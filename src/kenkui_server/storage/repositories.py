@@ -383,6 +383,68 @@ class Repositories:
             )
         return event
 
+    def request_cancellation(self, job_id: str) -> Job:
+        """Atomically admit cancellation without stranding a finished dispatch."""
+        with self.database.transaction() as connection:
+            row = connection.execute(
+                "SELECT id, spec_json, status, version, progress_json FROM jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            current = _job_from_row(row)
+            if current.status.is_terminal or current.status is JobStatus.CANCEL_REQUESTED:
+                return current
+
+            dispatch = connection.execute(
+                "SELECT status FROM dispatches WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            if current.status is JobStatus.QUEUED:
+                status = JobStatus.CANCELLED
+                event_type = "cancelled"
+            elif dispatch is not None and dispatch[0] not in {"pending", "running"}:
+                status = JobStatus.CANCELLED
+                event_type = "cancelled"
+            else:
+                status = JobStatus.CANCEL_REQUESTED
+                event_type = "cancel_requested"
+            cancelled = Job(
+                current.id,
+                current.spec,
+                status=status,
+                version=current.version + 1,
+                progress=current.progress,
+            )
+            result = connection.execute(
+                """
+                UPDATE jobs SET status = ?, version = ?, progress_json = ?
+                WHERE id = ? AND version = ?
+                """,
+                (
+                    cancelled.status.value,
+                    cancelled.version,
+                    _encode_progress(cancelled.progress),
+                    cancelled.id,
+                    current.version,
+                ),
+            )
+            if result.rowcount != 1:
+                raise StaleWriteError()
+            sequence = int(
+                connection.execute(
+                    "SELECT COALESCE(MAX(sequence), 0) + 1 FROM job_events WHERE job_id = ?",
+                    (cancelled.id,),
+                ).fetchone()[0]
+            )
+            connection.execute(
+                """
+                INSERT INTO job_events (job_id, sequence, event_type, progress_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                (cancelled.id, sequence, event_type, _encode_progress(cancelled.progress)),
+            )
+        return cancelled
+
     def finish_dispatch_if_not_cancellation_requested(self, dispatch: Dispatch) -> bool:
         """Finish a dispatch only when its job was not durably cancelled first."""
         with self.database.transaction() as connection:

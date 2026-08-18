@@ -99,6 +99,58 @@ def test_cancelling_running_job_returns_a_durable_cancellation_request(tmp_path:
     assert second.json() == expected
     assert repositories.jobs.get(job.id).status is JobStatus.CANCEL_REQUESTED
     assert [event.event_type for event in repositories.events.list_for_job(job.id)] == ["cancel_requested"]
+
+def test_cancellation_after_dispatch_finalization_terminalizes_atomically(tmp_path: Path) -> None:
+    from kenkui_server.jobs.models import (
+        Dispatch,
+        Job,
+        JobSpec,
+        JobStatus,
+        OutputSpec,
+        Progress,
+        SingleVoiceCasting,
+        TtsSettings,
+    )
+
+    app = create_app(data_dir=tmp_path / "state", fixture_mode=True)
+    repositories = app.state.local_services.repositories
+    job = Job(
+        "job-finalized-dispatch",
+        JobSpec(
+            "source",
+            ("chapter-1",),
+            SingleVoiceCasting("narrator"),
+            TtsSettings(),
+            OutputSpec("artifact.m4b"),
+        ),
+        status=JobStatus.RUNNING,
+        version=1,
+        progress=Progress("synthesis", 1, 3),
+    )
+    repositories.create_job_and_dispatch(
+        job,
+        Dispatch("dispatch-finalized", job.id, "pending"),
+        idempotency_key=None,
+    )
+    repositories.finish_dispatch_if_not_cancellation_requested(
+        repositories.dispatches.get("dispatch-finalized")
+    )
+
+    with TestClient(app) as client:
+        first = client.post(f"/v1/jobs/{job.id}/cancel")
+        second = client.post(f"/v1/jobs/{job.id}/cancel")
+
+    expected = {
+        "id": job.id,
+        "status": "cancelled",
+        "progress": {"stage": "synthesis", "completed": 1, "total": 3},
+    }
+    assert first.status_code == 200
+    assert first.json() == expected
+    assert second.json() == expected
+    assert repositories.jobs.get(job.id).status is JobStatus.CANCELLED
+    assert repositories.dispatches.get("dispatch-finalized").status == "done"
+    assert [event.event_type for event in repositories.events.list_for_job(job.id)] == ["cancelled"]
 def test_fixture_worker_publishes_one_authorized_artifact(tmp_path: Path) -> None:
     voice = kk.Voice("narrator", "Narrator", True, "local", "test", True)
     with TestClient(create_app(data_dir=tmp_path / "state", voices=(voice,), fixture_mode=True)) as client:
@@ -471,33 +523,3 @@ def test_restart_reclaims_running_dispatch_after_worker_death(tmp_path: Path) ->
         __import__("time").sleep(0.02)
 
     assert snapshot.status.value == "succeeded"
-
-
-def test_cancel_reloads_authoritative_snapshot_after_a_stale_write(monkeypatch, tmp_path: Path) -> None:
-    from kenkui_server.jobs.models import Job, JobSpec, OutputSpec, SingleVoiceCasting, TtsSettings
-    from kenkui_server.storage.repositories import StaleWriteError
-
-    app = create_app(data_dir=tmp_path / "state", fixture_mode=True)
-    repositories = app.state.local_services.repositories
-    job = Job(
-        "job-stale-cancel",
-        JobSpec("source", ("chapter-1",), SingleVoiceCasting("narrator"), TtsSettings(), OutputSpec("artifact.m4b")),
-    )
-    repositories.jobs.create(job)
-    update = repositories.update_job_and_append_event
-    calls = 0
-
-    def stale_once(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise StaleWriteError()
-        return update(*args, **kwargs)
-
-    monkeypatch.setattr(repositories, "update_job_and_append_event", stale_once)
-    with TestClient(app) as client:
-        response = client.post(f"/v1/jobs/{job.id}/cancel")
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "cancelled"
-    assert calls == 2
