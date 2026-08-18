@@ -5,12 +5,23 @@ CREATE TABLE identities (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE jobs ADD COLUMN owner_id UUID NOT NULL REFERENCES identities(id);
+ALTER TABLE dispatches ADD CONSTRAINT dispatches_one_per_job UNIQUE (job_id);
+ALTER TABLE artifacts ADD CONSTRAINT artifacts_one_per_job UNIQUE (job_id);
+
+CREATE TABLE job_idempotency (
+    key TEXT PRIMARY KEY,
+    job_id TEXT NOT NULL REFERENCES jobs(id)
+);
+
 CREATE TABLE credit_accounts (
     id UUID PRIMARY KEY,
     identity_id UUID NOT NULL REFERENCES identities(id),
     available_credits BIGINT NOT NULL DEFAULT 0 CHECK (available_credits >= 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE UNIQUE INDEX credit_accounts_one_per_identity ON credit_accounts (identity_id);
 
 CREATE TABLE credit_authorizations (
     id UUID PRIMARY KEY,
@@ -31,6 +42,10 @@ CREATE TABLE credit_ledger_entries (
     reference TEXT NOT NULL UNIQUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE credit_ledger_entries
+    ADD CONSTRAINT credit_ledger_one_transition_per_authorization_kind
+    UNIQUE (authorization_id, kind);
 
 CREATE TABLE payment_events (
     provider TEXT NOT NULL,

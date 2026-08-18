@@ -30,6 +30,13 @@ class BillingService:
     def grant_credits(self, account_id: str, credits: int, *, reference: str) -> CreditAccount:
         return self._repository.grant(account_id, credits, reference=reference)
 
+    def process_payment_event(
+        self, provider: str, provider_event_id: str, account_id: str, credits: int
+    ) -> CreditAccount:
+        return self._repository.process_payment_event(
+            provider, provider_event_id, account_id, credits
+        )
+
     def reserve(self, job_id: str, account_id: str, *, credits: int) -> CreditAuthorization:
         return self._repository.reserve(job_id, account_id, credits)
 

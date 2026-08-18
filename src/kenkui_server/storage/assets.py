@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Protocol
-
 from pathlib import Path
+from typing import Protocol
 
 
 class AssetStore:
@@ -38,12 +37,19 @@ class AssetStore:
         """Read a published artifact only after its job has authorized access."""
         return self.artifact_path(job_id).read_bytes()
 
+
+class S3Body(Protocol):
+    """Streaming response body returned by production S3-compatible clients."""
+
+    def read(self) -> bytes: ...
+
+
 class S3CompatibleClient(Protocol):
     """Subset shared by S3-compatible R2 clients."""
 
     def put_object(self, *, Bucket: str, Key: str, Body: bytes) -> None: ...
 
-    def get_object(self, *, Bucket: str, Key: str) -> dict[str, bytes]: ...
+    def get_object(self, *, Bucket: str, Key: str) -> dict[str, bytes | S3Body]: ...
 
     def delete_object(self, *, Bucket: str, Key: str) -> None: ...
 
@@ -86,7 +92,8 @@ class R2AssetStore:
         self._client.put_object(Bucket=self._bucket, Key=self._key(kind, identifier), Body=payload)
 
     def _get(self, kind: str, identifier: str) -> bytes:
-        return self._client.get_object(Bucket=self._bucket, Key=self._key(kind, identifier))["Body"]
+        body = self._client.get_object(Bucket=self._bucket, Key=self._key(kind, identifier))["Body"]
+        return body if isinstance(body, bytes) else body.read()
 
     def _delete(self, kind: str, identifier: str) -> None:
         self._client.delete_object(Bucket=self._bucket, Key=self._key(kind, identifier))

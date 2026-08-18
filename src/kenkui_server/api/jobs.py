@@ -31,6 +31,18 @@ def _response(job: Job) -> JobResponse:
     )
 
 
+def _authorize_job(request: Request, job_id: str) -> None:
+    """Enforce hosted ownership while leaving local deployments unmetered and private."""
+    hosted_auth = getattr(request.app.state, "hosted_auth", None)
+    if hosted_auth is None:
+        return
+    identity = getattr(request.state, "hosted_identity", None)
+    if identity is None:
+        raise HTTPException(status_code=401, detail="authentication required")
+    if not hosted_auth.backend.authorize(identity.user_id, hosted_auth.job_owner_resolver(job_id)):
+        raise HTTPException(status_code=403, detail="resource is not owned by this user")
+
+
 def _spec(request: JobRequest) -> JobSpec:
     if request.output.format != "m4b":
         raise HTTPException(status_code=422, detail="only m4b output is supported")
@@ -89,21 +101,32 @@ def create_job(
     return _response(job)
 
 
-
-
 @router.get("", response_model=JobListResponse)
 def list_jobs(request: Request) -> JobListResponse:
-    """Return all authoritative durable snapshots owned by this local server."""
+    """Return local jobs, or only the caller's owned jobs in hosted mode."""
     jobs = request.app.state.local_services.repositories.jobs.list()
+    hosted_auth = getattr(request.app.state, "hosted_auth", None)
+    identity = getattr(request.state, "hosted_identity", None)
+    if hosted_auth is not None and identity is not None:
+        jobs = tuple(
+            job
+            for job in jobs
+            if hosted_auth.backend.authorize(
+                identity.user_id, hosted_auth.job_owner_resolver(job.id)
+            )
+        )
     return JobListResponse(items=[_response(job) for job in jobs])
+
 
 @router.get("/{job_id}", response_model=JobResponse)
 def get_job(job_id: str, request: Request) -> JobResponse:
     """Return the authoritative durable snapshot used for SSE reconnect recovery."""
     try:
-        return _response(request.app.state.local_services.repositories.jobs.get(job_id))
+        job = request.app.state.local_services.repositories.jobs.get(job_id)
     except KeyError as error:
         raise HTTPException(status_code=404, detail="job not found") from error
+    _authorize_job(request, job_id)
+    return _response(job)
 
 
 @router.post("/{job_id}/cancel", response_model=JobResponse)
@@ -111,9 +134,11 @@ def cancel_job(job_id: str, request: Request) -> JobResponse:
     """Durably request cancellation once; repeated calls return the same snapshot."""
     repositories = request.app.state.local_services.repositories
     try:
-        return _response(repositories.request_cancellation(job_id))
+        repositories.jobs.get(job_id)
     except KeyError as error:
         raise HTTPException(status_code=404, detail="job not found") from error
+    _authorize_job(request, job_id)
+    return _response(repositories.request_cancellation(job_id))
 
 
 @router.get("/{job_id}/events")
@@ -128,6 +153,7 @@ async def stream_events(
         repositories.jobs.get(job_id)
     except KeyError as error:
         raise HTTPException(status_code=404, detail="job not found") from error
+    _authorize_job(request, job_id)
     try:
         seen = max(int(last_event_id or "0"), 0)
     except ValueError:
@@ -166,6 +192,7 @@ def get_artifact(job_id: str, request: Request) -> Response:
         job = services.repositories.jobs.get(job_id)
     except KeyError as error:
         raise HTTPException(status_code=404, detail="job not found") from error
+    _authorize_job(request, job_id)
     if job.status.value != "succeeded":
         raise HTTPException(status_code=409, detail="artifact is not available")
     artifacts = services.repositories.artifacts.list_for_job(job_id)

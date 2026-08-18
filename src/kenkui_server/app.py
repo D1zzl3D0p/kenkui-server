@@ -5,10 +5,9 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import kenkui as kk
-
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -16,7 +15,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
-from kenkui_server.api import assets, billing, jobs, voices as voices_api
+from kenkui_server.api import assets, billing, jobs
+from kenkui_server.api import voices as voices_api
+from kenkui_server.auth.base import AuthBackend, Identity
 from kenkui_server.compute.local import LocalProcessRunner
 from kenkui_server.config import Capabilities, local_capabilities
 from kenkui_server.errors import ErrorDetail, ErrorResponse
@@ -37,6 +38,20 @@ class LocalServices:
     assets: AssetStore
     voices: tuple[kk.Voice, ...]
     dispatcher: Dispatcher
+
+
+@dataclass(frozen=True, slots=True)
+class HostedAuthServices:
+    """Hosted authentication and ownership lookup used only when configured."""
+
+    backend: AuthBackend
+    job_owner_resolver: Callable[[str], UUID]
+
+
+def hosted_identity(request: Request) -> Identity | None:
+    """Return the identity established by hosted authentication middleware."""
+    return getattr(request.state, "hosted_identity", None)
+
 
 REQUEST_ID_HEADER = "X-Request-ID"
 
@@ -85,9 +100,15 @@ def create_app(
     voices: Sequence[kk.Voice] = (),
     fixture_mode: bool = False,
     web_build_path: str | Path | None = None,
+    auth_backend: AuthBackend | None = None,
+    job_owner_resolver: Callable[[str], UUID] | None = None,
 ) -> FastAPI:
     """Create the local Kenkui API application and its private durable state."""
-    root = Path(data_dir) if data_dir is not None else Path.home() / ".local" / "share" / "kenkui-server"
+    root = (
+        Path(data_dir)
+        if data_dir is not None
+        else Path.home() / ".local" / "share" / "kenkui-server"
+    )
     database = Database(root / "server.sqlite3")
     app = FastAPI(
         title="Kenkui Server API",
@@ -106,6 +127,13 @@ def create_app(
         voices=tuple(voices),
         dispatcher=dispatcher,
     )
+    if (auth_backend is None) != (job_owner_resolver is None):
+        raise ValueError("hosted authentication requires an owner resolver")
+    app.state.hosted_auth = (
+        HostedAuthServices(auth_backend, job_owner_resolver)
+        if auth_backend is not None and job_owner_resolver is not None
+        else None
+    )
     dispatcher.recover()
     app.include_router(assets.router)
     app.include_router(voices_api.router)
@@ -113,13 +141,9 @@ def create_app(
     app.include_router(jobs.router)
 
     @app.exception_handler(StarletteHTTPException)
-    async def handle_http_exception(
-        request: Request, exc: StarletteHTTPException
-    ) -> JSONResponse:
+    async def handle_http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         if exc.status_code == 404:
-            return _error_response(
-                request, status_code=404, code="not_found", message="Not found"
-            )
+            return _error_response(request, status_code=404, code="not_found", message="Not found")
         if exc.status_code == 405:
             return _error_response(
                 request,
@@ -183,6 +207,33 @@ def create_app(
         )
         response.headers[REQUEST_ID_HEADER] = _request_id(request)
         return response
+
+    @app.middleware("http")
+    async def authenticate_hosted_job_routes(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        hosted_auth: HostedAuthServices | None = request.app.state.hosted_auth
+        if hosted_auth is None or not request.url.path.startswith("/v1/jobs"):
+            return await call_next(request)
+        scheme, _, token = request.headers.get("Authorization", "").partition(" ")
+        if scheme.lower() != "bearer" or not token:
+            return _error_response(
+                request,
+                status_code=401,
+                code="unauthenticated",
+                message="Authentication required",
+            )
+        try:
+            request.state.hosted_identity = hosted_auth.backend.authenticate(token)
+        except PermissionError:
+            return _error_response(
+                request,
+                status_code=401,
+                code="unauthenticated",
+                message="Authentication required",
+            )
+        return await call_next(request)
 
     @app.get("/v1/health", responses=ERROR_RESPONSES)
     async def health() -> dict[str, str]:

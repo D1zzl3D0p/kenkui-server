@@ -48,6 +48,10 @@ class BillingRepository(Protocol):
 
     def grant(self, account_id: str, credits: int, *, reference: str) -> CreditAccount: ...
 
+    def process_payment_event(
+        self, provider: str, provider_event_id: str, account_id: str, credits: int
+    ) -> CreditAccount: ...
+
     def reserve(self, job_id: str, account_id: str, credits: int) -> CreditAuthorization: ...
 
     def authorization_for_job(self, job_id: str) -> CreditAuthorization: ...
@@ -66,6 +70,7 @@ class InMemoryBillingRepository:
         self._authorization_by_job: dict[str, str] = {}
         self._entries: list[LedgerEntry] = []
         self._references: set[str] = set()
+        self._processed_payment_events: set[tuple[str, str]] = set()
 
     def account(self, account_id: str) -> CreditAccount:
         return self._accounts.get(account_id, CreditAccount(account_id, 0))
@@ -80,9 +85,21 @@ class InMemoryBillingRepository:
         self._accounts[account_id] = updated
         self._references.add(reference)
         self._entries.append(
-            LedgerEntry(str(uuid4()), account_id, None, "purchase", credits, reference, datetime.now(UTC))
+            LedgerEntry(
+                str(uuid4()), account_id, None, "purchase", credits, reference, datetime.now(UTC)
+            )
         )
         return updated
+
+    def process_payment_event(
+        self, provider: str, provider_event_id: str, account_id: str, credits: int
+    ) -> CreditAccount:
+        event = (provider, provider_event_id)
+        if event in self._processed_payment_events:
+            return self.account(account_id)
+        account = self.grant(account_id, credits, reference=f"{provider}:{provider_event_id}")
+        self._processed_payment_events.add(event)
+        return account
 
     def reserve(self, job_id: str, account_id: str, credits: int) -> CreditAuthorization:
         existing_id = self._authorization_by_job.get(job_id)
@@ -101,7 +118,13 @@ class InMemoryBillingRepository:
         self._authorization_by_job[job_id] = authorization.id
         self._entries.append(
             LedgerEntry(
-                str(uuid4()), account_id, authorization.id, "reservation", -credits, job_id, datetime.now(UTC)
+                str(uuid4()),
+                account_id,
+                authorization.id,
+                "reservation",
+                -credits,
+                job_id,
+                datetime.now(UTC),
             )
         )
         return authorization
@@ -117,7 +140,11 @@ class InMemoryBillingRepository:
         if authorization.status is not AuthorizationStatus.RESERVED:
             return authorization
         finalized = CreditAuthorization(
-            authorization.id, authorization.job_id, authorization.account_id, authorization.credits, status
+            authorization.id,
+            authorization.job_id,
+            authorization.account_id,
+            authorization.credits,
+            status,
         )
         self._authorizations[authorization.id] = finalized
         if status is AuthorizationStatus.SETTLED:
@@ -125,12 +152,20 @@ class InMemoryBillingRepository:
         elif status is AuthorizationStatus.RELEASED:
             kind, credits = "release", authorization.credits
             account = self.account(authorization.account_id)
-            self._accounts[account.id] = CreditAccount(account.id, account.available_credits + credits)
+            self._accounts[account.id] = CreditAccount(
+                account.id, account.available_credits + credits
+            )
         else:
             raise ValueError("invalid_final_authorization_status")
         self._entries.append(
             LedgerEntry(
-                str(uuid4()), authorization.account_id, authorization.id, kind, credits, job_id, datetime.now(UTC)
+                str(uuid4()),
+                authorization.account_id,
+                authorization.id,
+                kind,
+                credits,
+                job_id,
+                datetime.now(UTC),
             )
         )
         return finalized

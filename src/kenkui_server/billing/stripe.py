@@ -47,7 +47,11 @@ class StripeWebhookHandler:
         account_id = metadata.get("account_id")
         credits = metadata.get("credits")
         event_id = event.get("id")
-        if not isinstance(account_id, str) or not isinstance(credits, str) or not isinstance(event_id, str):
+        if (
+            not isinstance(account_id, str)
+            or not isinstance(credits, str)
+            or not isinstance(event_id, str)
+        ):
             raise ValueError("invalid_payment_event")
         try:
             parsed_credits = int(credits)
@@ -56,7 +60,9 @@ class StripeWebhookHandler:
         if parsed_credits < 1:
             raise ValueError("invalid_payment_event")
         payment = PaymentEvent(event_id, account_id, parsed_credits)
-        self._billing.grant_credits(payment.account_id, payment.credits, reference=payment.id)
+        self._billing.process_payment_event(
+            "stripe", payment.id, payment.account_id, payment.credits
+        )
         return payment
 
 
