@@ -1,6 +1,29 @@
 {
   "components": {
     "schemas": {
+      "AssetResponse": {
+        "properties": {
+          "format": {
+            "title": "Format",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "format",
+          "sha256"
+        ],
+        "title": "AssetResponse",
+        "type": "object"
+      },
       "AuthCapabilities": {
         "description": "Authentication modes supported by this server.",
         "properties": {
@@ -25,6 +48,37 @@
           }
         },
         "title": "BillingCapabilities",
+        "type": "object"
+      },
+      "BookResponse": {
+        "properties": {
+          "author": {
+            "title": "Author",
+            "type": "string"
+          },
+          "chapters": {
+            "items": {
+              "$ref": "#/components/schemas/ChapterResponse"
+            },
+            "title": "Chapters",
+            "type": "array"
+          },
+          "sourceId": {
+            "title": "Sourceid",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sourceId",
+          "title",
+          "author",
+          "chapters"
+        ],
+        "title": "BookResponse",
         "type": "object"
       },
       "Capabilities": {
@@ -87,6 +141,48 @@
         "title": "CastingCapabilities",
         "type": "object"
       },
+      "CastingRequest": {
+        "properties": {
+          "voiceId": {
+            "title": "Voiceid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "voiceId"
+        ],
+        "title": "CastingRequest",
+        "type": "object"
+      },
+      "ChapterResponse": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "speechCharacters": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speechcharacters"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "title": "ChapterResponse",
+        "type": "object"
+      },
       "ErrorDetail": {
         "description": "Stable client-facing description of a failed request.",
         "properties": {
@@ -128,6 +224,232 @@
         ],
         "title": "ErrorResponse",
         "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "JobRequest": {
+        "properties": {
+          "casting": {
+            "$ref": "#/components/schemas/CastingRequest"
+          },
+          "chapters": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Chapters",
+            "type": "array"
+          },
+          "output": {
+            "$ref": "#/components/schemas/OutputRequest",
+            "default": {
+              "format": "m4b"
+            }
+          },
+          "sourceId": {
+            "title": "Sourceid",
+            "type": "string"
+          },
+          "tts": {
+            "$ref": "#/components/schemas/TtsRequest",
+            "default": {
+              "normalizeText": true
+            }
+          }
+        },
+        "required": [
+          "sourceId",
+          "chapters",
+          "casting"
+        ],
+        "title": "JobRequest",
+        "type": "object"
+      },
+      "JobResponse": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/ProgressResponse"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "progress"
+        ],
+        "title": "JobResponse",
+        "type": "object"
+      },
+      "OutputRequest": {
+        "properties": {
+          "format": {
+            "default": "m4b",
+            "title": "Format",
+            "type": "string"
+          }
+        },
+        "title": "OutputRequest",
+        "type": "object"
+      },
+      "PreflightResponse": {
+        "properties": {
+          "normalizedCharacters": {
+            "title": "Normalizedcharacters",
+            "type": "integer"
+          },
+          "sourceId": {
+            "title": "Sourceid",
+            "type": "string"
+          },
+          "valid": {
+            "default": true,
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "sourceId",
+          "normalizedCharacters"
+        ],
+        "title": "PreflightResponse",
+        "type": "object"
+      },
+      "ProgressResponse": {
+        "properties": {
+          "completed": {
+            "title": "Completed",
+            "type": "integer"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stage",
+          "completed",
+          "total"
+        ],
+        "title": "ProgressResponse",
+        "type": "object"
+      },
+      "TtsRequest": {
+        "properties": {
+          "normalizeText": {
+            "default": true,
+            "title": "Normalizetext",
+            "type": "boolean"
+          }
+        },
+        "title": "TtsRequest",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VoiceListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/VoiceResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "VoiceListResponse",
+        "type": "object"
+      },
+      "VoiceResponse": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "language"
+        ],
+        "title": "VoiceResponse",
+        "type": "object"
       }
     }
   },
@@ -137,6 +459,97 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/assets": {
+      "post": {
+        "description": "Accept one EPUB body and retain it behind a server-assigned private path.",
+        "operationId": "upload_asset_v1_assets_post",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Upload Asset",
+        "tags": [
+          "assets"
+        ]
+      }
+    },
+    "/v1/assets/{asset_id}/book": {
+      "get": {
+        "description": "Inspect an owned local EPUB through Kenkui's public Pipeline API.",
+        "operationId": "inspect_book_v1_assets__asset_id__book_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "asset_id",
+            "required": true,
+            "schema": {
+              "title": "Asset Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inspect Book",
+        "tags": [
+          "assets"
+        ]
+      }
+    },
+    "/v1/billing": {
+      "get": {
+        "description": "Local execution has no credits, provider, or reservation workflow.",
+        "operationId": "billing_v1_billing_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Billing V1 Billing Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Billing",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
     "/v1/capabilities": {
       "get": {
         "operationId": "capabilities_v1_capabilities_get",
@@ -195,6 +608,314 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/v1/jobs": {
+      "post": {
+        "description": "Admit a locally unmetered job and commit its dispatch before starting work.",
+        "operationId": "create_job_v1_jobs_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/v1/jobs/preflight": {
+      "post": {
+        "description": "Validate executable local intent without creating a Job or reservation.",
+        "operationId": "preflight_v1_jobs_preflight_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreflightResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preflight",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}": {
+      "get": {
+        "description": "Return the authoritative durable snapshot used for SSE reconnect recovery.",
+        "operationId": "get_job_v1_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}/artifact": {
+      "get": {
+        "description": "Authorize artifact retrieval from an owned completed local job only.",
+        "operationId": "get_artifact_v1_jobs__job_id__artifact_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Artifact",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}/cancel": {
+      "post": {
+        "description": "Durably request cancellation once; repeated calls return the same snapshot.",
+        "operationId": "cancel_job_v1_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/v1/jobs/{job_id}/events": {
+      "get": {
+        "description": "Stream append-only events; callers re-fetch the snapshot after reconnecting.",
+        "operationId": "stream_events_v1_jobs__job_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Last-Event-ID",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stream Events",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/v1/voices": {
+      "get": {
+        "description": "Return only enabled entries in the server's explicit local registry.",
+        "operationId": "list_voices_v1_voices_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Voices",
+        "tags": [
+          "voices"
+        ]
       }
     }
   }

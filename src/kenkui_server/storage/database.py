@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
+from threading import RLock
 from typing import Iterator
 
 from kenkui_server.storage.migrations import MIGRATIONS
@@ -16,7 +17,8 @@ class Database:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(self.path)
+        self._lock = RLock()
+        self.connection = sqlite3.connect(self.path, check_same_thread=False)
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.execute("PRAGMA busy_timeout = 5000")
         self.connection.execute("PRAGMA journal_mode = WAL")
@@ -39,13 +41,15 @@ class Database:
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
         """Commit an atomic local persistence change or roll it back."""
-        try:
-            yield self.connection
-        except Exception:
-            self.connection.rollback()
-            raise
-        else:
-            self.connection.commit()
+        with self._lock:
+            self.connection.execute("BEGIN IMMEDIATE")
+            try:
+                yield self.connection
+            except Exception:
+                self.connection.rollback()
+                raise
+            else:
+                self.connection.commit()
 
     def journal_mode(self) -> str:
         """Return the active SQLite journal mode."""

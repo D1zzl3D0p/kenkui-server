@@ -107,3 +107,33 @@ def test_event_sequence_is_unique_per_job(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="duplicate_event_sequence"):
         repositories.events.append(event)
+
+
+def test_atomic_idempotency_admission_returns_one_durable_job_under_concurrency(tmp_path: Path) -> None:
+    import threading
+
+    repositories = Repositories(Database(tmp_path / "server.sqlite3"))
+    admitted: list[Job] = []
+    failures: list[Exception] = []
+
+    def admit(identifier: str) -> None:
+        try:
+            candidate = Job(identifier, job().spec)
+            admitted.append(
+                repositories.create_job_and_dispatch(
+                    candidate,
+                    Dispatch(f"dispatch-{identifier}", candidate.id, "pending"),
+                    idempotency_key="same-retry",
+                )
+            )
+        except Exception as error:
+            failures.append(error)
+
+    threads = [threading.Thread(target=admit, args=(f"job-{index}",)) for index in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not failures
+    assert len(admitted) == 2
+    assert {item.id for item in admitted} in ({"job-0"}, {"job-1"})

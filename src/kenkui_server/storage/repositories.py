@@ -227,6 +227,23 @@ class DispatchRepository:
             raise KeyError(dispatch_id)
         return Dispatch(*row)
 
+    def get_for_job(self, job_id: str) -> Dispatch:
+        """Return the one durable dispatch associated with a local job."""
+        row = self._database.connection.execute(
+            "SELECT id, job_id, status, version FROM dispatches WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(job_id)
+        return Dispatch(*row)
+
+    def list_pending(self) -> tuple[Dispatch, ...]:
+        """Return unclaimed durable work for restart recovery."""
+        rows = self._database.connection.execute(
+            "SELECT id, job_id, status, version FROM dispatches WHERE status = 'pending' ORDER BY id"
+        ).fetchall()
+        return tuple(Dispatch(*row) for row in rows)
+
     def update(self, dispatch: Dispatch, *, expected_version: int) -> None:
         if dispatch.version != expected_version + 1:
             raise ValueError("invalid_dispatch_version")
@@ -272,3 +289,35 @@ class Repositories:
         self.events = JobEventRepository(database)
         self.dispatches = DispatchRepository(database)
         self.artifacts = ArtifactRepository(database)
+
+    def create_job_and_dispatch(
+        self, job: Job, dispatch: Dispatch, *, idempotency_key: str | None
+    ) -> Job:
+        """Atomically admit a queued job and its runnable dispatch before execution."""
+        with self.database.transaction() as connection:
+            if idempotency_key is not None:
+                existing = connection.execute(
+                    "SELECT job_id FROM job_idempotency WHERE key = ?", (idempotency_key,)
+                ).fetchone()
+                if existing is not None:
+                    row = connection.execute(
+                        "SELECT id, spec_json, status, version, progress_json FROM jobs WHERE id = ?",
+                        (existing[0],),
+                    ).fetchone()
+                    if row is None:
+                        raise RuntimeError("orphaned_idempotency_key")
+                    return _job_from_row(row)
+            connection.execute(
+                "INSERT INTO jobs (id, spec_json, status, version, progress_json) VALUES (?, ?, ?, ?, ?)",
+                (job.id, _encode_spec(job.spec), job.status.value, job.version, _encode_progress(job.progress)),
+            )
+            connection.execute(
+                "INSERT INTO dispatches (id, job_id, status, version) VALUES (?, ?, ?, ?)",
+                (dispatch.id, dispatch.job_id, dispatch.status, dispatch.version),
+            )
+            if idempotency_key is not None:
+                connection.execute(
+                    "INSERT INTO job_idempotency (key, job_id) VALUES (?, ?)",
+                    (idempotency_key, job.id),
+                )
+        return job

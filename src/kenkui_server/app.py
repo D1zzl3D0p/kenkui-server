@@ -1,9 +1,13 @@
 """FastAPI application factory for the versioned local API."""
 
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+import kenkui as kk
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
@@ -12,11 +16,27 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
+from kenkui_server.api import assets, billing, jobs, voices as voices_api
+from kenkui_server.compute.local import LocalProcessRunner
 from kenkui_server.config import Capabilities, local_capabilities
 from kenkui_server.errors import ErrorDetail, ErrorResponse
+from kenkui_server.jobs.dispatcher import Dispatcher
 from kenkui_server.observability import log_event
+from kenkui_server.storage.assets import AssetStore
+from kenkui_server.storage.database import Database
+from kenkui_server.storage.repositories import Repositories
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class LocalServices:
+    """Application-owned local dependencies shared by route modules."""
+
+    repositories: Repositories
+    assets: AssetStore
+    voices: tuple[kk.Voice, ...]
+    dispatcher: Dispatcher
 
 REQUEST_ID_HEADER = "X-Request-ID"
 
@@ -59,8 +79,15 @@ def _error_response(
     )
 
 
-def create_app() -> FastAPI:
-    """Create the local Kenkui API application."""
+def create_app(
+    *,
+    data_dir: str | Path | None = None,
+    voices: Sequence[kk.Voice] = (),
+    fixture_mode: bool = False,
+) -> FastAPI:
+    """Create the local Kenkui API application and its private durable state."""
+    root = Path(data_dir) if data_dir is not None else Path.home() / ".local" / "share" / "kenkui-server"
+    database = Database(root / "server.sqlite3")
     app = FastAPI(
         title="Kenkui Server API",
         version="1.0.0",
@@ -68,6 +95,21 @@ def create_app() -> FastAPI:
         docs_url="/v1/docs",
         redoc_url=None,
     )
+    repositories = Repositories(database)
+    asset_store = AssetStore(root / "assets")
+    runner = LocalProcessRunner(database.path, asset_store.root, fixture_mode=fixture_mode)
+    dispatcher = Dispatcher(repositories, runner)
+    app.state.local_services = LocalServices(
+        repositories=repositories,
+        assets=asset_store,
+        voices=tuple(voices),
+        dispatcher=dispatcher,
+    )
+    dispatcher.recover()
+    app.include_router(assets.router)
+    app.include_router(voices_api.router)
+    app.include_router(billing.router)
+    app.include_router(jobs.router)
 
     @app.exception_handler(StarletteHTTPException)
     async def handle_http_exception(
