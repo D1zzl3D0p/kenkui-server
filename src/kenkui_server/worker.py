@@ -11,7 +11,14 @@ import kenkui as kk
 
 from kenkui_server.jobs.models import Artifact, Job, JobStatus
 from kenkui_server.jobs.pipeline import pipeline_from_job
-from kenkui_server.jobs.transitions import CancelRequested, Cancelled, Completed, DispatchRequested, Failed, ProgressReported, transition
+from kenkui_server.jobs.transitions import (
+    Cancelled,
+    Completed,
+    DispatchRequested,
+    Failed,
+    ProgressReported,
+    transition,
+)
 from kenkui_server.storage.assets import AssetStore
 from kenkui_server.storage.database import Database
 from kenkui_server.storage.repositories import Repositories, StaleWriteError
@@ -70,6 +77,8 @@ class LocalJobRunner:
             )
         except StaleWriteError:
             return
+        output: Path | None = None
+
         try:
             asset = repositories.assets.get(running.spec.source_id)
             output = store.artifact_path(running.id)
@@ -134,12 +143,20 @@ class LocalJobRunner:
             else:
                 self._fail_if_running(repositories, running.id)
         finally:
+            self._finish_dispatch(repositories, dispatch_id, running.id, output)
+
+    def _finish_dispatch(
+        self, repositories: Repositories, dispatch_id: str, job_id: str, output: Path | None
+    ) -> None:
+        while True:
             current_dispatch = repositories.dispatches.get(dispatch_id)
-            if current_dispatch.status != "done":
-                repositories.dispatches.update(
-                    replace(current_dispatch, status="done", version=current_dispatch.version + 1),
-                    expected_version=current_dispatch.version,
-                )
+            if current_dispatch.status == "done":
+                return
+            if repositories.finish_dispatch_if_not_cancellation_requested(current_dispatch):
+                return
+            if output is not None:
+                output.unlink(missing_ok=True)
+            self._cancel_if_requested(repositories, job_id)
 
     def _cancel_if_requested(self, repositories: Repositories, job_id: str) -> None:
         current = repositories.jobs.get(job_id)

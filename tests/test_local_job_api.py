@@ -340,6 +340,90 @@ def test_stale_completion_after_cancellation_discards_output_and_terminalizes_jo
     finally:
         database.close()
 
+def test_cancellation_committed_after_stale_completion_recovery_stays_recoverable(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from kenkui_server.jobs.models import (
+        Asset,
+        Dispatch,
+        Job,
+        JobSpec,
+        JobStatus,
+        OutputSpec,
+        Progress,
+        SingleVoiceCasting,
+        TtsSettings,
+    )
+    from kenkui_server.jobs.transitions import CancelRequested, transition
+    from kenkui_server.storage.assets import AssetStore
+    from kenkui_server.storage.database import Database
+    from kenkui_server.storage.repositories import Repositories, StaleWriteError
+    from kenkui_server.worker import LocalJobRunner
+
+    root = tmp_path / "state"
+    store = AssetStore(root / "assets")
+    database = Database(root / "server.sqlite3")
+    repositories = Repositories(database)
+    source = store.put_source("asset-post-reload-cancellation", b"source")
+    repositories.assets.put(Asset("asset-post-reload-cancellation", str(source), "digest", "epub"))
+    job = Job(
+        "job-post-reload-cancellation",
+        JobSpec(
+            "asset-post-reload-cancellation",
+            ("chapter-1",),
+            SingleVoiceCasting("narrator"),
+            TtsSettings(),
+            OutputSpec("artifact.m4b"),
+        ),
+        status=JobStatus.RUNNING,
+        version=1,
+        progress=Progress("synthesis", 0, 1),
+    )
+    repositories.create_job_and_dispatch(
+        job, Dispatch("dispatch-post-reload-cancellation", job.id, "pending"), idempotency_key=None
+    )
+    update_job = repositories.update_job_and_append_event
+
+    def reject_completed_snapshot(*args, event_type: str, **kwargs) -> None:
+        if event_type == "completed":
+            raise StaleWriteError()
+        update_job(*args, event_type=event_type, **kwargs)
+
+    get_job = repositories.jobs.get
+    get_calls = 0
+
+    def get_with_post_recovery_cancellation(job_id: str) -> Job:
+        nonlocal get_calls
+        snapshot = get_job(job_id)
+        get_calls += 1
+        if get_calls == 3:
+            cancellation = transition(snapshot, CancelRequested())
+            update_job(
+                cancellation, expected_version=snapshot.version, event_type="cancel_requested"
+            )
+        return snapshot
+    monkeypatch.setattr(repositories, "update_job_and_append_event", reject_completed_snapshot)
+    monkeypatch.setattr(repositories.jobs, "get", get_with_post_recovery_cancellation)
+
+
+
+    try:
+        LocalJobRunner(database.path, store.root, fixture_mode=True)._run(
+            repositories, store, "dispatch-post-reload-cancellation"
+        )
+        assert repositories.jobs.get(job.id).status is JobStatus.CANCELLED
+        assert repositories.dispatches.get("dispatch-post-reload-cancellation").status == "done"
+        assert not store.artifact_path(job.id).exists()
+        assert repositories.artifacts.list_for_job(job.id) == ()
+
+        assert [event.event_type for event in repositories.events.list_for_job(job.id)] == [
+            "cancel_requested",
+            "cancelled",
+        ]
+    finally:
+        database.close()
+
+
 
 def test_sse_honors_last_event_id_for_incremental_reconnect(tmp_path: Path) -> None:
     voice = kk.Voice("narrator", "Narrator", True, "local", "test", True)

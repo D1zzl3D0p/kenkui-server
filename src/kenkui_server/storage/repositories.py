@@ -382,3 +382,23 @@ class Repositories:
                 (event.job_id, event.sequence, event.event_type, _encode_progress(event.progress)),
             )
         return event
+
+    def finish_dispatch_if_not_cancellation_requested(self, dispatch: Dispatch) -> bool:
+        """Finish a dispatch only when its job was not durably cancelled first."""
+        with self.database.transaction() as connection:
+            status = connection.execute(
+                "SELECT status FROM jobs WHERE id = ?", (dispatch.job_id,)
+            ).fetchone()
+            if status is None:
+                raise KeyError(dispatch.job_id)
+            if status[0] == JobStatus.CANCEL_REQUESTED.value:
+                return False
+            result = connection.execute(
+                """
+                UPDATE dispatches SET status = 'done', version = ? WHERE id = ? AND version = ?
+                """,
+                (dispatch.version + 1, dispatch.id, dispatch.version),
+            )
+            if result.rowcount != 1:
+                raise StaleWriteError()
+        return True
