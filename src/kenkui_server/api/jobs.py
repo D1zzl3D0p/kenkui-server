@@ -59,7 +59,7 @@ def _spec(request: JobRequest) -> JobSpec:
 
 
 def _preflight(request: Request, payload: JobRequest) -> tuple[JobSpec, int]:
-    services = request.app.state.local_services
+    services = request.app.state.services
     spec = _spec(payload)
     try:
         asset = services.repositories.assets.get(spec.source_id)
@@ -95,16 +95,34 @@ def create_job(
     request: Request,
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ) -> JobResponse:
-    """Admit a locally unmetered job and commit its dispatch before starting work."""
-    spec, _ = _preflight(request, payload)
-    job = request.app.state.local_services.dispatcher.submit(spec, idempotency_key=idempotency_key)
+    """Admit local work or hosted credit-backed work before starting its runner."""
+    spec, characters = _preflight(request, payload)
+    hosted_services = request.app.state.hosted_services
+    if hosted_services is None:
+        job = request.app.state.services.dispatcher.submit(spec, idempotency_key=idempotency_key)
+    else:
+        identity = getattr(request.state, "hosted_identity", None)
+        if identity is None:
+            raise HTTPException(status_code=401, detail="authentication required")
+        try:
+            job = request.app.state.services.dispatcher.submit(
+                spec,
+                owner_id=identity.user_id,
+                account_id=hosted_services.account_id_for_identity(identity.user_id),
+                normalized_speech_characters=characters,
+                idempotency_key=idempotency_key,
+            )
+        except ValueError as error:
+            if str(error) in {"empty_speech", "insufficient_credits"}:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            raise
     return _response(job)
 
 
 @router.get("", response_model=JobListResponse)
 def list_jobs(request: Request) -> JobListResponse:
     """Return local jobs, or only the caller's owned jobs in hosted mode."""
-    jobs = request.app.state.local_services.repositories.jobs.list()
+    jobs = request.app.state.services.repositories.jobs.list()
     hosted_auth = getattr(request.app.state, "hosted_auth", None)
     identity = getattr(request.state, "hosted_identity", None)
     if hosted_auth is not None and identity is not None:
@@ -122,7 +140,7 @@ def list_jobs(request: Request) -> JobListResponse:
 def get_job(job_id: str, request: Request) -> JobResponse:
     """Return the authoritative durable snapshot used for SSE reconnect recovery."""
     try:
-        job = request.app.state.local_services.repositories.jobs.get(job_id)
+        job = request.app.state.services.repositories.jobs.get(job_id)
     except KeyError as error:
         raise HTTPException(status_code=404, detail="job not found") from error
     _authorize_job(request, job_id)
@@ -132,7 +150,7 @@ def get_job(job_id: str, request: Request) -> JobResponse:
 @router.post("/{job_id}/cancel", response_model=JobResponse)
 def cancel_job(job_id: str, request: Request) -> JobResponse:
     """Durably request cancellation once; repeated calls return the same snapshot."""
-    repositories = request.app.state.local_services.repositories
+    repositories = request.app.state.services.repositories
     try:
         repositories.jobs.get(job_id)
     except KeyError as error:
@@ -148,7 +166,7 @@ async def stream_events(
     last_event_id: str | None = Header(None, alias="Last-Event-ID"),
 ) -> StreamingResponse:
     """Stream append-only events; callers re-fetch the snapshot after reconnecting."""
-    repositories = request.app.state.local_services.repositories
+    repositories = request.app.state.services.repositories
     try:
         repositories.jobs.get(job_id)
     except KeyError as error:
@@ -187,7 +205,7 @@ async def stream_events(
 @router.get("/{job_id}/artifact")
 def get_artifact(job_id: str, request: Request) -> Response:
     """Authorize artifact retrieval from an owned completed local job only."""
-    services = request.app.state.local_services
+    services = request.app.state.services
     try:
         job = services.repositories.jobs.get(job_id)
     except KeyError as error:

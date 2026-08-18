@@ -18,10 +18,13 @@ from starlette.responses import Response
 from kenkui_server.api import assets, billing, jobs
 from kenkui_server.api import voices as voices_api
 from kenkui_server.auth.base import AuthBackend, Identity
+from kenkui_server.billing.service import BillingService
+from kenkui_server.billing.stripe import StripeWebhookHandler
+from kenkui_server.compute.base import ProcessRunner
 from kenkui_server.compute.local import LocalProcessRunner
-from kenkui_server.config import Capabilities, local_capabilities
+from kenkui_server.config import Capabilities, HostedConfig, local_capabilities
 from kenkui_server.errors import ErrorDetail, ErrorResponse
-from kenkui_server.jobs.dispatcher import Dispatcher
+from kenkui_server.jobs.dispatcher import Dispatcher, HostedDispatcher
 from kenkui_server.observability import log_event
 from kenkui_server.storage.assets import AssetStore
 from kenkui_server.storage.database import Database
@@ -32,12 +35,24 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class LocalServices:
-    """Application-owned local dependencies shared by route modules."""
+    """Application-owned dependencies shared by route modules."""
 
-    repositories: Repositories
-    assets: AssetStore
+    repositories: Any
+    assets: Any
     voices: tuple[kk.Voice, ...]
-    dispatcher: Dispatcher
+    dispatcher: Any
+
+
+@dataclass(frozen=True, slots=True)
+class HostedServices:
+    """Provider-neutral hosted dependencies selected by deployment configuration."""
+
+    repositories: Any
+    assets: Any
+    voices: tuple[kk.Voice, ...]
+    runner: ProcessRunner
+    auth_backend: AuthBackend
+    account_id_for_identity: Callable[[UUID], str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +61,7 @@ class HostedAuthServices:
 
     backend: AuthBackend
     job_owner_resolver: Callable[[str], UUID]
+    asset_owner_resolver: Callable[[str], UUID] | None = None
 
 
 def hosted_identity(request: Request) -> Identity | None:
@@ -102,14 +118,20 @@ def create_app(
     web_build_path: str | Path | None = None,
     auth_backend: AuthBackend | None = None,
     job_owner_resolver: Callable[[str], UUID] | None = None,
+    asset_owner_resolver: Callable[[str], UUID] | None = None,
+    hosted_config: HostedConfig | None = None,
+    hosted_services: HostedServices | None = None,
 ) -> FastAPI:
-    """Create the local Kenkui API application and its private durable state."""
-    root = (
-        Path(data_dir)
-        if data_dir is not None
-        else Path.home() / ".local" / "share" / "kenkui-server"
-    )
-    database = Database(root / "server.sqlite3")
+    """Create local services by default or hosted services when configured."""
+    if (hosted_config is None) != (hosted_services is None):
+        raise ValueError("hosted configuration requires hosted services")
+    if hosted_config is not None and (
+        auth_backend is not None
+        or job_owner_resolver is not None
+        or asset_owner_resolver is not None
+    ):
+        raise ValueError("hosted configuration owns authentication")
+
     app = FastAPI(
         title="Kenkui Server API",
         version="1.0.0",
@@ -117,27 +139,57 @@ def create_app(
         docs_url="/v1/docs",
         redoc_url=None,
     )
-    repositories = Repositories(database)
-    asset_store = AssetStore(root / "assets")
-    runner = LocalProcessRunner(database.path, asset_store.root, fixture_mode=fixture_mode)
-    dispatcher = Dispatcher(repositories, runner)
-    app.state.local_services = LocalServices(
-        repositories=repositories,
-        assets=asset_store,
-        voices=tuple(voices),
-        dispatcher=dispatcher,
-    )
-    if (auth_backend is None) != (job_owner_resolver is None):
-        raise ValueError("hosted authentication requires an owner resolver")
-    app.state.hosted_auth = (
-        HostedAuthServices(auth_backend, job_owner_resolver)
-        if auth_backend is not None and job_owner_resolver is not None
-        else None
-    )
+    if hosted_services is None:
+        root = (
+            Path(data_dir)
+            if data_dir is not None
+            else Path.home() / ".local" / "share" / "kenkui-server"
+        )
+        database = Database(root / "server.sqlite3")
+        repositories = Repositories(database)
+        asset_store = AssetStore(root / "assets")
+        runner = LocalProcessRunner(database.path, asset_store.root, fixture_mode=fixture_mode)
+        dispatcher: Any = Dispatcher(repositories, runner)
+        services = LocalServices(
+            repositories=repositories,
+            assets=asset_store,
+            voices=tuple(voices),
+            dispatcher=dispatcher,
+        )
+        app.state.local_services = services
+        if (auth_backend is None) != (job_owner_resolver is None):
+            raise ValueError("hosted authentication requires an owner resolver")
+        app.state.hosted_auth = (
+            HostedAuthServices(auth_backend, job_owner_resolver, asset_owner_resolver)
+            if auth_backend is not None and job_owner_resolver is not None
+            else None
+        )
+        app.state.hosted_services = None
+    else:
+        dispatcher = HostedDispatcher(hosted_services.repositories, hosted_services.runner)
+        services = LocalServices(
+            repositories=hosted_services.repositories,
+            assets=hosted_services.assets,
+            voices=hosted_services.voices,
+            dispatcher=dispatcher,
+        )
+        app.state.hosted_auth = HostedAuthServices(
+            hosted_services.auth_backend,
+            hosted_services.repositories.jobs.owner_id,
+            hosted_services.repositories.assets.owner_id,
+        )
+        app.state.hosted_services = hosted_services
+    app.state.services = services
     dispatcher.recover()
     app.include_router(assets.router)
     app.include_router(voices_api.router)
     app.include_router(billing.router)
+    if hosted_config is not None and hosted_services is not None:
+        handler = StripeWebhookHandler(
+            BillingService(hosted_services.repositories.billing),
+            signing_secret=hosted_config.stripe_webhook_secret.get_secret_value(),
+        )
+        app.include_router(billing.stripe_webhook_router(handler))
     app.include_router(jobs.router)
 
     @app.exception_handler(StarletteHTTPException)
@@ -209,12 +261,15 @@ def create_app(
         return response
 
     @app.middleware("http")
-    async def authenticate_hosted_job_routes(
+    async def authenticate_hosted_protected_routes(
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         hosted_auth: HostedAuthServices | None = request.app.state.hosted_auth
-        if hosted_auth is None or not request.url.path.startswith("/v1/jobs"):
+        protected = request.url.path.startswith("/v1/jobs") or request.url.path.startswith(
+            "/v1/assets"
+        )
+        if hosted_auth is None or not protected:
             return await call_next(request)
         scheme, _, token = request.headers.get("Authorization", "").partition(" ")
         if scheme.lower() != "bearer" or not token:

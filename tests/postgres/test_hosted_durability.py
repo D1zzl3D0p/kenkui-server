@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from uuid import UUID
 
 import pytest
 
 from kenkui_server.jobs.models import (
     Artifact,
+    Asset,
     Dispatch,
     Job,
+    JobEvent,
     JobSpec,
     JobStatus,
     OutputSpec,
@@ -15,7 +18,11 @@ from kenkui_server.jobs.models import (
     SingleVoiceCasting,
     TtsSettings,
 )
-from kenkui_server.storage.postgres import PostgresHostedRepository, PostgresRepositories
+from kenkui_server.storage.postgres import (
+    PostgresHostedRepository,
+    PostgresIdentityRepository,
+    PostgresRepositories,
+)
 from kenkui_server.storage.repositories import _encode_spec
 
 
@@ -51,6 +58,10 @@ class RecordingConnection:
             return Cursor({"sequence": 1})
         if "SELECT spec_json" in normalized:
             return Cursor({"spec_json": _encode_spec(_job().spec)})
+        if "INSERT INTO identities" in normalized:
+            return Cursor({"id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"})
+        if normalized.startswith("SELECT status FROM jobs"):
+            return Cursor({"status": "running"})
         return Cursor()
 
 
@@ -127,3 +138,56 @@ def test_postgres_repositories_guard_job_dispatch_and_artifact_mutations_by_expe
     assert "WHERE id = %s AND version = %s" in sql
     assert "INSERT INTO artifacts" in sql
     assert "ON CONFLICT (job_id) DO NOTHING" in sql
+
+
+def test_postgres_repositories_expose_event_and_dispatch_recovery_operations() -> None:
+    connection = RecordingConnection()
+    repositories = PostgresRepositories(connection)
+    event = JobEvent("job-1", 1, "queued", Progress("queued", 0, 1))
+
+    repositories.events.append(event)
+    assert repositories.events.list_for_job("job-1") == ()
+    assert repositories.dispatches.list_pending() == ()
+    assert repositories.dispatches.list_incomplete() == ()
+
+    sql = "\n".join(statement for statement, _ in connection.statements)
+    assert "INSERT INTO job_events" in sql
+    assert "FROM job_events WHERE job_id = %s ORDER BY sequence" in sql
+    assert "WHERE status = 'pending'" in sql
+    assert "WHERE status IN ('pending', 'running')" in sql
+
+
+def test_postgres_worker_finishes_a_dispatch_only_when_cancellation_was_not_requested() -> None:
+    connection = RecordingConnection()
+    repositories = PostgresRepositories(connection)
+
+    finished = repositories.finish_dispatch_if_not_cancellation_requested(
+        Dispatch("dispatch-1", "job-1", "running", 1)
+    )
+
+    assert finished is True
+    sql = "\n".join(statement for statement, _ in connection.statements)
+    assert "UPDATE dispatches SET status = 'done'" in sql
+
+
+def test_postgres_assets_persist_the_owner_used_by_hosted_authorization() -> None:
+    connection = RecordingConnection()
+    repositories = PostgresRepositories(connection)
+
+    repositories.assets.put_for_owner(
+        Asset("source-1", "private/source-1.epub", "digest", "epub"),
+        UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+    )
+
+    statement, parameters = connection.statements[-1]
+    assert "INSERT INTO assets (id, path, sha256, format, owner_id)" in statement
+    assert parameters[-1] == "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+
+
+def test_postgres_identity_mapping_is_durable_and_returns_a_stable_uuid() -> None:
+    connection = RecordingConnection()
+
+    identity_id = PostgresIdentityRepository(connection).user_id_for_subject("workos-user-1")
+
+    assert identity_id == UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    assert "ON CONFLICT (workos_subject)" in connection.statements[-1][0]

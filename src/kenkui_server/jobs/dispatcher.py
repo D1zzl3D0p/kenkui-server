@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from uuid import uuid4
+from typing import Any
+from uuid import UUID, uuid4
 
+from kenkui_server.billing.pricing import credits_for_characters
 from kenkui_server.compute.base import ProcessRunner
 from kenkui_server.jobs.models import Dispatch, Job, JobSpec
 from kenkui_server.storage.repositories import Repositories, StaleWriteError
@@ -30,6 +32,56 @@ class Dispatcher:
 
     def recover(self) -> None:
         """Reclaim incomplete work so a dead local worker cannot strand its Job."""
+        for dispatch in self._repositories.dispatches.list_incomplete():
+            job = self._repositories.jobs.get(dispatch.job_id)
+            if job.status.is_terminal:
+                continue
+            if dispatch.status == "running":
+                try:
+                    self._repositories.dispatches.update(
+                        replace(dispatch, status="pending", version=dispatch.version + 1),
+                        expected_version=dispatch.version,
+                    )
+                except StaleWriteError:
+                    continue
+            self._runner.start(dispatch.id)
+
+
+class HostedDispatcher:
+    """Admit credit-backed hosted work through one durable transaction."""
+
+    def __init__(self, repositories: Any, runner: ProcessRunner) -> None:
+        self._repositories: Any = repositories
+        self._runner = runner
+
+    def submit(
+        self,
+        spec: JobSpec,
+        *,
+        owner_id: UUID,
+        account_id: str,
+        normalized_speech_characters: int,
+        idempotency_key: str | None = None,
+    ) -> Job:
+        credits = credits_for_characters(normalized_speech_characters)
+        if credits < 1:
+            raise ValueError("empty_speech")
+        job = Job(str(uuid4()), spec)
+        dispatch = Dispatch(str(uuid4()), job.id, "pending")
+        admitted: Job = self._repositories.admit(
+            job,
+            dispatch,
+            account_id=account_id,
+            owner_id=str(owner_id),
+            credits=credits,
+            idempotency_key=idempotency_key,
+        )
+        if admitted.id == job.id:
+            self._runner.start(dispatch.id)
+        return admitted
+
+    def recover(self) -> None:
+        """Reclaim incomplete hosted work after an interrupted worker attempt."""
         for dispatch in self._repositories.dispatches.list_incomplete():
             job = self._repositories.jobs.get(dispatch.job_id)
             if job.status.is_terminal:

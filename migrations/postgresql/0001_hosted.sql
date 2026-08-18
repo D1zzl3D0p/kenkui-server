@@ -6,6 +6,7 @@ CREATE TABLE identities (
 );
 
 ALTER TABLE jobs ADD COLUMN owner_id UUID NOT NULL REFERENCES identities(id);
+ALTER TABLE assets ADD COLUMN owner_id UUID NOT NULL REFERENCES identities(id);
 ALTER TABLE dispatches ADD CONSTRAINT dispatches_one_per_job UNIQUE (job_id);
 ALTER TABLE artifacts ADD CONSTRAINT artifacts_one_per_job UNIQUE (job_id);
 

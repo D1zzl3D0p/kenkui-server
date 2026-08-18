@@ -7,6 +7,7 @@ PostgreSQL driver without leaking that choice into core job semantics.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
@@ -18,7 +19,16 @@ from kenkui_server.billing.models import (
     CreditAuthorization,
     LedgerEntry,
 )
-from kenkui_server.jobs.models import Artifact, Dispatch, Job, JobEvent, JobStatus
+from kenkui_server.jobs.models import (
+    Artifact,
+    Asset,
+    Dispatch,
+    InspectedChapter,
+    Inspection,
+    Job,
+    JobEvent,
+    JobStatus,
+)
 from kenkui_server.storage.repositories import (
     StaleWriteError,
     _decode_progress,
@@ -130,6 +140,129 @@ class PostgresJobRepository:
         return UUID(str(row["owner_id"]))
 
 
+class PostgresIdentityRepository:
+    """Stable provider-subject to internal-user mapping for hosted auth."""
+
+    def __init__(self, connection: PostgresConnection) -> None:
+        self._connection = connection
+
+    def user_id_for_subject(self, provider_subject: str) -> UUID:
+        row = self._connection.execute(
+            """
+            INSERT INTO identities (id, workos_subject)
+            VALUES (%s, %s)
+            ON CONFLICT (workos_subject)
+            DO UPDATE SET workos_subject = EXCLUDED.workos_subject
+            RETURNING id
+            """,
+            (str(uuid4()), provider_subject),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("identity_upsert_failed")
+        return UUID(str(row["id"]))
+
+
+class PostgresJobEventRepository:
+    """Append-only hosted job history used for reconnectable event streams."""
+
+    def __init__(self, connection: PostgresConnection) -> None:
+        self._connection = connection
+
+    def append(self, event: JobEvent) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO job_events (job_id, sequence, event_type, progress_json)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (event.job_id, event.sequence, event.event_type, _encode_progress(event.progress)),
+        )
+
+    def list_for_job(self, job_id: str) -> tuple[JobEvent, ...]:
+        rows = self._connection.execute(
+            """
+            SELECT job_id, sequence, event_type, progress_json
+            FROM job_events WHERE job_id = %s ORDER BY sequence
+            """,
+            (job_id,),
+        ).fetchall()
+        return tuple(
+            JobEvent(
+                str(row["job_id"]),
+                int(row["sequence"]),
+                str(row["event_type"]),
+                _decode_progress(str(row["progress_json"])),
+            )
+            for row in rows
+        )
+
+
+class PostgresAssetRepository:
+    """Private hosted source metadata and durable ownership."""
+
+    def __init__(self, connection: PostgresConnection) -> None:
+        self._connection = connection
+
+    def put_for_owner(self, asset: Asset, owner_id: UUID) -> None:
+        self._connection.execute(
+            """
+            INSERT INTO assets (id, path, sha256, format, owner_id)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (asset.id, asset.path, asset.sha256, asset.format, str(owner_id)),
+        )
+
+    def get(self, asset_id: str) -> Asset:
+        row = self._connection.execute(
+            "SELECT id, path, sha256, format FROM assets WHERE id = %s",
+            (asset_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(asset_id)
+        return Asset(str(row["id"]), str(row["path"]), str(row["sha256"]), str(row["format"]))
+
+    def owner_id(self, asset_id: str) -> UUID:
+        row = self._connection.execute(
+            "SELECT owner_id FROM assets WHERE id = %s",
+            (asset_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(asset_id)
+        return UUID(str(row["owner_id"]))
+
+
+class PostgresInspectionRepository:
+    """Durable immutable hosted source inspections."""
+
+    def __init__(self, connection: PostgresConnection) -> None:
+        self._connection = connection
+
+    def put(self, inspection: Inspection) -> None:
+        chapters = json.dumps(
+            [{"id": chapter.id, "title": chapter.title} for chapter in inspection.chapters],
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        self._connection.execute(
+            """
+            INSERT INTO inspections (source_id, title, author, chapters_json)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (inspection.source_id, inspection.title, inspection.author, chapters),
+        )
+
+    def get(self, source_id: str) -> Inspection:
+        row = self._connection.execute(
+            "SELECT source_id, title, author, chapters_json FROM inspections WHERE source_id = %s",
+            (source_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(source_id)
+        chapters = tuple(
+            InspectedChapter(**chapter) for chapter in json.loads(str(row["chapters_json"]))
+        )
+        return Inspection(str(row["source_id"]), str(row["title"]), str(row["author"]), chapters)
+
+
 class PostgresDispatchRepository:
     """PostgreSQL dispatch claims with conditional state changes."""
 
@@ -154,13 +287,49 @@ class PostgresDispatchRepository:
         )
         _require_one(result)
 
+    def get(self, dispatch_id: str) -> Dispatch:
+        row = self._connection.execute(
+            "SELECT id, job_id, status, version FROM dispatches WHERE id = %s",
+            (dispatch_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(dispatch_id)
+        return Dispatch(str(row["id"]), str(row["job_id"]), str(row["status"]), int(row["version"]))
+
     def get_for_job(self, job_id: str) -> Dispatch:
         row = self._connection.execute(
-            "SELECT id, job_id, status, version FROM dispatches WHERE job_id = %s", (job_id,)
+            "SELECT id, job_id, status, version FROM dispatches WHERE job_id = %s",
+            (job_id,),
         ).fetchone()
         if row is None:
             raise KeyError(job_id)
         return Dispatch(str(row["id"]), str(row["job_id"]), str(row["status"]), int(row["version"]))
+
+    def list_pending(self) -> tuple[Dispatch, ...]:
+        rows = self._connection.execute(
+            """
+            SELECT id, job_id, status, version FROM dispatches
+            WHERE status = 'pending' ORDER BY id
+            """,
+            (),
+        ).fetchall()
+        return tuple(
+            Dispatch(str(row["id"]), str(row["job_id"]), str(row["status"]), int(row["version"]))
+            for row in rows
+        )
+
+    def list_incomplete(self) -> tuple[Dispatch, ...]:
+        rows = self._connection.execute(
+            """
+            SELECT id, job_id, status, version FROM dispatches
+            WHERE status IN ('pending', 'running') ORDER BY id
+            """,
+            (),
+        ).fetchall()
+        return tuple(
+            Dispatch(str(row["id"]), str(row["job_id"]), str(row["status"]), int(row["version"]))
+            for row in rows
+        )
 
 
 class PostgresArtifactRepository:
@@ -197,6 +366,9 @@ class PostgresRepositories:
     def __init__(self, connection: PostgresConnection) -> None:
         self._connection = connection
         self.jobs = PostgresJobRepository(connection)
+        self.events = PostgresJobEventRepository(connection)
+        self.assets = PostgresAssetRepository(connection)
+        self.inspections = PostgresInspectionRepository(connection)
         self.dispatches = PostgresDispatchRepository(connection)
         self.artifacts = PostgresArtifactRepository(connection)
 
@@ -228,8 +400,6 @@ class PostgresRepositories:
     def update_job_and_append_event(
         self, job: Job, *, expected_version: int, event_type: str
     ) -> JobEvent:
-        if job.version != expected_version + 1:
-            raise ValueError("invalid_job_version")
         with self._connection.transaction() as connection:
             result = connection.execute(
                 """
@@ -258,9 +428,97 @@ class PostgresRepositories:
             )
         return event
 
+    def request_cancellation(self, job_id: str) -> Job:
+        """Atomically record hosted cancellation and its matching event."""
+        with self._connection.transaction() as connection:
+            row = connection.execute(
+                "SELECT id, spec_json, status, version, progress_json FROM jobs WHERE id = %s",
+                (job_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(job_id)
+            current = _job_from_row(row)
+            if current.status.is_terminal or current.status is JobStatus.CANCEL_REQUESTED:
+                return current
+            dispatch = connection.execute(
+                "SELECT status FROM dispatches WHERE job_id = %s",
+                (job_id,),
+            ).fetchone()
+            if current.status is JobStatus.QUEUED or (
+                dispatch is not None and str(dispatch["status"]) not in {"pending", "running"}
+            ):
+                status, event_type = JobStatus.CANCELLED, "cancelled"
+            else:
+                status, event_type = JobStatus.CANCEL_REQUESTED, "cancel_requested"
+            cancelled = Job(
+                current.id,
+                current.spec,
+                status=status,
+                version=current.version + 1,
+                progress=current.progress,
+            )
+            result = connection.execute(
+                """
+                UPDATE jobs SET status = %s, version = %s, progress_json = %s
+                WHERE id = %s AND version = %s
+                """,
+                (
+                    cancelled.status.value,
+                    cancelled.version,
+                    _encode_progress(cancelled.progress),
+                    cancelled.id,
+                    current.version,
+                ),
+            )
+            _require_one(result)
+            sequence = connection.execute(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM job_events WHERE job_id = %s",
+                (job_id,),
+            ).fetchone()
+            if sequence is None:
+                raise RuntimeError("missing_event_sequence")
+            connection.execute(
+                """
+                INSERT INTO job_events (job_id, sequence, event_type, progress_json)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (
+                    job_id,
+                    int(sequence["sequence"]),
+                    event_type,
+                    _encode_progress(cancelled.progress),
+                ),
+            )
+        return cancelled
+
+    def finish_dispatch_if_not_cancellation_requested(self, dispatch: Dispatch) -> bool:
+        """Prevent a worker from completing a dispatch after durable cancellation."""
+        with self._connection.transaction() as connection:
+            status = connection.execute(
+                "SELECT status FROM jobs WHERE id = %s",
+                (dispatch.job_id,),
+            ).fetchone()
+            if status is None:
+                raise KeyError(dispatch.job_id)
+            if str(status["status"]) == JobStatus.CANCEL_REQUESTED.value:
+                return False
+            result = connection.execute(
+                """
+                UPDATE dispatches SET status = 'done', version = %s
+                WHERE id = %s AND version = %s
+                """,
+                (dispatch.version + 1, dispatch.id, dispatch.version),
+            )
+            _require_one(result)
+        return True
+
 
 class PostgresHostedRepository(PostgresRepositories):
     """Hosted admission that reserves funds and makes work runnable atomically."""
+
+    def __init__(self, connection: PostgresConnection) -> None:
+        super().__init__(connection)
+        self.billing = PostgresBillingRepository(connection)
 
     def admit(
         self,
