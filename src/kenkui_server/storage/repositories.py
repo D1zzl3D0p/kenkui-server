@@ -150,6 +150,11 @@ class JobRepository:
         if job.version != expected_version + 1:
             raise ValueError("invalid_job_version")
         with self._database.transaction() as connection:
+            stored_spec = connection.execute(
+                "SELECT spec_json FROM jobs WHERE id = ?", (job.id,)
+            ).fetchone()
+            if stored_spec is not None and _decode_spec(stored_spec[0]) != job.spec:
+                raise ValueError("immutable_job_spec")
             result = connection.execute(
                 """
                 UPDATE jobs

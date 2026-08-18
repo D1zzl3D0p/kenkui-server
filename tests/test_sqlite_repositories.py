@@ -77,6 +77,28 @@ def test_snapshot_update_rejects_stale_concurrent_write(tmp_path: Path) -> None:
         repositories.jobs.update(running, expected_version=0)
 
 
+
+def test_snapshot_update_rejects_changed_immutable_job_spec(tmp_path: Path) -> None:
+    repositories = Repositories(Database(tmp_path / "server.sqlite3"))
+    repositories.jobs.create(job())
+    changed_spec = JobSpec(
+        source_id="asset-2",
+        chapters=("chapter-b",),
+        casting=SingleVoiceCasting(voice_id="en_GB-nora"),
+        tts=TtsSettings(normalize_text=False),
+        output=OutputSpec(path="/tmp/other-book.m4b"),
+    )
+    running = Job(
+        id="job-1",
+        spec=changed_spec,
+        status=JobStatus.RUNNING,
+        version=1,
+        progress=Progress("synthesis", 0, 1),
+    )
+
+    with pytest.raises(ValueError, match="immutable_job_spec"):
+        repositories.jobs.update(running, expected_version=0)
+
 def test_event_sequence_is_unique_per_job(tmp_path: Path) -> None:
     repositories = Repositories(Database(tmp_path / "server.sqlite3"))
     repositories.jobs.create(job())
