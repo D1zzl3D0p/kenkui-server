@@ -78,6 +78,15 @@ wheels = [
 ]
 
 [[package]]
+name = "defusedxml"
+version = "0.7.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0f/d5/c66da9b79e5bdb124974bfe172b4daf3c984ebd9c2a06e2b8a4dc7331c72/defusedxml-0.7.1.tar.gz", hash = "sha256:1bb3032db185915b62d7c6209c5a8792be6a32ab2fedacc84e01b52c51aa3e69", size = 75520, upload-time = "2021-03-08T10:59:26.269Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/6c/aa3f2f849e01cb6a001cd8554a88d4c77c5c1a31c95bdf1cf9301e6d9ef4/defusedxml-0.7.1-py2.py3-none-any.whl", hash = "sha256:a352e7e428770286cc899e2542b6cdaedb2b4953ff269a210103ec58f6198a61", size = 25604, upload-time = "2021-03-08T10:59:24.45Z" },
+]
+
+[[package]]
 name = "fastapi"
 version = "0.129.2"
 source = { registry = "https://pypi.org/simple" }
@@ -210,11 +219,43 @@ wheels = [
 ]
 
 [[package]]
+name = "kenkui"
+version = "0.1.0"
+source = { editable = "../kenkui" }
+dependencies = [
+    { name = "defusedxml" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "defusedxml", specifier = "==0.7.1" },
+    { name = "pocket-tts", marker = "extra == 'pocket'", specifier = "==2.1.0" },
+]
+provides-extras = ["pocket"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "check-wheel-contents", specifier = ">=0.6.2" },
+    { name = "mypy", specifier = ">=1.15" },
+    { name = "pytest", specifier = ">=8.3" },
+    { name = "pytest-cov", specifier = ">=6.0" },
+    { name = "ruff", specifier = ">=0.11" },
+    { name = "twine", specifier = ">=6.1" },
+    { name = "types-defusedxml", specifier = ">=0.7.0.20250822" },
+]
+docs = [
+    { name = "mkdocs", specifier = ">=1.6" },
+    { name = "mkdocs-material", specifier = ">=9.6" },
+    { name = "mkdocstrings", extras = ["python"], specifier = ">=0.29" },
+]
+
+[[package]]
 name = "kenkui-server"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "kenkui" },
     { name = "pydantic" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -231,6 +272,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115,<0.130" },
+    { name = "kenkui", editable = "../kenkui" },
     { name = "pydantic", specifier = ">=2.10,<3.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34,<1.0" },
 ]
