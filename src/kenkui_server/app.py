@@ -9,10 +9,10 @@ from uuid import uuid4
 
 import kenkui as kk
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
@@ -84,6 +84,7 @@ def create_app(
     data_dir: str | Path | None = None,
     voices: Sequence[kk.Voice] = (),
     fixture_mode: bool = False,
+    web_build_path: str | Path | None = None,
 ) -> FastAPI:
     """Create the local Kenkui API application and its private durable state."""
     root = Path(data_dir) if data_dir is not None else Path.home() / ".local" / "share" / "kenkui-server"
@@ -194,5 +195,21 @@ def create_app(
     )
     async def capabilities() -> Capabilities:
         return local_capabilities()
+
+    if web_build_path is not None:
+        web_build = Path(web_build_path).resolve()
+        index = web_build / "index.html"
+        if not index.is_file():
+            raise ValueError("web_build_path must contain index.html")
+
+        @app.get("/{path:path}", include_in_schema=False)
+        async def serve_web(path: str) -> Response:
+            """Serve installed SPA assets and fall back to its entry point."""
+            if path == "v1" or path.startswith("v1/"):
+                raise HTTPException(status_code=404, detail="not found")
+            candidate = (web_build / path).resolve()
+            if candidate.is_relative_to(web_build) and candidate.is_file():
+                return FileResponse(candidate)
+            return FileResponse(index)
 
     return app

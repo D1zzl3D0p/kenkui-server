@@ -138,6 +138,13 @@ class JobRepository:
                 (job.id, _encode_spec(job.spec), job.status.value, job.version, _encode_progress(job.progress)),
             )
 
+    def list(self) -> tuple[Job, ...]:
+        """Return all authoritative snapshots in a deterministic order."""
+        rows = self._database.connection.execute(
+            "SELECT id, spec_json, status, version, progress_json FROM jobs ORDER BY id"
+        ).fetchall()
+        return tuple(_job_from_row(row) for row in rows)
+
     def get(self, job_id: str) -> Job:
         row = self._database.connection.execute(
             "SELECT id, spec_json, status, version, progress_json FROM jobs WHERE id = ?", (job_id,)

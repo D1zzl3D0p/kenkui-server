@@ -238,6 +238,22 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "JobListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/JobResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "JobListResponse",
+        "type": "object"
+      },
       "JobRequest": {
         "properties": {
           "casting": {
@@ -285,6 +301,14 @@
             "$ref": "#/components/schemas/ProgressResponse"
           },
           "status": {
+            "enum": [
+              "queued",
+              "running",
+              "cancel_requested",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ],
             "title": "Status",
             "type": "string"
           }
@@ -611,6 +635,26 @@
       }
     },
     "/v1/jobs": {
+      "get": {
+        "description": "Return all authoritative durable snapshots owned by this local server.",
+        "operationId": "list_jobs_v1_jobs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Jobs",
+        "tags": [
+          "jobs"
+        ]
+      },
       "post": {
         "description": "Admit a locally unmetered job and commit its dispatch before starting work.",
         "operationId": "create_job_v1_jobs_post",

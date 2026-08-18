@@ -2,10 +2,22 @@
 
 Local-first FastAPI server for Kenkui.
 
-This repository currently exposes only the versioned server foundation:
-`/v1/health`, `/v1/capabilities`, and the checked OpenAPI contract. It does
-not implement jobs, assets, billing, workers, authentication providers, or
-audiobook processing.
+The server owns durable local Jobs, source assets, execution, and output
+artifacts. It exposes the versioned `/v1` API without hosted authentication,
+providers, or billing.
+
+## Local API behavior
+
+- `GET /v1/jobs` returns an `{"items": [...]}` envelope of authoritative,
+  local Job snapshots. Snapshots contain only the Job ID, status, and
+  progress—never filesystem paths.
+- Cancelling a queued Job immediately returns terminal `cancelled`. Cancelling
+  a running Job returns non-terminal `cancel_requested`; the worker later
+  publishes terminal `cancelled` after it observes the durable request.
+- Configure `create_app(web_build_path=...)` (or pass the same
+  `ServerConfig.web_build_path` to `create_uvicorn_config`) with an installed
+  bundle containing `index.html` to serve its static assets and SPA fallback
+  from the server origin. `/v1` requests always remain API requests.
 
 ## Normative contracts
 
@@ -16,9 +28,7 @@ audiobook processing.
 
 ```sh
 uv sync --all-groups
-uv run pytest tests/test_health.py tests/test_capabilities.py tests/test_errors.py tests/test_openapi.py
-uv run mypy
-uv run ruff check .
+uv run pytest tests/test_local_api.py tests/test_local_job_api.py tests/test_sqlite_repositories.py tests/test_transitions.py tests/test_openapi.py tests/test_main.py
 ```
 
 Run the local server (it binds to `127.0.0.1` by default):

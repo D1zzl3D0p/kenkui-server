@@ -20,3 +20,25 @@ def test_local_assets_and_voices_do_not_expose_private_paths(tmp_path: Path) -> 
         assert client.get("/v1/voices").json() == {
             "items": [{"id": "narrator", "name": "Narrator", "language": None}]
         }
+
+
+def test_configured_web_build_serves_assets_and_spa_fallback_without_shadowing_v1(tmp_path: Path) -> None:
+    web_build = tmp_path / "web"
+    assets = web_build / "assets"
+    assets.mkdir(parents=True)
+    (web_build / "index.html").write_text("<!doctype html><title>Kenkui</title>")
+    (assets / "app.js").write_text("console.log('kenkui')")
+
+    with TestClient(create_app(data_dir=tmp_path / "state", web_build_path=web_build)) as client:
+        asset = client.get("/assets/app.js")
+        fallback = client.get("/jobs/job-1")
+        health = client.get("/v1/health")
+        missing_api = client.get("/v1/missing")
+
+    assert asset.status_code == 200
+    assert asset.text == "console.log('kenkui')"
+    assert fallback.status_code == 200
+    assert fallback.text == "<!doctype html><title>Kenkui</title>"
+    assert health.json() == {"status": "ok"}
+    assert missing_api.status_code == 404
+    assert missing_api.json()["error"]["code"] == "not_found"

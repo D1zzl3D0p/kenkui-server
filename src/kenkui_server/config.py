@@ -1,5 +1,6 @@
 """Local-only server configuration and public capability DTOs."""
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -10,6 +11,7 @@ class ServerConfig(BaseModel):
 
     host: str = "127.0.0.1"
     port: int = 8000
+    web_build_path: Path | None = None
 
 
 class AuthCapabilities(BaseModel):

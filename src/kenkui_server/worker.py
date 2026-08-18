@@ -11,7 +11,7 @@ import kenkui as kk
 
 from kenkui_server.jobs.models import Artifact, Job, JobStatus
 from kenkui_server.jobs.pipeline import pipeline_from_job
-from kenkui_server.jobs.transitions import CancelRequested, Completed, DispatchRequested, Failed, ProgressReported, transition
+from kenkui_server.jobs.transitions import CancelRequested, Cancelled, Completed, DispatchRequested, Failed, ProgressReported, transition
 from kenkui_server.storage.assets import AssetStore
 from kenkui_server.storage.database import Database
 from kenkui_server.storage.repositories import Repositories, StaleWriteError
@@ -47,7 +47,9 @@ class LocalJobRunner:
         if dispatch.status != "pending":
             return
         job = repositories.jobs.get(dispatch.job_id)
-        if job.status is JobStatus.CANCELLED:
+        if job.status in {JobStatus.CANCELLED, JobStatus.CANCEL_REQUESTED}:
+            if job.status is JobStatus.CANCEL_REQUESTED:
+                self._cancel_if_requested(repositories, job.id)
             repositories.dispatches.update(
                 replace(dispatch, status="cancelled", version=dispatch.version + 1),
                 expected_version=dispatch.version,
@@ -82,7 +84,7 @@ class LocalJobRunner:
                     try:
                         polling_repositories = Repositories(polling_database)
                         while not stop_polling.wait(0.05):
-                            if polling_repositories.jobs.get(running.id).status is JobStatus.CANCELLED:
+                            if polling_repositories.jobs.get(running.id).status is JobStatus.CANCEL_REQUESTED:
                                 cancellation.cancel()
                                 return
                     finally:
@@ -93,7 +95,7 @@ class LocalJobRunner:
 
                 def on_event(event: kk.ExecutionEvent) -> None:
                     current = repositories.jobs.get(running.id)
-                    if current.status is JobStatus.CANCELLED:
+                    if current.status is JobStatus.CANCEL_REQUESTED:
                         cancellation.cancel()
                         return
                     completed = getattr(event, "completed", current.progress.completed)
@@ -112,16 +114,20 @@ class LocalJobRunner:
                     stop_polling.set()
                     poller.join()
             current = repositories.jobs.get(running.id)
-            if current.status is JobStatus.CANCELLED:
+            if current.status is JobStatus.CANCEL_REQUESTED:
                 output.unlink(missing_ok=True)
+                self._cancel_if_requested(repositories, running.id)
                 return
             completed = transition(current, Completed())
             if self._update(repositories, completed, "completed"):
                 repositories.artifacts.put(Artifact(str(uuid4()), completed.id, str(output), "m4b"))
         except kk.CancelledError:
-            self._cancel_if_running(repositories, running.id)
+            self._cancel_if_requested(repositories, running.id)
         except Exception:
-            self._fail_if_running(repositories, running.id)
+            if repositories.jobs.get(running.id).status is JobStatus.CANCEL_REQUESTED:
+                self._cancel_if_requested(repositories, running.id)
+            else:
+                self._fail_if_running(repositories, running.id)
         finally:
             current_dispatch = repositories.dispatches.get(dispatch_id)
             if current_dispatch.status != "done":
@@ -130,10 +136,10 @@ class LocalJobRunner:
                     expected_version=current_dispatch.version,
                 )
 
-    def _cancel_if_running(self, repositories: Repositories, job_id: str) -> None:
+    def _cancel_if_requested(self, repositories: Repositories, job_id: str) -> None:
         current = repositories.jobs.get(job_id)
-        if current.status is JobStatus.RUNNING:
-            self._update(repositories, transition(current, CancelRequested()), "cancelled")
+        if current.status is JobStatus.CANCEL_REQUESTED:
+            self._update(repositories, transition(current, Cancelled()), "cancelled")
 
     def _fail_if_running(self, repositories: Repositories, job_id: str) -> None:
         current = repositories.jobs.get(job_id)

@@ -17,6 +17,11 @@ class CancelRequested:
     """Request cooperative cancellation of a non-terminal job."""
 
 
+
+
+@dataclass(frozen=True, slots=True)
+class Cancelled:
+    """Record a worker's terminal observation of a cancellation request."""
 @dataclass(frozen=True, slots=True)
 class Completed:
     """Record successful completion of a running job."""
@@ -41,7 +46,7 @@ class ProgressReported:
 
 
 JobTransitionEvent = (
-    DispatchRequested | CancelRequested | Completed | Failed | ProgressReported
+    DispatchRequested | CancelRequested | Cancelled | Completed | Failed | ProgressReported
 )
 
 
@@ -58,6 +63,8 @@ def _event_name(event: JobTransitionEvent) -> str:
         return "dispatch_requested"
     if isinstance(event, CancelRequested):
         return "cancel_requested"
+    if isinstance(event, Cancelled):
+        return "cancelled"
     if isinstance(event, Completed):
         return "completed"
     if isinstance(event, Failed):
@@ -76,7 +83,12 @@ def _next(job: Job, *, status: JobStatus | None = None, progress: Progress | Non
 
 def transition(job: Job, event: JobTransitionEvent) -> Job:
     """Return the next job snapshot or raise a stable invalid transition code."""
-    if isinstance(event, CancelRequested) and job.status in {JobStatus.QUEUED, JobStatus.RUNNING}:
+    if isinstance(event, CancelRequested):
+        if job.status is JobStatus.QUEUED:
+            return _next(job, status=JobStatus.CANCELLED)
+        if job.status is JobStatus.RUNNING:
+            return _next(job, status=JobStatus.CANCEL_REQUESTED)
+    if isinstance(event, Cancelled) and job.status is JobStatus.CANCEL_REQUESTED:
         return _next(job, status=JobStatus.CANCELLED)
     if isinstance(event, DispatchRequested) and job.status is JobStatus.QUEUED:
         return _next(job, status=JobStatus.RUNNING, progress=Progress("running", 0, 0))

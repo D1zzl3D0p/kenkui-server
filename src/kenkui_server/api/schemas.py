@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -72,8 +74,12 @@ class ProgressResponse(_Model):
 
 class JobResponse(_Model):
     id: str
-    status: str
+    status: Literal["queued", "running", "cancel_requested", "succeeded", "failed", "cancelled"]
     progress: ProgressResponse
+
+
+class JobListResponse(_Model):
+    items: list[JobResponse]
 
 
 class EventResponse(_Model):

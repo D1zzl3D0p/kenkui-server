@@ -35,3 +35,11 @@ def test_checked_openapi_contract_matches_the_v1_application() -> None:
         "title": "ErrorResponse",
         "type": "object",
     }
+    assert document["components"]["schemas"]["JobResponse"]["properties"]["status"]["enum"] == [
+        "queued",
+        "running",
+        "cancel_requested",
+        "succeeded",
+        "failed",
+        "cancelled",
+    ]

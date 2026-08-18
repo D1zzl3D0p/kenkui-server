@@ -40,6 +40,65 @@ def test_preflight_then_idempotent_job_creation(tmp_path: Path) -> None:
         assert "path" not in first.text
 
 
+
+
+def test_list_jobs_returns_authoritative_snapshots(tmp_path: Path) -> None:
+    from kenkui_server.jobs.models import Job, JobSpec, JobStatus, OutputSpec, Progress, SingleVoiceCasting, TtsSettings
+
+    app = create_app(data_dir=tmp_path / "state", fixture_mode=True)
+    repositories = app.state.local_services.repositories
+    repositories.jobs.create(
+        Job(
+            "job-b",
+            JobSpec("source-b", ("chapter-1",), SingleVoiceCasting("narrator"), TtsSettings(), OutputSpec("artifact.m4b")),
+        )
+    )
+    repositories.jobs.create(
+        Job(
+            "job-a",
+            JobSpec("source-a", ("chapter-1",), SingleVoiceCasting("narrator"), TtsSettings(), OutputSpec("artifact.m4b")),
+            status=JobStatus.RUNNING,
+            version=1,
+            progress=Progress("synthesis", 2, 3),
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/v1/jobs")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [
+            {"id": "job-a", "status": "running", "progress": {"stage": "synthesis", "completed": 2, "total": 3}},
+            {"id": "job-b", "status": "queued", "progress": {"stage": "queued", "completed": 0, "total": 0}},
+        ]
+    }
+
+
+def test_cancelling_running_job_returns_a_durable_cancellation_request(tmp_path: Path) -> None:
+    from kenkui_server.jobs.models import Job, JobSpec, JobStatus, OutputSpec, Progress, SingleVoiceCasting, TtsSettings
+
+    app = create_app(data_dir=tmp_path / "state", fixture_mode=True)
+    repositories = app.state.local_services.repositories
+    job = Job(
+        "job-running",
+        JobSpec("source", ("chapter-1",), SingleVoiceCasting("narrator"), TtsSettings(), OutputSpec("artifact.m4b")),
+        status=JobStatus.RUNNING,
+        version=1,
+        progress=Progress("synthesis", 1, 3),
+    )
+    repositories.jobs.create(job)
+
+    with TestClient(app) as client:
+        first = client.post(f"/v1/jobs/{job.id}/cancel")
+        second = client.post(f"/v1/jobs/{job.id}/cancel")
+
+    expected = {"id": job.id, "status": "cancel_requested", "progress": {"stage": "synthesis", "completed": 1, "total": 3}}
+    assert first.status_code == 200
+    assert first.json() == expected
+    assert second.json() == expected
+    assert repositories.jobs.get(job.id).status is JobStatus.CANCEL_REQUESTED
+    assert [event.event_type for event in repositories.events.list_for_job(job.id)] == ["cancel_requested"]
 def test_fixture_worker_publishes_one_authorized_artifact(tmp_path: Path) -> None:
     voice = kk.Voice("narrator", "Narrator", True, "local", "test", True)
     with TestClient(create_app(data_dir=tmp_path / "state", voices=(voice,), fixture_mode=True)) as client:

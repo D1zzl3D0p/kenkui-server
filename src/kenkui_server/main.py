@@ -10,7 +10,11 @@ from kenkui_server.observability import configure_logging
 def create_uvicorn_config(server_config: ServerConfig | None = None) -> uvicorn.Config:
     """Build the Uvicorn configuration with its loopback-only default."""
     config = server_config or ServerConfig()
-    return uvicorn.Config(create_app(), host=config.host, port=config.port)
+    return uvicorn.Config(
+        create_app(web_build_path=config.web_build_path),
+        host=config.host,
+        port=config.port,
+    )
 
 
 def main() -> None:
