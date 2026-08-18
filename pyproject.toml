@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kenkui-server"
+version = "0.1.0"
+description = "Local-first Kenkui API server"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "AGPL-3.0-only" }
+authors = [{ name = "Kenkui contributors" }]
+classifiers = [
+  "License :: OSI Approved :: GNU Affero General Public License v3",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+  "fastapi>=0.115,<0.130",
+  "pydantic>=2.10,<3.0",
+  "uvicorn[standard]>=0.34,<1.0",
+]
+
+[project.scripts]
+kenkui-server = "kenkui_server.main:main"
+
+[dependency-groups]
+dev = [
+  "alembic>=1.14,<2.0",
+  "httpx>=0.28,<1.0",
+  "mypy>=1.14,<2.0",
+  "pytest>=8.3,<9.0",
+  "ruff>=0.9,<1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["kenkui_server"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kenkui_server"]

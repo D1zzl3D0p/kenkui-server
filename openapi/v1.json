@@ -1,0 +1,201 @@
+{
+  "components": {
+    "schemas": {
+      "AuthCapabilities": {
+        "description": "Authentication modes supported by this server.",
+        "properties": {
+          "mode": {
+            "const": "none",
+            "default": "none",
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "title": "AuthCapabilities",
+        "type": "object"
+      },
+      "BillingCapabilities": {
+        "description": "Billing modes supported by this server.",
+        "properties": {
+          "mode": {
+            "const": "unmetered",
+            "default": "unmetered",
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "title": "BillingCapabilities",
+        "type": "object"
+      },
+      "Capabilities": {
+        "description": "Public, versioned declaration of local server features.",
+        "properties": {
+          "apiVersion": {
+            "const": "1",
+            "default": "1",
+            "title": "Apiversion",
+            "type": "string"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/AuthCapabilities",
+            "default": {
+              "mode": "none"
+            }
+          },
+          "billing": {
+            "$ref": "#/components/schemas/BillingCapabilities",
+            "default": {
+              "mode": "unmetered"
+            }
+          },
+          "casting": {
+            "$ref": "#/components/schemas/CastingCapabilities",
+            "default": {
+              "mode": "single"
+            }
+          },
+          "outputFormats": {
+            "items": {
+              "const": "m4b",
+              "type": "string"
+            },
+            "title": "Outputformats",
+            "type": "array"
+          },
+          "sourceFormats": {
+            "items": {
+              "const": "epub",
+              "type": "string"
+            },
+            "title": "Sourceformats",
+            "type": "array"
+          }
+        },
+        "title": "Capabilities",
+        "type": "object"
+      },
+      "CastingCapabilities": {
+        "description": "Casting modes supported by this server.",
+        "properties": {
+          "mode": {
+            "const": "single",
+            "default": "single",
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "title": "CastingCapabilities",
+        "type": "object"
+      },
+      "ErrorDetail": {
+        "description": "Stable client-facing description of a failed request.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "title": "Details",
+            "type": "object"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "requestId": {
+            "title": "Requestid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message",
+          "requestId"
+        ],
+        "title": "ErrorDetail",
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "description": "The sole error envelope exposed by the versioned API.",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorDetail"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Kenkui Server API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/v1/capabilities": {
+      "get": {
+        "operationId": "capabilities_v1_capabilities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Capabilities"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Normalized internal server error"
+          }
+        },
+        "summary": "Capabilities"
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "operationId": "health_v1_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health V1 Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Normalized internal server error"
+          }
+        },
+        "summary": "Health"
+      }
+    }
+  }
+}
