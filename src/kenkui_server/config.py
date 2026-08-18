@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 
 class ServerConfig(BaseModel):
@@ -13,6 +13,18 @@ class ServerConfig(BaseModel):
     port: int = 8000
     web_build_path: Path | None = None
 
+
+
+class HostedConfig(BaseModel):
+    """Deployment-only provider configuration; serialization always masks secrets."""
+
+    database_url: SecretStr
+    r2_bucket: str
+    r2_endpoint: str
+    r2_access_key_id: SecretStr
+    r2_secret_access_key: SecretStr
+    workos_api_key: SecretStr
+    stripe_webhook_secret: SecretStr
 
 class AuthCapabilities(BaseModel):
     """Authentication modes supported by this server."""
