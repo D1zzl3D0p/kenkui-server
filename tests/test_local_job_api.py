@@ -255,6 +255,92 @@ def test_running_worker_polls_durable_cancellation(monkeypatch, tmp_path: Path) 
     assert repositories.jobs.get(job.id).status.value == "cancelled"
 
 
+def test_stale_completion_after_cancellation_discards_output_and_terminalizes_job(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from kenkui_server.jobs.models import (
+        Asset,
+        Dispatch,
+        Job,
+        JobSpec,
+        JobStatus,
+        OutputSpec,
+        Progress,
+        SingleVoiceCasting,
+        TtsSettings,
+    )
+    from kenkui_server.jobs.transitions import CancelRequested, transition
+    from kenkui_server.storage.assets import AssetStore
+    from kenkui_server.storage.database import Database
+    from kenkui_server.storage.repositories import Repositories
+    from kenkui_server.worker import LocalJobRunner
+
+    root = tmp_path / "state"
+    store = AssetStore(root / "assets")
+    database = Database(root / "server.sqlite3")
+    repositories = Repositories(database)
+    source = store.put_source("asset-stale-completion", b"source")
+    repositories.assets.put(Asset("asset-stale-completion", str(source), "digest", "epub"))
+    job = Job(
+        "job-stale-completion",
+        JobSpec(
+            "asset-stale-completion",
+            ("chapter-1",),
+            SingleVoiceCasting("narrator"),
+            TtsSettings(),
+            OutputSpec("artifact.m4b"),
+        ),
+        status=JobStatus.RUNNING,
+        version=1,
+        progress=Progress("synthesis", 0, 1),
+    )
+    repositories.create_job_and_dispatch(
+        job, Dispatch("dispatch-stale-completion", job.id, "pending"), idempotency_key=None
+    )
+    get_job = repositories.jobs.get
+    get_calls = 0
+
+    def get_with_interleaved_cancellation(job_id: str) -> Job:
+        nonlocal get_calls
+        snapshot = get_job(job_id)
+        get_calls += 1
+        if get_calls == 2:
+            cancellation = transition(snapshot, CancelRequested())
+            repositories.update_job_and_append_event(
+                cancellation, expected_version=snapshot.version, event_type="cancel_requested"
+            )
+        return snapshot
+
+    update_dispatch = repositories.dispatches.update
+
+    def update_dispatch_after_terminal_cancellation(
+        dispatch: Dispatch, *, expected_version: int
+    ) -> None:
+        if dispatch.status == "done":
+            assert get_job(job.id).status is JobStatus.CANCELLED
+            assert [event.event_type for event in repositories.events.list_for_job(job.id)] == [
+                "cancel_requested",
+                "cancelled",
+            ]
+        update_dispatch(dispatch, expected_version=expected_version)
+
+    monkeypatch.setattr(repositories.jobs, "get", get_with_interleaved_cancellation)
+    monkeypatch.setattr(
+        repositories.dispatches, "update", update_dispatch_after_terminal_cancellation
+    )
+
+    try:
+        LocalJobRunner(database.path, store.root, fixture_mode=True)._run(
+            repositories, store, "dispatch-stale-completion"
+        )
+
+        assert not store.artifact_path(job.id).exists()
+        assert repositories.artifacts.list_for_job(job.id) == ()
+        assert repositories.dispatches.get("dispatch-stale-completion").status == "done"
+    finally:
+        database.close()
+
+
 def test_sse_honors_last_event_id_for_incremental_reconnect(tmp_path: Path) -> None:
     voice = kk.Voice("narrator", "Narrator", True, "local", "test", True)
     with TestClient(create_app(data_dir=tmp_path / "state", voices=(voice,), fixture_mode=True)) as client:

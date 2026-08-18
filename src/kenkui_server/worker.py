@@ -121,6 +121,11 @@ class LocalJobRunner:
             completed = transition(current, Completed())
             if self._update(repositories, completed, "completed"):
                 repositories.artifacts.put(Artifact(str(uuid4()), completed.id, str(output), "m4b"))
+            else:
+                current = repositories.jobs.get(running.id)
+                if current.status is JobStatus.CANCEL_REQUESTED:
+                    output.unlink(missing_ok=True)
+                    self._cancel_if_requested(repositories, running.id)
         except kk.CancelledError:
             self._cancel_if_requested(repositories, running.id)
         except Exception:
