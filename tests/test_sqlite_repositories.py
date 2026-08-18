@@ -137,3 +137,24 @@ def test_atomic_idempotency_admission_returns_one_durable_job_under_concurrency(
     assert not failures
     assert len(admitted) == 2
     assert {item.id for item in admitted} in ({"job-0"}, {"job-1"})
+
+
+
+def test_snapshot_and_next_event_are_committed_together(tmp_path: Path) -> None:
+    repositories = Repositories(Database(tmp_path / "server.sqlite3"))
+    queued = job()
+    repositories.jobs.create(queued)
+    running = Job(
+        queued.id,
+        queued.spec,
+        JobStatus.RUNNING,
+        version=1,
+        progress=Progress("running", 0, 0),
+    )
+
+    repositories.update_job_and_append_event(running, expected_version=queued.version, event_type="running")
+
+    assert repositories.jobs.get(queued.id) == running
+    assert repositories.events.list_for_job(queued.id) == (
+        JobEvent(queued.id, 1, "running", running.progress),
+    )

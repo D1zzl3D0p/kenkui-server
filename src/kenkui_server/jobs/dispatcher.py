@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from uuid import uuid4
 
 from kenkui_server.compute.base import ProcessRunner
 from kenkui_server.jobs.models import Dispatch, Job, JobSpec
-from kenkui_server.storage.repositories import Repositories
+from kenkui_server.storage.repositories import Repositories, StaleWriteError
 
 
 class Dispatcher:
@@ -28,6 +29,17 @@ class Dispatcher:
         return admitted
 
     def recover(self) -> None:
-        """Restart each unclaimed durable dispatch after process recovery."""
-        for dispatch in self._repositories.dispatches.list_pending():
+        """Reclaim incomplete work so a dead local worker cannot strand its Job."""
+        for dispatch in self._repositories.dispatches.list_incomplete():
+            job = self._repositories.jobs.get(dispatch.job_id)
+            if job.status.is_terminal:
+                continue
+            if dispatch.status == "running":
+                try:
+                    self._repositories.dispatches.update(
+                        replace(dispatch, status="pending", version=dispatch.version + 1),
+                        expected_version=dispatch.version,
+                    )
+                except StaleWriteError:
+                    continue
             self._runner.start(dispatch.id)

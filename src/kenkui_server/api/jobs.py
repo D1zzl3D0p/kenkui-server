@@ -9,8 +9,9 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 
 from kenkui_server.api.schemas import EventResponse, JobRequest, JobResponse, PreflightResponse, ProgressResponse
-from kenkui_server.jobs.models import Job, JobEvent, JobSpec, OutputSpec, SingleVoiceCasting, TtsSettings
+from kenkui_server.jobs.models import Job, JobSpec, OutputSpec, SingleVoiceCasting, TtsSettings
 from kenkui_server.jobs.transitions import CancelRequested, transition
+from kenkui_server.storage.repositories import StaleWriteError
 
 router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
 
@@ -96,17 +97,21 @@ def get_job(job_id: str, request: Request) -> JobResponse:
 def cancel_job(job_id: str, request: Request) -> JobResponse:
     """Durably request cancellation once; repeated calls return the same snapshot."""
     repositories = request.app.state.local_services.repositories
-    try:
-        current = repositories.jobs.get(job_id)
-    except KeyError as error:
-        raise HTTPException(status_code=404, detail="job not found") from error
-    if current.status.is_terminal:
-        return _response(current)
-    cancelled = transition(current, CancelRequested())
-    repositories.jobs.update(cancelled, expected_version=current.version)
-    events = repositories.events.list_for_job(job_id)
-    repositories.events.append(JobEvent(job_id, len(events) + 1, "cancelled", cancelled.progress))
-    return _response(cancelled)
+    while True:
+        try:
+            current = repositories.jobs.get(job_id)
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="job not found") from error
+        if current.status.is_terminal:
+            return _response(current)
+        cancelled = transition(current, CancelRequested())
+        try:
+            repositories.update_job_and_append_event(
+                cancelled, expected_version=current.version, event_type="cancelled"
+            )
+        except StaleWriteError:
+            continue
+        return _response(cancelled)
 
 
 @router.get("/{job_id}/events")

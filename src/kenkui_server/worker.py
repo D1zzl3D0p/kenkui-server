@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import kenkui as kk
 
-from kenkui_server.jobs.models import Artifact, Job, JobEvent, JobStatus, Progress
+from kenkui_server.jobs.models import Artifact, Job, JobStatus
 from kenkui_server.jobs.pipeline import pipeline_from_job
 from kenkui_server.jobs.transitions import CancelRequested, Completed, DispatchRequested, Failed, ProgressReported, transition
 from kenkui_server.storage.assets import AssetStore
@@ -32,19 +32,14 @@ class LocalJobRunner:
         finally:
             database.close()
 
-    def _append(self, repositories: Repositories, job: Job, event_type: str) -> None:
-        sequence = len(repositories.events.list_for_job(job.id)) + 1
-        repositories.events.append(JobEvent(job.id, sequence, event_type, job.progress))
-
     def _update(self, repositories: Repositories, job: Job, event_type: str) -> bool:
-        current = repositories.jobs.get(job.id)
-        if current.version != job.version - 1:
-            return False
+        """Apply a transition and append its event in one guarded transaction."""
         try:
-            repositories.jobs.update(job, expected_version=current.version)
+            repositories.update_job_and_append_event(
+                job, expected_version=job.version - 1, event_type=event_type
+            )
         except StaleWriteError:
             return False
-        self._append(repositories, job, event_type)
         return True
 
     def _run(self, repositories: Repositories, store: AssetStore, dispatch_id: str) -> None:
@@ -53,15 +48,26 @@ class LocalJobRunner:
             return
         job = repositories.jobs.get(dispatch.job_id)
         if job.status is JobStatus.CANCELLED:
-            repositories.dispatches.update(replace(dispatch, status="cancelled", version=dispatch.version + 1), expected_version=dispatch.version)
+            repositories.dispatches.update(
+                replace(dispatch, status="cancelled", version=dispatch.version + 1),
+                expected_version=dispatch.version,
+            )
+            return
+        if job.status is JobStatus.QUEUED:
+            running = transition(job, DispatchRequested())
+            if not self._update(repositories, running, "running"):
+                return
+        elif job.status is JobStatus.RUNNING:
+            running = job
+        else:
             return
         try:
-            running = transition(job, DispatchRequested())
-        except ValueError:
+            repositories.dispatches.update(
+                replace(dispatch, status="running", version=dispatch.version + 1),
+                expected_version=dispatch.version,
+            )
+        except StaleWriteError:
             return
-        if not self._update(repositories, running, "running"):
-            return
-        repositories.dispatches.update(replace(dispatch, status="running", version=dispatch.version + 1), expected_version=dispatch.version)
         try:
             asset = repositories.assets.get(running.spec.source_id)
             output = store.artifact_path(running.id)

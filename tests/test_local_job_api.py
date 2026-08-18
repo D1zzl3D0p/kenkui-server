@@ -214,3 +214,61 @@ def test_sse_honors_last_event_id_for_incremental_reconnect(tmp_path: Path) -> N
 
         assert "id: 1\n" not in stream.text
         assert "id: 2\n" in stream.text
+
+
+def test_restart_reclaims_running_dispatch_after_worker_death(tmp_path: Path) -> None:
+    from kenkui_server.jobs.models import Asset, Dispatch, Job, JobSpec, JobStatus, OutputSpec, Progress, SingleVoiceCasting, TtsSettings
+
+    root = tmp_path / "state"
+    first = create_app(data_dir=root, fixture_mode=True)
+    services = first.state.local_services
+    source = services.assets.put_source("asset-running", _epub())
+    services.repositories.assets.put(Asset("asset-running", str(source), "digest", "epub"))
+    job = Job(
+        "job-running",
+        JobSpec("asset-running", ("chapter-1",), SingleVoiceCasting("narrator"), TtsSettings(), OutputSpec("artifact.m4b")),
+        status=JobStatus.RUNNING,
+        version=1,
+        progress=Progress("running", 0, 0),
+    )
+    services.repositories.jobs.create(job)
+    services.repositories.dispatches.create(Dispatch("dispatch-running", job.id, "running", version=1))
+
+    restarted = create_app(data_dir=root, fixture_mode=True)
+    for _ in range(50):
+        snapshot = restarted.state.local_services.repositories.jobs.get(job.id)
+        if snapshot.status.value == "succeeded":
+            break
+        __import__("time").sleep(0.02)
+
+    assert snapshot.status.value == "succeeded"
+
+
+def test_cancel_reloads_authoritative_snapshot_after_a_stale_write(monkeypatch, tmp_path: Path) -> None:
+    from kenkui_server.jobs.models import Job, JobSpec, OutputSpec, SingleVoiceCasting, TtsSettings
+    from kenkui_server.storage.repositories import StaleWriteError
+
+    app = create_app(data_dir=tmp_path / "state", fixture_mode=True)
+    repositories = app.state.local_services.repositories
+    job = Job(
+        "job-stale-cancel",
+        JobSpec("source", ("chapter-1",), SingleVoiceCasting("narrator"), TtsSettings(), OutputSpec("artifact.m4b")),
+    )
+    repositories.jobs.create(job)
+    update = repositories.update_job_and_append_event
+    calls = 0
+
+    def stale_once(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise StaleWriteError()
+        return update(*args, **kwargs)
+
+    monkeypatch.setattr(repositories, "update_job_and_append_event", stale_once)
+    with TestClient(app) as client:
+        response = client.post(f"/v1/jobs/{job.id}/cancel")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+    assert calls == 2

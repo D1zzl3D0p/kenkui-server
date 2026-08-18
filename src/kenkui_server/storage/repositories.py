@@ -244,6 +244,16 @@ class DispatchRepository:
         ).fetchall()
         return tuple(Dispatch(*row) for row in rows)
 
+    def list_incomplete(self) -> tuple[Dispatch, ...]:
+        """Return pending or claimed work that must be reconciled after restart."""
+        rows = self._database.connection.execute(
+            """
+            SELECT id, job_id, status, version FROM dispatches
+            WHERE status IN ('pending', 'running') ORDER BY id
+            """
+        ).fetchall()
+        return tuple(Dispatch(*row) for row in rows)
+
     def update(self, dispatch: Dispatch, *, expected_version: int) -> None:
         if dispatch.version != expected_version + 1:
             raise ValueError("invalid_dispatch_version")
@@ -321,3 +331,47 @@ class Repositories:
                     (idempotency_key, job.id),
                 )
         return job
+
+    def update_job_and_append_event(
+        self, job: Job, *, expected_version: int, event_type: str
+    ) -> JobEvent:
+        """Commit one optimistic snapshot transition and its next event together."""
+        if job.version != expected_version + 1:
+            raise ValueError("invalid_job_version")
+        with self.database.transaction() as connection:
+            stored_spec = connection.execute(
+                "SELECT spec_json FROM jobs WHERE id = ?", (job.id,)
+            ).fetchone()
+            if stored_spec is not None and _decode_spec(stored_spec[0]) != job.spec:
+                raise ValueError("immutable_job_spec")
+            result = connection.execute(
+                """
+                UPDATE jobs
+                SET status = ?, version = ?, progress_json = ?
+                WHERE id = ? AND version = ?
+                """,
+                (
+                    job.status.value,
+                    job.version,
+                    _encode_progress(job.progress),
+                    job.id,
+                    expected_version,
+                ),
+            )
+            if result.rowcount != 1:
+                raise StaleWriteError()
+            sequence = int(
+                connection.execute(
+                    "SELECT COALESCE(MAX(sequence), 0) + 1 FROM job_events WHERE job_id = ?",
+                    (job.id,),
+                ).fetchone()[0]
+            )
+            event = JobEvent(job.id, sequence, event_type, job.progress)
+            connection.execute(
+                """
+                INSERT INTO job_events (job_id, sequence, event_type, progress_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                (event.job_id, event.sequence, event.event_type, _encode_progress(event.progress)),
+            )
+        return event
