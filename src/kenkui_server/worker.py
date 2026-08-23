@@ -107,7 +107,12 @@ class LocalJobRunner:
                     if current.status is JobStatus.CANCEL_REQUESTED:
                         cancellation.cancel()
                         return
-                    completed = getattr(event, "completed", current.progress.completed)
+                    # Not every event reports progress. CastResolved carries a
+                    # stage but no counts, and forwarding it as progress would
+                    # publish a duplicate frame at the current numbers.
+                    if not hasattr(event, "completed"):
+                        return
+                    completed = event.completed
                     total = getattr(event, "total", current.progress.total)
                     stage = getattr(event, "stage", current.progress.stage)
                     if completed < current.progress.completed or total < completed:
