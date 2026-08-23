@@ -41,7 +41,30 @@ class VoiceListResponse(_Model):
 
 
 class CastingRequest(_Model):
-    voice_id: str = Field(validation_alias="voiceId", serialization_alias="voiceId")
+    """Either a single narrator, or a character cast.
+
+    voiceId alone means single casting. Naming a model means character
+    casting, since attribution cannot run without one.
+    """
+
+    voice_id: str | None = Field(
+        None, validation_alias="voiceId", serialization_alias="voiceId"
+    )
+    narrator_voice_id: str | None = Field(
+        None,
+        validation_alias="narratorVoiceId",
+        serialization_alias="narratorVoiceId",
+    )
+    unknown_voice_id: str | None = Field(
+        None,
+        validation_alias="unknownVoiceId",
+        serialization_alias="unknownVoiceId",
+    )
+    cast: dict[str, str] = Field(default_factory=dict)
+    method: str = "gendered"
+    model_id: str | None = Field(
+        None, validation_alias="modelId", serialization_alias="modelId"
+    )
 
 
 class TtsRequest(_Model):

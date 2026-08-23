@@ -1,6 +1,7 @@
 """Explicit unmetered local admission declaration."""
 
 from fastapi import APIRouter, Request, Response
+
 from kenkui_server.billing.stripe import StripeWebhookHandler
 
 router = APIRouter(prefix="/v1/billing", tags=["billing"])

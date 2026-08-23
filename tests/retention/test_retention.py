@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 
 from kenkui_server.storage.retention import InMemoryRetentionRepository, RetentionWorker
 
-
 NOW = datetime(2026, 8, 18, tzinfo=UTC)
 
 

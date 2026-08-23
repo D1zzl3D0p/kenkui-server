@@ -3,7 +3,6 @@ from pathlib import Path
 
 from kenkui_server.app import create_app
 
-
 OPENAPI_ARTIFACT = Path(__file__).parents[1] / "openapi" / "v1.json"
 
 

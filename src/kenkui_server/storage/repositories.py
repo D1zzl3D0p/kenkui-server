@@ -10,6 +10,7 @@ from typing import Any
 from kenkui_server.jobs.models import (
     Artifact,
     Asset,
+    CharacterCasting,
     Dispatch,
     InspectedChapter,
     Inspection,
@@ -41,7 +42,7 @@ def _encode_spec(spec: JobSpec) -> str:
         {
             "source_id": spec.source_id,
             "chapters": spec.chapters,
-            "casting": {"voice_id": spec.casting.voice_id},
+            "casting": _casting_to_row(spec.casting),
             "tts": {"normalize_text": spec.tts.normalize_text},
             "output": {"path": spec.output.path},
         }
@@ -53,7 +54,7 @@ def _decode_spec(raw: str) -> JobSpec:
     return JobSpec(
         source_id=value["source_id"],
         chapters=tuple(value["chapters"]),
-        casting=SingleVoiceCasting(value["casting"]["voice_id"]),
+        casting=_casting_from_row(value["casting"]),
         tts=TtsSettings(value["tts"]["normalize_text"]),
         output=OutputSpec(value["output"]["path"]),
     )
@@ -464,3 +465,34 @@ class Repositories:
             if result.rowcount != 1:
                 raise StaleWriteError()
         return True
+
+
+def _casting_to_row(casting: object) -> dict[str, object]:
+    """Serialise either casting shape, tagged by kind."""
+    if isinstance(casting, CharacterCasting):
+        return {
+            "kind": "characters",
+            "narrator_voice_id": casting.narrator_voice_id,
+            "unknown_voice_id": casting.unknown_voice_id,
+            "cast": [list(pair) for pair in casting.cast],
+            "method": casting.method,
+            "model_id": casting.model_id,
+        }
+    return {"kind": "single", "voice_id": casting.voice_id}  # type: ignore[union-attr]
+
+
+def _casting_from_row(value: dict[str, object]) -> object:
+    """Rebuild casting from a row.
+
+    Rows written before character casting existed carry no kind, so a missing
+    one means single. Without that, every stored job would fail to load.
+    """
+    if value.get("kind") != "characters":
+        return SingleVoiceCasting(str(value["voice_id"]))
+    return CharacterCasting(
+        narrator_voice_id=str(value["narrator_voice_id"]),
+        unknown_voice_id=str(value["unknown_voice_id"]),
+        cast=tuple((str(a), str(b)) for a, b in value["cast"]),  # type: ignore[misc]
+        method=str(value["method"]),
+        model_id=str(value["model_id"]),
+    )

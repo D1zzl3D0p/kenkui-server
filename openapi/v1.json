@@ -105,7 +105,9 @@
           "casting": {
             "$ref": "#/components/schemas/CastingCapabilities",
             "default": {
-              "mode": "single"
+              "modes": [
+                "single"
+              ]
             }
           },
           "outputFormats": {
@@ -129,28 +131,83 @@
         "type": "object"
       },
       "CastingCapabilities": {
-        "description": "Casting modes supported by this server.",
+        "description": "Casting modes supported by this server.\n\nA list rather than one value: character casting is advertised only where a\ndeployment has configured an LLM allowlist, so a browser can tell the two\napart without trying and failing.",
         "properties": {
-          "mode": {
-            "const": "single",
-            "default": "single",
-            "title": "Mode",
-            "type": "string"
+          "modes": {
+            "items": {
+              "enum": [
+                "single",
+                "characters"
+              ],
+              "type": "string"
+            },
+            "title": "Modes",
+            "type": "array"
           }
         },
         "title": "CastingCapabilities",
         "type": "object"
       },
       "CastingRequest": {
+        "description": "Either a single narrator, or a character cast.\n\nvoiceId alone means single casting. Naming a model means character\ncasting, since attribution cannot run without one.",
         "properties": {
-          "voiceId": {
-            "title": "Voiceid",
+          "cast": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Cast",
+            "type": "object"
+          },
+          "method": {
+            "default": "gendered",
+            "title": "Method",
             "type": "string"
+          },
+          "modelId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modelid"
+          },
+          "narratorVoiceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Narratorvoiceid"
+          },
+          "unknownVoiceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unknownvoiceid"
+          },
+          "voiceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voiceid"
           }
         },
-        "required": [
-          "voiceId"
-        ],
         "title": "CastingRequest",
         "type": "object"
       },
@@ -636,7 +693,7 @@
     },
     "/v1/jobs": {
       "get": {
-        "description": "Return all authoritative durable snapshots owned by this local server.",
+        "description": "Return local jobs, or only the caller's owned jobs in hosted mode.",
         "operationId": "list_jobs_v1_jobs_get",
         "responses": {
           "200": {
@@ -656,7 +713,7 @@
         ]
       },
       "post": {
-        "description": "Admit a locally unmetered job and commit its dispatch before starting work.",
+        "description": "Admit local work or hosted credit-backed work before starting its runner.",
         "operationId": "create_job_v1_jobs_post",
         "parameters": [
           {

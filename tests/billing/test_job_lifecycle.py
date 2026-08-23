@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 
 from kenkui_server.billing.models import AuthorizationStatus, InMemoryBillingRepository
-from kenkui_server.billing.service import BillingService, CreditAwareJobAdmission, JobBillingFinalizer
+from kenkui_server.billing.service import (
+    BillingService,
+    CreditAwareJobAdmission,
+    JobBillingFinalizer,
+)
 from kenkui_server.jobs.models import JobStatus
 
 

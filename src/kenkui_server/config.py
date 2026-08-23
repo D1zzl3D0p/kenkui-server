@@ -39,9 +39,16 @@ class BillingCapabilities(BaseModel):
 
 
 class CastingCapabilities(BaseModel):
-    """Casting modes supported by this server."""
+    """Casting modes supported by this server.
 
-    mode: Literal["single"] = "single"
+    A list rather than one value: character casting is advertised only where a
+    deployment has configured an LLM allowlist, so a browser can tell the two
+    apart without trying and failing.
+    """
+
+    modes: list[Literal["single", "characters"]] = Field(
+        default_factory=lambda: ["single"]
+    )
 
 
 class Capabilities(BaseModel):
@@ -61,6 +68,14 @@ class Capabilities(BaseModel):
     casting: CastingCapabilities = CastingCapabilities()
 
 
-def local_capabilities() -> Capabilities:
-    """Return the immutable capability declaration for local mode."""
-    return Capabilities()
+def local_capabilities(model_allowlist: tuple[str, ...] = ()) -> Capabilities:
+    """Return the capability declaration for local mode.
+
+    Character casting is advertised only when the deployment has named the
+    models it will accept. Offering it without one would let a browser build a
+    job the server must then refuse.
+    """
+    modes: list[Literal["single", "characters"]] = ["single"]
+    if model_allowlist:
+        modes.append("characters")
+    return Capabilities(casting=CastingCapabilities(modes=modes))

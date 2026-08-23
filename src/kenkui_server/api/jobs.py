@@ -9,6 +9,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 
 from kenkui_server.api.schemas import (
+    CastingRequest,
     EventResponse,
     JobListResponse,
     JobRequest,
@@ -16,7 +17,14 @@ from kenkui_server.api.schemas import (
     PreflightResponse,
     ProgressResponse,
 )
-from kenkui_server.jobs.models import Job, JobSpec, OutputSpec, SingleVoiceCasting, TtsSettings
+from kenkui_server.jobs.models import (
+    CharacterCasting,
+    Job,
+    JobSpec,
+    OutputSpec,
+    SingleVoiceCasting,
+    TtsSettings,
+)
 
 router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
 
@@ -43,14 +51,41 @@ def _authorize_job(request: Request, job_id: str) -> None:
         raise HTTPException(status_code=403, detail="resource is not owned by this user")
 
 
-def _spec(request: JobRequest) -> JobSpec:
+def _casting(
+    request: CastingRequest, allowed_models: tuple[str, ...]
+) -> SingleVoiceCasting | CharacterCasting:
+    """Choose a casting shape from the request, refusing an unlisted model.
+
+    Naming a model means character casting: attribution cannot run without
+    one. The allowlist is checked here rather than at execution so a job is
+    never admitted that the worker would have to abandon.
+    """
+    if request.model_id is None:
+        if request.voice_id is None:
+            raise HTTPException(status_code=422, detail="a voice is required")
+        return SingleVoiceCasting(request.voice_id)
+    if request.model_id not in allowed_models:
+        raise HTTPException(status_code=422, detail="model_not_allowed")
+    narrator = request.narrator_voice_id or request.voice_id
+    if narrator is None:
+        raise HTTPException(status_code=422, detail="a narrator voice is required")
+    return CharacterCasting(
+        narrator_voice_id=narrator,
+        unknown_voice_id=request.unknown_voice_id or "",
+        cast=tuple(request.cast.items()),
+        method=request.method,
+        model_id=request.model_id,
+    )
+
+
+def _spec(request: JobRequest, allowed_models: tuple[str, ...] = ()) -> JobSpec:
     if request.output.format != "m4b":
         raise HTTPException(status_code=422, detail="only m4b output is supported")
     try:
         return JobSpec(
             source_id=request.source_id,
             chapters=tuple(request.chapters),
-            casting=SingleVoiceCasting(request.casting.voice_id),
+            casting=_casting(request.casting, allowed_models),
             tts=TtsSettings(request.tts.normalize_text),
             output=OutputSpec("artifact.m4b"),
         )

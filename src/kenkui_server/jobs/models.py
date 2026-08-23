@@ -24,6 +24,50 @@ class SingleVoiceCasting:
 
 
 @dataclass(frozen=True, slots=True)
+class CharacterCasting:
+    """Character-voice casting intent for one job.
+
+    unknown_voice_id falls back to the narrator, matching the library: a line
+    nobody could place sounds like narration rather than vanishing.
+    """
+
+    narrator_voice_id: str
+    unknown_voice_id: str
+    cast: tuple[tuple[str, str], ...]
+    method: str
+    model_id: str
+
+    def __post_init__(self) -> None:
+        narrator = _required(self.narrator_voice_id, "invalid_voice_id")
+        object.__setattr__(self, "narrator_voice_id", narrator)
+        object.__setattr__(
+            self,
+            "unknown_voice_id",
+            self.unknown_voice_id.strip() or narrator,
+        )
+        object.__setattr__(self, "model_id", _required(self.model_id, "invalid_model_id"))
+        object.__setattr__(self, "method", _required(self.method, "invalid_method"))
+        # Sorted so two requests naming the same cast in different orders are
+        # one job spec, and therefore one idempotency key.
+        object.__setattr__(
+            self,
+            "cast",
+            tuple(
+                sorted(
+                    (
+                        _required(character, "invalid_character_id"),
+                        _required(voice, "invalid_voice_id"),
+                    )
+                    for character, voice in self.cast
+                )
+            ),
+        )
+
+
+Casting = SingleVoiceCasting | CharacterCasting
+
+
+@dataclass(frozen=True, slots=True)
 class TtsSettings:
     """Deterministic, provider-independent synthesis intent."""
 
@@ -53,7 +97,7 @@ class JobSpec:
 
     source_id: str
     chapters: tuple[str, ...]
-    casting: SingleVoiceCasting
+    casting: Casting
     tts: TtsSettings
     output: OutputSpec
 

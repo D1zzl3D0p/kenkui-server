@@ -4,7 +4,11 @@ from uuid import UUID
 
 import pytest
 
-from kenkui_server.auth.workos import FakeWorkOSClient, InMemoryIdentityRepository, WorkOSAuthBackend
+from kenkui_server.auth.workos import (
+    FakeWorkOSClient,
+    InMemoryIdentityRepository,
+    WorkOSAuthBackend,
+)
 
 
 def test_workos_identity_maps_stably_to_internal_uuid() -> None:

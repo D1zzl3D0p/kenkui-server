@@ -6,7 +6,7 @@ import os
 
 import kenkui as kk
 
-from kenkui_server.jobs.models import JobSpec
+from kenkui_server.jobs.models import JobSpec, SingleVoiceCasting
 
 
 def pipeline_from_job(spec: JobSpec, source: str | os.PathLike[str]) -> kk.Pipeline:
@@ -14,4 +14,17 @@ def pipeline_from_job(spec: JobSpec, source: str | os.PathLike[str]) -> kk.Pipel
     pipeline = kk.book(source).select_chapters(*spec.chapters)
     if spec.tts.normalize_text:
         pipeline = pipeline.normalize_text()
-    return pipeline.assign_voice(spec.casting.voice_id).tts()
+    casting = spec.casting
+    if isinstance(casting, SingleVoiceCasting):
+        return pipeline.assign_voice(casting.voice_id).tts()
+    return (
+        pipeline.infer_characters(model=casting.model_id)
+        .attribute_quotes(model=casting.model_id)
+        .assign_voices(
+            narrator=casting.narrator_voice_id,
+            unknown=casting.unknown_voice_id,
+            cast=dict(casting.cast),
+            method=casting.method,
+        )
+        .tts()
+    )

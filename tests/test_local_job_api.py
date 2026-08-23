@@ -43,7 +43,15 @@ def test_preflight_then_idempotent_job_creation(tmp_path: Path) -> None:
 
 
 def test_list_jobs_returns_authoritative_snapshots(tmp_path: Path) -> None:
-    from kenkui_server.jobs.models import Job, JobSpec, JobStatus, OutputSpec, Progress, SingleVoiceCasting, TtsSettings
+    from kenkui_server.jobs.models import (
+        Job,
+        JobSpec,
+        JobStatus,
+        OutputSpec,
+        Progress,
+        SingleVoiceCasting,
+        TtsSettings,
+    )
 
     app = create_app(data_dir=tmp_path / "state", fixture_mode=True)
     repositories = app.state.local_services.repositories
@@ -76,7 +84,15 @@ def test_list_jobs_returns_authoritative_snapshots(tmp_path: Path) -> None:
 
 
 def test_cancelling_running_job_returns_a_durable_cancellation_request(tmp_path: Path) -> None:
-    from kenkui_server.jobs.models import Job, JobSpec, JobStatus, OutputSpec, Progress, SingleVoiceCasting, TtsSettings
+    from kenkui_server.jobs.models import (
+        Job,
+        JobSpec,
+        JobStatus,
+        OutputSpec,
+        Progress,
+        SingleVoiceCasting,
+        TtsSettings,
+    )
 
     app = create_app(data_dir=tmp_path / "state", fixture_mode=True)
     repositories = app.state.local_services.repositories
@@ -231,7 +247,15 @@ def test_sse_replays_monotonic_durable_history(tmp_path: Path) -> None:
 
 
 def test_restart_recovers_unclaimed_dispatch_from_durable_state(tmp_path: Path) -> None:
-    from kenkui_server.jobs.models import Asset, Dispatch, Job, JobSpec, OutputSpec, SingleVoiceCasting, TtsSettings
+    from kenkui_server.jobs.models import (
+        Asset,
+        Dispatch,
+        Job,
+        JobSpec,
+        OutputSpec,
+        SingleVoiceCasting,
+        TtsSettings,
+    )
 
     root = tmp_path / "state"
     first = create_app(data_dir=root, fixture_mode=True)
@@ -264,7 +288,15 @@ def test_running_worker_polls_durable_cancellation(monkeypatch, tmp_path: Path) 
     import threading
     import time
 
-    from kenkui_server.jobs.models import Asset, Dispatch, Job, JobSpec, OutputSpec, SingleVoiceCasting, TtsSettings
+    from kenkui_server.jobs.models import (
+        Asset,
+        Dispatch,
+        Job,
+        JobSpec,
+        OutputSpec,
+        SingleVoiceCasting,
+        TtsSettings,
+    )
     from kenkui_server.jobs.transitions import CancelRequested, transition
     from kenkui_server.storage.assets import AssetStore
     from kenkui_server.storage.database import Database
@@ -498,7 +530,17 @@ def test_sse_honors_last_event_id_for_incremental_reconnect(tmp_path: Path) -> N
 
 
 def test_restart_reclaims_running_dispatch_after_worker_death(tmp_path: Path) -> None:
-    from kenkui_server.jobs.models import Asset, Dispatch, Job, JobSpec, JobStatus, OutputSpec, Progress, SingleVoiceCasting, TtsSettings
+    from kenkui_server.jobs.models import (
+        Asset,
+        Dispatch,
+        Job,
+        JobSpec,
+        JobStatus,
+        OutputSpec,
+        Progress,
+        SingleVoiceCasting,
+        TtsSettings,
+    )
 
     root = tmp_path / "state"
     first = create_app(data_dir=root, fixture_mode=True)
