@@ -17,7 +17,7 @@ Beta uses granted allowances; payments and desktop packaging remain separate gat
 | Modal secret | kenkui-staging-worker | kenkui-production-worker |
 | Modal volume | kenkui-staging-models | kenkui-production-models |
 | R2 | separate staging bucket/keys | separate production bucket/keys |
-| WorkOS | staging environment | production environment |
+| WorkOS | staging environment | staging environment during private beta |
 
 Render API and database default to Virginia, 1 CPU / 2 GB each, with 10 GB
 database storage. These are initial sizing choices, not benchmark results.
@@ -92,7 +92,7 @@ uv run --extra hosted modal secret create kenkui-staging-worker \
 KENKUI_DEPLOYMENT=staging \
   uv run --extra hosted modal deploy deploy/modal_app.py --env staging
 KENKUI_DEPLOYMENT=staging \
-  uv run --extra hosted modal run deploy/modal_app.py::provision --env staging
+  uv run --extra hosted modal run --env staging deploy/modal_app.py::provision
 ```
 
 Repeat with production names and environment. Do not provision while jobs run.
@@ -101,8 +101,10 @@ Recovery and retention are deployed on their existing minute/hour schedules.
 
 ## 5. WorkOS, DNS, and website
 
-Register each API's `/v1/auth/callback` URL and its matching web logout return URL
-in the corresponding WorkOS environment. Enable Google, GitHub, and Apple. Use
+During private beta, both deployments use the existing WorkOS staging application
+`Kenkui private beta` (client `client_01M0Y37EQMGD270AW5W7NZC1E0`). Register
+each API's `/v1/auth/callback` URL and matching web logout return URL on that
+application. WorkOS production activation is a later promotion task. Enable Google, GitHub, and Apple. Use
 provider callback URLs supplied by WorkOS when configuring those providers.
 Production provider credentials must belong to Kenkui. Apple users must share
 their allowlisted email; a private relay address will not match it.
