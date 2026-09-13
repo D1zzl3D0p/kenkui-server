@@ -65,3 +65,36 @@ def test_hosted_job_route_authenticates_session_and_enforces_resource_owner(tmp_
     assert forbidden.status_code == 403
     assert backend.tokens == ["session-2"]
     assert backend.authorizations == [(stranger, owner)]
+
+
+def test_browser_receives_auth_errors_and_preflight_without_a_session(tmp_path: Path) -> None:
+    owner, stranger = UUID(int=1), UUID(int=2)
+    origin = "https://app.kenkui.fm"
+    app = create_app(
+        data_dir=tmp_path,
+        auth_backend=RecordingAuthBackend(Identity(stranger, "stranger")),
+        job_owner_resolver=lambda _: owner,
+        allowed_origins=[origin],
+    )
+    app.state.local_services.repositories.jobs.create(_job())
+    with TestClient(app) as client:
+        missing = client.get("/v1/jobs/job-1", headers={"Origin": origin})
+        forbidden = client.get(
+            "/v1/jobs/job-1",
+            headers={
+                "Origin": origin,
+                "Authorization": "Bearer stranger",
+            },
+        )
+        preflight = client.options(
+            "/v1/jobs",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,idempotency-key",
+            },
+        )
+    assert [missing.status_code, forbidden.status_code, preflight.status_code] == [401, 403, 200]
+    for response in (missing, forbidden, preflight):
+        assert response.headers["access-control-allow-origin"] == origin
+        assert response.headers["access-control-allow-credentials"] == "true"

@@ -173,16 +173,6 @@ def create_app(
         docs_url="/v1/docs",
         redoc_url=None,
     )
-    if allowed_origins:
-        from fastapi.middleware.cors import CORSMiddleware
-
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=allowed_origins,
-            allow_credentials=True,
-            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-            allow_headers=["Content-Type", "Idempotency-Key", "Authorization"],
-        )
     if hosted_services is None:
         root = (
             Path(data_dir)
@@ -434,4 +424,16 @@ def create_app(
                 return FileResponse(candidate)
             return FileResponse(index)
 
+    # CORS must wrap authentication, including its early 401/403 responses and
+    # unauthenticated browser preflight requests.
+    if allowed_origins:
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allowed_origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+            allow_headers=["Content-Type", "Idempotency-Key", "Authorization"],
+        )
     return app
