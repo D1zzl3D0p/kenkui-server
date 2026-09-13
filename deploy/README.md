@@ -49,7 +49,9 @@ Use a dedicated PostgreSQL database, private R2 bucket and WorkOS environment.
 Do not point a first migration at an existing unrelated database. Use
 `deploy/beta.env.example` as the configuration inventory; store actual values in
 provider secrets or an ignored file, never Git. Generate `KENKUI_SESSION_SECRET`
-with at least 32 random characters. Keep `R2_KEY_SALT` stable for a bucket.
+as a Fernet key (32 random bytes encoded as URL-safe base64), using
+`cryptography.fernet.Fernet.generate_key()`. The WorkOS Python SDK requires this
+format; Render-generated hexadecimal secrets cannot seal its session cookies. Keep `R2_KEY_SALT` stable for a bucket.
 
 Configure HTTPS web/API origins on the same site, for example
 `app.kenkui.fm` and `api.kenkui.fm`, because browser sessions use SameSite=Lax.

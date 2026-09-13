@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from kenkui_server.app import create_app
-from kenkui_server.auth.browser import BrowserAuthBackend, BrowserSessionConfig, SESSION_COOKIE
+from kenkui_server.auth.browser import SESSION_COOKIE, BrowserAuthBackend, BrowserSessionConfig
 from kenkui_server.auth.workos import InMemoryIdentityRepository
 
 
@@ -23,7 +23,7 @@ def backend():
     config = BrowserSessionConfig(
         "https://api.example.com/v1/auth/callback",
         "https://app.example.com",
-        "x" * 32,
+        "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=",
         frozenset({"invited@example.com"}),
     )
     return BrowserAuthBackend(
@@ -79,3 +79,20 @@ def test_uninvited_and_unverified_users_cannot_use_sessions():
         )
         with pytest.raises(PermissionError):
             auth.authenticate("sealed")
+
+
+@pytest.mark.parametrize("password", ["x" * 32, "a" * 64, "!" * 44, "é" * 44])
+def test_invalid_session_key_is_rejected_at_startup(password):
+    with pytest.raises(ValueError, match="Fernet key"):
+        BrowserSessionConfig(
+            "https://api.example.com/v1/auth/callback",
+            "https://app.example.com",
+            password,
+            frozenset({"invited@example.com"}),
+        )
+
+
+def test_configured_key_can_seal_a_real_workos_session():
+    session = pytest.importorskip("workos.session").Session
+    auth = backend()
+    assert session.seal_data({"user": {"id": "test"}}, auth.config.cookie_password)

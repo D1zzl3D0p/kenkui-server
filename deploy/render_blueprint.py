@@ -38,7 +38,7 @@ def blueprint(environment, image, worker_cidrs=()):
             "fromDatabase": {"name": name + "-db", "property": "connectionString"},
         }
     ]
-    env += [{"key": "KENKUI_SESSION_SECRET", "generateValue": True}]
+    env += [{"key": "KENKUI_SESSION_SECRET", "sync": False}]
     env += [
         {"key": key, "sync": False}
         for key in (

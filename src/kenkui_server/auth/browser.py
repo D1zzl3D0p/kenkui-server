@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import secrets
 from dataclasses import dataclass, field
@@ -29,8 +30,14 @@ class BrowserSessionConfig:
     invited_emails: frozenset[str]
 
     def __post_init__(self) -> None:
-        if len(self.cookie_password) < 32:
-            raise ValueError("session cookie password must contain at least 32 characters")
+        try:
+            decoded = base64.b64decode(self.cookie_password, altchars=b"-_", validate=True)
+        except (ValueError, binascii.Error):
+            decoded = b""
+        if len(decoded) != 32:
+            raise ValueError(
+                "session cookie password must be a Fernet key: 32 URL-safe base64-encoded bytes"
+            )
         for url in (self.redirect_uri, self.web_origin):
             if urlsplit(url).scheme != "https" or not urlsplit(url).netloc:
                 raise ValueError("hosted browser sessions require HTTPS origins")
