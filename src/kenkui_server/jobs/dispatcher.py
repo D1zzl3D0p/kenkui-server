@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+import hashlib
 from typing import Any
 from uuid import UUID, uuid4
 
 from kenkui_server.billing.pricing import credits_for_characters
 from kenkui_server.compute.base import ProcessRunner
 from kenkui_server.jobs.models import Dispatch, Job, JobSpec
-from kenkui_server.storage.repositories import Repositories, StaleWriteError
+from kenkui_server.storage.repositories import Repositories
 
 
 class Dispatcher:
@@ -36,14 +36,6 @@ class Dispatcher:
             job = self._repositories.jobs.get(dispatch.job_id)
             if job.status.is_terminal:
                 continue
-            if dispatch.status == "running":
-                try:
-                    self._repositories.dispatches.update(
-                        replace(dispatch, status="pending", version=dispatch.version + 1),
-                        expected_version=dispatch.version,
-                    )
-                except StaleWriteError:
-                    continue
             self._runner.start(dispatch.id)
 
 
@@ -74,7 +66,9 @@ class HostedDispatcher:
             account_id=account_id,
             owner_id=str(owner_id),
             credits=credits,
-            idempotency_key=idempotency_key,
+            idempotency_key=hashlib.sha256(f"{owner_id}:{idempotency_key}".encode()).hexdigest()
+            if idempotency_key is not None
+            else None,
         )
         if admitted.id == job.id:
             self._runner.start(dispatch.id)
@@ -86,12 +80,4 @@ class HostedDispatcher:
             job = self._repositories.jobs.get(dispatch.job_id)
             if job.status.is_terminal:
                 continue
-            if dispatch.status == "running":
-                try:
-                    self._repositories.dispatches.update(
-                        replace(dispatch, status="pending", version=dispatch.version + 1),
-                        expected_version=dispatch.version,
-                    )
-                except StaleWriteError:
-                    continue
             self._runner.start(dispatch.id)

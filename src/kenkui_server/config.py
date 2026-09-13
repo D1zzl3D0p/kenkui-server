@@ -12,7 +12,10 @@ class ServerConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8000
     web_build_path: Path | None = None
-
+    data_dir: Path | None = None
+    model_allowlist: tuple[str, ...] = ()
+    max_jobs: int = Field(2, ge=1)
+    render_workers: int = Field(1, ge=1)
 
 
 class HostedConfig(BaseModel):
@@ -26,16 +29,17 @@ class HostedConfig(BaseModel):
     workos_api_key: SecretStr
     stripe_webhook_secret: SecretStr
 
+
 class AuthCapabilities(BaseModel):
     """Authentication modes supported by this server."""
 
-    mode: Literal["none"] = "none"
+    mode: Literal["none", "session", "bearer"] = "none"
 
 
 class BillingCapabilities(BaseModel):
     """Billing modes supported by this server."""
 
-    mode: Literal["unmetered"] = "unmetered"
+    mode: Literal["unmetered", "credits"] = "unmetered"
 
 
 class CastingCapabilities(BaseModel):
@@ -46,9 +50,7 @@ class CastingCapabilities(BaseModel):
     apart without trying and failing.
     """
 
-    modes: list[Literal["single", "characters"]] = Field(
-        default_factory=lambda: ["single"]
-    )
+    modes: list[Literal["single", "characters"]] = Field(default=["single"])
 
 
 class Capabilities(BaseModel):
@@ -60,12 +62,13 @@ class Capabilities(BaseModel):
     auth: AuthCapabilities = AuthCapabilities()
     billing: BillingCapabilities = BillingCapabilities()
     source_formats: list[Literal["epub"]] = Field(
-        default_factory=lambda: ["epub"], serialization_alias="sourceFormats"
+        default=["epub"], serialization_alias="sourceFormats"
     )
     output_formats: list[Literal["m4b"]] = Field(
-        default_factory=lambda: ["m4b"], serialization_alias="outputFormats"
+        default=["m4b"], serialization_alias="outputFormats"
     )
     casting: CastingCapabilities = CastingCapabilities()
+    max_upload_bytes: int = Field(50 * 1024 * 1024, serialization_alias="maxUploadBytes")
 
 
 def local_capabilities(model_allowlist: tuple[str, ...] = ()) -> Capabilities:

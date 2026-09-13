@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from dataclasses import asdict
 from typing import Any
+from uuid import uuid4
 
 from kenkui_server.jobs.models import (
     Artifact,
     Asset,
+    Casting,
     CharacterCasting,
     Dispatch,
     InspectedChapter,
@@ -44,7 +47,7 @@ def _encode_spec(spec: JobSpec) -> str:
             "chapters": spec.chapters,
             "casting": _casting_to_row(spec.casting),
             "tts": {"normalize_text": spec.tts.normalize_text},
-            "output": {"path": spec.output.path},
+            "output": asdict(spec.output),
         }
     )
 
@@ -56,7 +59,7 @@ def _decode_spec(raw: str) -> JobSpec:
         chapters=tuple(value["chapters"]),
         casting=_casting_from_row(value["casting"]),
         tts=TtsSettings(value["tts"]["normalize_text"]),
-        output=OutputSpec(value["output"]["path"]),
+        output=OutputSpec(**value["output"]),
     )
 
 
@@ -93,7 +96,7 @@ class AssetRepository:
             )
 
     def get(self, asset_id: str) -> Asset:
-        row = self._database.connection.execute(
+        row = self._database.query(
             "SELECT id, path, sha256, format FROM assets WHERE id = ?", (asset_id,)
         ).fetchone()
         if row is None:
@@ -111,12 +114,15 @@ class InspectionRepository:
         chapters = _encode([asdict(chapter) for chapter in inspection.chapters])
         with self._database.transaction() as connection:
             connection.execute(
-                "INSERT INTO inspections (source_id, title, author, chapters_json) VALUES (?, ?, ?, ?)",
+                (
+                    "INSERT INTO inspections (source_id, title, author, chapters_json) VALUES (?, "
+                    "?, ?, ?)"
+                ),
                 (inspection.source_id, inspection.title, inspection.author, chapters),
             )
 
     def get(self, source_id: str) -> Inspection:
-        row = self._database.connection.execute(
+        row = self._database.query(
             "SELECT source_id, title, author, chapters_json FROM inspections WHERE source_id = ?",
             (source_id,),
         ).fetchone()
@@ -135,19 +141,28 @@ class JobRepository:
     def create(self, job: Job) -> None:
         with self._database.transaction() as connection:
             connection.execute(
-                "INSERT INTO jobs (id, spec_json, status, version, progress_json) VALUES (?, ?, ?, ?, ?)",
-                (job.id, _encode_spec(job.spec), job.status.value, job.version, _encode_progress(job.progress)),
+                (
+                    "INSERT INTO jobs (id, spec_json, status, version, progress_json) VALUES (?, "
+                    "?, ?, ?, ?)"
+                ),
+                (
+                    job.id,
+                    _encode_spec(job.spec),
+                    job.status.value,
+                    job.version,
+                    _encode_progress(job.progress),
+                ),
             )
 
     def list(self) -> tuple[Job, ...]:
         """Return all authoritative snapshots in a deterministic order."""
-        rows = self._database.connection.execute(
+        rows = self._database.query(
             "SELECT id, spec_json, status, version, progress_json FROM jobs ORDER BY id"
         ).fetchall()
         return tuple(_job_from_row(row) for row in rows)
 
     def get(self, job_id: str) -> Job:
-        row = self._database.connection.execute(
+        row = self._database.query(
             "SELECT id, spec_json, status, version, progress_json FROM jobs WHERE id = ?", (job_id,)
         ).fetchone()
         if row is None:
@@ -196,7 +211,12 @@ class JobEventRepository:
                     INSERT INTO job_events (job_id, sequence, event_type, progress_json)
                     VALUES (?, ?, ?, ?)
                     """,
-                    (event.job_id, event.sequence, event.event_type, _encode_progress(event.progress)),
+                    (
+                        event.job_id,
+                        event.sequence,
+                        event.event_type,
+                        _encode_progress(event.progress),
+                    ),
                 )
         except sqlite3.IntegrityError as error:
             if "job_events.job_id, job_events.sequence" in str(error):
@@ -204,7 +224,7 @@ class JobEventRepository:
             raise
 
     def list_for_job(self, job_id: str) -> tuple[JobEvent, ...]:
-        rows = self._database.connection.execute(
+        rows = self._database.query(
             """
             SELECT job_id, sequence, event_type, progress_json
             FROM job_events WHERE job_id = ? ORDER BY sequence
@@ -228,7 +248,7 @@ class DispatchRepository:
             )
 
     def get(self, dispatch_id: str) -> Dispatch:
-        row = self._database.connection.execute(
+        row = self._database.query(
             "SELECT id, job_id, status, version FROM dispatches WHERE id = ?", (dispatch_id,)
         ).fetchone()
         if row is None:
@@ -237,7 +257,7 @@ class DispatchRepository:
 
     def get_for_job(self, job_id: str) -> Dispatch:
         """Return the one durable dispatch associated with a local job."""
-        row = self._database.connection.execute(
+        row = self._database.query(
             "SELECT id, job_id, status, version FROM dispatches WHERE job_id = ?",
             (job_id,),
         ).fetchone()
@@ -247,14 +267,15 @@ class DispatchRepository:
 
     def list_pending(self) -> tuple[Dispatch, ...]:
         """Return unclaimed durable work for restart recovery."""
-        rows = self._database.connection.execute(
-            "SELECT id, job_id, status, version FROM dispatches WHERE status = 'pending' ORDER BY id"
+        rows = self._database.query(
+            "SELECT id, job_id, status, version FROM dispatches WHERE status = "
+            "'pending' ORDER BY id"
         ).fetchall()
         return tuple(Dispatch(*row) for row in rows)
 
     def list_incomplete(self) -> tuple[Dispatch, ...]:
         """Return pending or claimed work that must be reconciled after restart."""
-        rows = self._database.connection.execute(
+        rows = self._database.query(
             """
             SELECT id, job_id, status, version FROM dispatches
             WHERE status IN ('pending', 'running') ORDER BY id
@@ -290,7 +311,7 @@ class ArtifactRepository:
             )
 
     def list_for_job(self, job_id: str) -> tuple[Artifact, ...]:
-        rows = self._database.connection.execute(
+        rows = self._database.query(
             "SELECT id, job_id, path, format FROM artifacts WHERE job_id = ? ORDER BY id", (job_id,)
         ).fetchall()
         return tuple(Artifact(*row) for row in rows)
@@ -319,15 +340,30 @@ class Repositories:
                 ).fetchone()
                 if existing is not None:
                     row = connection.execute(
-                        "SELECT id, spec_json, status, version, progress_json FROM jobs WHERE id = ?",
+                        (
+                            "SELECT id, spec_json, status, version, progress_json FROM jobs "
+                            "WHERE id = ?"
+                        ),
                         (existing[0],),
                     ).fetchone()
                     if row is None:
                         raise RuntimeError("orphaned_idempotency_key")
-                    return _job_from_row(row)
+                    existing_job = _job_from_row(row)
+                    if existing_job.spec != job.spec:
+                        raise ValueError("idempotency_conflict")
+                    return existing_job
             connection.execute(
-                "INSERT INTO jobs (id, spec_json, status, version, progress_json) VALUES (?, ?, ?, ?, ?)",
-                (job.id, _encode_spec(job.spec), job.status.value, job.version, _encode_progress(job.progress)),
+                (
+                    "INSERT INTO jobs (id, spec_json, status, version, progress_json) VALUES (?, "
+                    "?, ?, ?, ?)"
+                ),
+                (
+                    job.id,
+                    _encode_spec(job.spec),
+                    job.status.value,
+                    job.version,
+                    _encode_progress(job.progress),
+                ),
             )
             connection.execute(
                 "INSERT INTO dispatches (id, job_id, status, version) VALUES (?, ?, ?, ?)",
@@ -341,12 +377,20 @@ class Repositories:
         return job
 
     def update_job_and_append_event(
-        self, job: Job, *, expected_version: int, event_type: str
+        self,
+        job: Job,
+        *,
+        expected_version: int,
+        event_type: str,
+        artifact: Artifact | None = None,
+        lease: tuple[str, str] | None = None,
+        failure: tuple[str, str] | None = None,
     ) -> JobEvent:
         """Commit one optimistic snapshot transition and its next event together."""
         if job.version != expected_version + 1:
             raise ValueError("invalid_job_version")
         with self.database.transaction() as connection:
+            self.check_lease(connection, lease)
             stored_spec = connection.execute(
                 "SELECT spec_json FROM jobs WHERE id = ?", (job.id,)
             ).fetchone()
@@ -382,6 +426,18 @@ class Repositories:
                 """,
                 (event.job_id, event.sequence, event.event_type, _encode_progress(event.progress)),
             )
+            if failure is not None:
+                connection.execute(
+                    "INSERT INTO job_failures (job_id, code, message) VALUES (?, ?, ?)",
+                    (job.id, *failure),
+                )
+            if artifact is not None:
+                if job.status is not JobStatus.SUCCEEDED or artifact.job_id != job.id:
+                    raise ValueError("invalid_completion_artifact")
+                connection.execute(
+                    "INSERT INTO artifacts (id, job_id, path, format) VALUES (?, ?, ?, ?)",
+                    (artifact.id, artifact.job_id, artifact.path, artifact.format),
+                )
         return event
 
     def request_cancellation(self, job_id: str) -> Job:
@@ -446,9 +502,12 @@ class Repositories:
             )
         return cancelled
 
-    def finish_dispatch_if_not_cancellation_requested(self, dispatch: Dispatch) -> bool:
+    def finish_dispatch_if_not_cancellation_requested(
+        self, dispatch: Dispatch, *, lease: tuple[str, str] | None = None
+    ) -> bool:
         """Finish a dispatch only when its job was not durably cancelled first."""
         with self.database.transaction() as connection:
+            self.check_lease(connection, lease)
             status = connection.execute(
                 "SELECT status FROM jobs WHERE id = ?", (dispatch.job_id,)
             ).fetchone()
@@ -466,8 +525,110 @@ class Repositories:
                 raise StaleWriteError()
         return True
 
+    @staticmethod
+    def check_lease(connection: sqlite3.Connection, lease: tuple[str, str] | None) -> None:
+        if lease is None:
+            return
+        row = connection.execute(
+            "SELECT token, expires_at FROM execution_leases WHERE dispatch_id = ?", (lease[0],)
+        ).fetchone()
+        if row is None or row[0] != lease[1] or row[1] <= time.time():
+            raise StaleWriteError()
 
-def _casting_to_row(casting: object) -> dict[str, object]:
+    def claim_execution(
+        self, dispatch_id: str, *, limit: int, ttl: float = 30, max_attempts: int = 3
+    ) -> str | None:
+        """Claim bounded work across API processes; only expired attempts may be replaced."""
+        now = time.time()
+        with self.database.transaction() as connection:
+            row = connection.execute(
+                (
+                    "SELECT d.job_id, j.status FROM dispatches d JOIN jobs j ON j.id=d.job_id "
+                    "WHERE d.id=?"
+                ),
+                (dispatch_id,),
+            ).fetchone()
+            if row is None or row[1] in {"succeeded", "failed", "cancelled"}:
+                return None
+            previous = connection.execute(
+                "SELECT expires_at, attempts FROM execution_leases WHERE dispatch_id=?",
+                (dispatch_id,),
+            ).fetchone()
+            if previous is not None and previous[0] > now:
+                return None
+            active = connection.execute(
+                (
+                    "SELECT COUNT(*) FROM execution_leases l JOIN dispatches d ON "
+                    "d.id=l.dispatch_id JOIN jobs j ON j.id=d.job_id WHERE l.expires_at>? AND "
+                    "j.status NOT IN ('succeeded','failed','cancelled')"
+                ),
+                (now,),
+            ).fetchone()[0]
+            if active >= limit:
+                return None
+            if previous is not None and previous[1] >= max_attempts:
+                status = "cancelled" if row[1] == "cancel_requested" else "failed"
+                connection.execute(
+                    "UPDATE jobs SET status=?, version=version+1 WHERE id=?", (status, row[0])
+                )
+                connection.execute(
+                    "UPDATE dispatches SET status='done', version=version+1 WHERE id=?",
+                    (dispatch_id,),
+                )
+                connection.execute(
+                    "INSERT OR REPLACE INTO job_failures VALUES (?, ?, ?)",
+                    (row[0], "worker_lost", "The worker repeatedly stopped. Please retry the job."),
+                )
+                connection.execute(
+                    (
+                        "INSERT INTO job_events SELECT id, (SELECT "
+                        "COALESCE(MAX(sequence),0)+1 FROM "
+                        "job_events WHERE job_id=?), ?, progress_json FROM jobs WHERE id=?"
+                    ),
+                    (row[0], status, row[0]),
+                )
+                return None
+            token = str(uuid4())
+            connection.execute(
+                (
+                    "INSERT INTO execution_leases VALUES (?, ?, ?, 1) ON CONFLICT(dispatch_id) DO "
+                    "UPDATE SET token=excluded.token, expires_at=excluded.expires_at, "
+                    "attempts=execution_leases.attempts+1"
+                ),
+                (dispatch_id, token, now + ttl),
+            )
+            connection.execute(
+                "UPDATE dispatches SET status='pending', version=version+1 WHERE id=?",
+                (dispatch_id,),
+            )
+            return token
+
+    def renew_execution(self, dispatch_id: str, token: str, *, ttl: float = 30) -> bool:
+        with self.database.transaction() as connection:
+            result = connection.execute(
+                (
+                    "UPDATE execution_leases SET expires_at=? WHERE dispatch_id=? AND token=? AND "
+                    "expires_at>?"
+                ),
+                (time.time() + ttl, dispatch_id, token, time.time()),
+            )
+            return result.rowcount == 1
+
+    def release_execution(self, dispatch_id: str, token: str) -> None:
+        with self.database.transaction() as connection:
+            connection.execute(
+                "UPDATE execution_leases SET expires_at=0 WHERE dispatch_id=? AND token=?",
+                (dispatch_id, token),
+            )
+
+    def failure_for_job(self, job_id: str) -> dict[str, str] | None:
+        row = self.database.query(
+            "SELECT code, message FROM job_failures WHERE job_id=?", (job_id,)
+        ).fetchone()
+        return {"code": row[0], "message": row[1]} if row else None
+
+
+def _casting_to_row(casting: Casting) -> dict[str, object]:
     """Serialise either casting shape, tagged by kind."""
     if isinstance(casting, CharacterCasting):
         return {
@@ -478,10 +639,10 @@ def _casting_to_row(casting: object) -> dict[str, object]:
             "method": casting.method,
             "model_id": casting.model_id,
         }
-    return {"kind": "single", "voice_id": casting.voice_id}  # type: ignore[union-attr]
+    return {"kind": "single", "voice_id": casting.voice_id}
 
 
-def _casting_from_row(value: dict[str, object]) -> object:
+def _casting_from_row(value: dict[str, Any]) -> Casting:
     """Rebuild casting from a row.
 
     Rows written before character casting existed carry no kind, so a missing
@@ -492,7 +653,7 @@ def _casting_from_row(value: dict[str, object]) -> object:
     return CharacterCasting(
         narrator_voice_id=str(value["narrator_voice_id"]),
         unknown_voice_id=str(value["unknown_voice_id"]),
-        cast=tuple((str(a), str(b)) for a, b in value["cast"]),  # type: ignore[misc]
+        cast=tuple((str(a), str(b)) for a, b in value["cast"]),
         method=str(value["method"]),
         model_id=str(value["model_id"]),
     )

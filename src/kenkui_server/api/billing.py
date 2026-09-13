@@ -8,9 +8,17 @@ router = APIRouter(prefix="/v1/billing", tags=["billing"])
 
 
 @router.get("")
-def billing() -> dict[str, str]:
+def billing(request: Request) -> dict[str, str]:
     """Local execution has no credits, provider, or reservation workflow."""
-    return {"mode": "unmetered"}
+    services = request.app.state.hosted_services
+    if services is None:
+        return {"mode": "unmetered"}
+    identity = request.state.hosted_identity
+    account = services.repositories.billing.account(
+        services.account_id_for_identity(identity.user_id)
+    )
+    return {"mode": "credits", "availableCredits": str(account.available_credits)}
+
 
 def stripe_webhook_router(handler: StripeWebhookHandler) -> APIRouter:
     """Build the hosted webhook endpoint without configuring local mode."""

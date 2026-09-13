@@ -21,6 +21,9 @@ def test_r2_store_keeps_private_keys_internal_and_deletes_idempotently() -> None
 
 def test_r2_store_consumes_s3_stream_body_to_bytes() -> None:
     class StreamingBody:
+        def close(self) -> None:
+            pass
+
         def read(self) -> bytes:
             return b"streamed-m4b"
 

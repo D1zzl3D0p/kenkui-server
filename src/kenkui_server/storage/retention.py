@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class RetentionKind(StrEnum):
@@ -84,3 +84,55 @@ class InMemoryRetentionRepository:
 
     def _add(self, record: RetentionRecord) -> None:
         self._records[record.identifier] = record
+
+
+class PostgresRetention:
+    """Bounded, retryable deletion of expired sources and outputs."""
+
+    def __init__(self, database: Any, objects: Any) -> None:
+        self.database = database
+        self.objects = objects
+
+    def run(self) -> int:
+        deleted = 0
+        # Lock the asset during deletion; admission takes the same row lock.
+        with self.database.transaction():
+            sources = self.database.execute("""
+                SELECT a.id FROM assets a
+                WHERE a.deleted_at IS NULL
+                AND a.created_at < now() - interval '24 hours'
+                AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.spec_json::jsonb->>'source_id'=a.id
+                    AND (j.terminal_at IS NULL OR j.terminal_at > now() - interval '24 hours'))
+                ORDER BY a.created_at LIMIT 100 FOR UPDATE OF a SKIP LOCKED
+            """).fetchall()
+            for source in sources:
+                self.objects.delete_source(source["id"])
+                self.database.execute(
+                    "UPDATE assets SET deleted_at=now() WHERE id=%s", (source["id"],)
+                )
+                deleted += 1
+        with self.database.transaction():
+            artifacts = self.database.execute("""
+                SELECT a.id, a.path FROM artifacts a JOIN jobs j ON j.id=a.job_id
+                WHERE j.terminal_at < now() - interval '30 days'
+                ORDER BY j.terminal_at LIMIT 100 FOR UPDATE OF a SKIP LOCKED
+            """).fetchall()
+            for artifact in artifacts:
+                self.objects.delete_artifact(artifact["path"])
+                self.database.execute("DELETE FROM artifacts WHERE id=%s", (artifact["id"],))
+                deleted += 1
+        with self.database.transaction():
+            abandoned = self.database.execute("""
+                SELECT id, resource_id FROM stored_objects o
+                WHERE o.object_kind='temporary' AND o.deleted_at IS NULL
+                AND o.terminal_at < now() - interval '24 hours'
+                AND NOT EXISTS(SELECT 1 FROM artifacts a WHERE a.path=o.resource_id)
+                ORDER BY o.terminal_at LIMIT 100 FOR UPDATE SKIP LOCKED
+            """).fetchall()
+            for item in abandoned:
+                self.objects.delete_artifact(item["resource_id"])
+                self.database.execute(
+                    "UPDATE stored_objects SET deleted_at=now() WHERE id=%s", (item["id"],)
+                )
+                deleted += 1
+        return deleted

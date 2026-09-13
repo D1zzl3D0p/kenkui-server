@@ -9,7 +9,10 @@ from kenkui_server.storage.migrations.m0002_dispatch_idempotency import (
     upgrade as idempotency_upgrade,
 )
 
+from .m0003_execution_leases import upgrade as execution_upgrade
+
 MIGRATIONS = (
     (INITIAL_VERSION, initial_upgrade),
     (IDEMPOTENCY_VERSION, idempotency_upgrade),
+    (3, execution_upgrade),
 )

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
 def _required(value: str, code: str) -> str:
@@ -83,6 +83,9 @@ class OutputSpec:
     """Requested local M4B publication location."""
 
     path: str
+    title: str | None = None
+    author: str | None = None
+    source_cover: bool = True
 
     def __post_init__(self) -> None:
         path = _required(self.path, "invalid_output_path")
@@ -103,7 +106,9 @@ class JobSpec:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "source_id", _required(self.source_id, "invalid_source_id"))
-        chapter_ids = tuple(_required(chapter_id, "invalid_chapter_id") for chapter_id in self.chapters)
+        chapter_ids = tuple(
+            _required(chapter_id, "invalid_chapter_id") for chapter_id in self.chapters
+        )
         if not chapter_ids:
             raise ValueError("empty_chapter_selection")
         if len(chapter_ids) != len(set(chapter_ids)):
@@ -111,7 +116,7 @@ class JobSpec:
         object.__setattr__(self, "chapters", chapter_ids)
 
 
-class JobStatus(str, Enum):
+class JobStatus(StrEnum):
     """Persisted state of a local job."""
 
     QUEUED = "queued"

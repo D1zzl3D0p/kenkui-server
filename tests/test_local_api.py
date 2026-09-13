@@ -42,3 +42,4 @@ def test_configured_web_build_serves_assets_and_spa_fallback_without_shadowing_v
     assert health.json() == {"status": "ok"}
     assert missing_api.status_code == 404
     assert missing_api.json()["error"]["code"] == "not_found"
+

@@ -218,5 +218,5 @@ def test_hosted_job_route_uses_single_atomic_durable_admission(
         key,
     ) = fixture.repositories.admissions[0]
     assert admitted_dispatch.job_id == admitted_job.id
-    assert (account_id, owner_id, credits, key) == ("account-1", str(OWNER), 2, "request-1")
+    assert (account_id, owner_id, credits, key) == ("account-1", str(OWNER), 2, hashlib.sha256(f"{OWNER}:request-1".encode()).hexdigest())
     assert fixture.runner.started == [admitted_dispatch.id]

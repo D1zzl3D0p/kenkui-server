@@ -1,22 +1,62 @@
-name: CI
-
+name: Beta integration
 on:
   pull_request:
   push:
     branches: [main]
-
+  workflow_dispatch:
+  workflow_call:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: beta-test-only
+          POSTGRES_DB: kenkui_beta_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      KENKUI_TEST_DATABASE_URL: postgresql://postgres:beta-test-only@localhost:5432/kenkui_beta_test
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: kenkui-server
+      - name: Require compatible sibling revisions
+        env:
+          CORE_REPOSITORY: ${{ vars.KENKUI_CORE_REPOSITORY }}
+          CORE_REF: ${{ vars.KENKUI_CORE_REF }}
+          WEB_REPOSITORY: ${{ vars.KENKUI_WEB_REPOSITORY }}
+          WEB_REF: ${{ vars.KENKUI_WEB_REF }}
+        run: |
+          test -n "$CORE_REPOSITORY" && test -n "$CORE_REF"
+          test -n "$WEB_REPOSITORY" && test -n "$WEB_REF"
+          [[ "$CORE_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$WEB_REF" =~ ^[0-9a-f]{40}$ ]]
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.KENKUI_CORE_REPOSITORY }}
+          ref: ${{ vars.KENKUI_CORE_REF }}
+          path: kenkui
+          token: ${{ secrets.KENKUI_REPO_READ_TOKEN || github.token }}
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.KENKUI_WEB_REPOSITORY }}
+          ref: ${{ vars.KENKUI_WEB_REF }}
+          path: kenkui-web
+          token: ${{ secrets.KENKUI_REPO_READ_TOKEN || github.token }}
       - uses: astral-sh/setup-uv@v5
         with:
-          python-version: ${{ matrix.python-version }}
-      - run: uv sync --all-groups
-      - run: uv run pytest tests/test_health.py tests/test_capabilities.py tests/test_errors.py tests/test_observability.py tests/test_main.py tests/test_openapi.py
-      - run: uv run mypy
-      - run: uv run ruff check .
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: uv sync --frozen --all-groups --extra hosted
+        working-directory: kenkui-server
+      - run: npm ci
+        working-directory: kenkui-web
+      - run: npx playwright install --with-deps chromium
+        working-directory: kenkui-web
+      - run: python kenkui-server/scripts/verify-workspace.py

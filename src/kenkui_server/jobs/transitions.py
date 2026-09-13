@@ -17,11 +17,11 @@ class CancelRequested:
     """Request cooperative cancellation of a non-terminal job."""
 
 
-
-
 @dataclass(frozen=True, slots=True)
 class Cancelled:
     """Record a worker's terminal observation of a cancellation request."""
+
+
 @dataclass(frozen=True, slots=True)
 class Completed:
     """Record successful completion of a running job."""

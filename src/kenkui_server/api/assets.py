@@ -34,14 +34,18 @@ async def upload_asset(request: Request) -> AssetResponse:
     """Accept one EPUB body and retain it behind a server-assigned private path."""
     if request.headers.get("content-type", "").split(";", 1)[0] != "application/epub+zip":
         raise HTTPException(status_code=415, detail="expected application/epub+zip")
-    payload = await request.body()
+    payload = bytearray()
+    async for chunk in request.stream():
+        if len(payload) + len(chunk) > request.app.state.max_upload_bytes:
+            raise HTTPException(status_code=413, detail="source exceeds upload limit")
+        payload.extend(chunk)
     if not payload:
         raise HTTPException(status_code=422, detail="empty asset")
     asset_id = str(uuid4())
     services = request.app.state.services
-    path = services.assets.put_source(asset_id, payload)
+    path = services.assets.put_source(asset_id, bytes(payload))
     digest = hashlib.sha256(payload).hexdigest()
-    asset = Asset(asset_id, str(path), digest, "epub")
+    asset = Asset(asset_id, str(path) if path is not None else asset_id, digest, "epub")
     hosted_auth = getattr(request.app.state, "hosted_auth", None)
     if hosted_auth is None:
         services.repositories.assets.put(asset)
@@ -63,7 +67,12 @@ async def inspect_book(asset_id: str, request: Request) -> BookResponse:
         raise HTTPException(status_code=404, detail="asset not found") from error
     _authorize_asset(request, asset_id)
     try:
-        inspected = await anyio.to_thread.run_sync(lambda: kk.book(asset.path).inspect())
+
+        def inspect_source() -> kk.BookInspection:
+            with services.assets.materialize_source(asset_id) as source:
+                return kk.book(source).inspect()
+
+        inspected = await anyio.to_thread.run_sync(inspect_source)
     except kk.KenkuiError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     inspection = Inspection(

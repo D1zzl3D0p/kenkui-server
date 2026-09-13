@@ -2,9 +2,11 @@
 
 Local-first FastAPI server for Kenkui.
 
-The server owns durable local Jobs, source assets, execution, and output
-artifacts. It exposes the versioned `/v1` API without hosted authentication,
-providers, or billing.
+The server owns durable Jobs, source assets, execution, and output artifacts.
+Local mode is unmetered and binds to loopback. The optional hosted composition
+adds PostgreSQL, R2, AuthKit browser sessions, beta allowances and Modal workers.
+See [the private beta release runbook](deploy/README.md) for configuration and
+acceptance requirements.
 
 ## Local API behavior
 
@@ -28,7 +30,9 @@ providers, or billing.
 
 ```sh
 uv sync --all-groups
-uv run pytest tests/test_local_api.py tests/test_local_job_api.py tests/test_sqlite_repositories.py tests/test_transitions.py tests/test_openapi.py tests/test_main.py
+uv run pytest
+uv run mypy
+uv run ruff check src
 ```
 
 Run the local server (it binds to `127.0.0.1` by default):

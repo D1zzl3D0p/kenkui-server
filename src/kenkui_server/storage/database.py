@@ -7,8 +7,23 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from threading import RLock
+from typing import Any
 
 from kenkui_server.storage.migrations import MIGRATIONS
+
+
+class QueryResult:
+    """Rows copied while holding the connection lock; no shared live cursor."""
+
+    def __init__(self, rows: list[tuple[Any, ...]]) -> None:
+        self.rows = rows
+
+    def fetchone(self) -> tuple[Any, ...] | None:
+        return self.rows.pop(0) if self.rows else None
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        rows, self.rows = self.rows, []
+        return rows
 
 
 class Database:
@@ -36,7 +51,9 @@ class Database:
             for version, upgrade in MIGRATIONS:
                 if version not in applied:
                     upgrade(connection)
-                    connection.execute("INSERT INTO schema_migrations (version) VALUES (?)", (version,))
+                    connection.execute(
+                        "INSERT INTO schema_migrations (version) VALUES (?)", (version,)
+                    )
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
@@ -50,6 +67,11 @@ class Database:
                 raise
             else:
                 self.connection.commit()
+
+    def query(self, statement: str, parameters: tuple[Any, ...] = ()) -> QueryResult:
+        """Serialize reads with writes on this shared SQLite connection."""
+        with self._lock:
+            return QueryResult(self.connection.execute(statement, parameters).fetchall())
 
     def journal_mode(self) -> str:
         """Return the active SQLite journal mode."""

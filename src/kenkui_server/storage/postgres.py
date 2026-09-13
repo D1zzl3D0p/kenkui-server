@@ -29,6 +29,7 @@ from kenkui_server.jobs.models import (
     JobEvent,
     JobStatus,
 )
+from kenkui_server.storage.postgres_execution import PostgresExecution
 from kenkui_server.storage.repositories import (
     StaleWriteError,
     _decode_progress,
@@ -85,7 +86,10 @@ class PostgresJobRepository:
 
     def create(self, job: Job) -> None:
         self._connection.execute(
-            "INSERT INTO jobs (id, spec_json, status, version, progress_json) VALUES (%s, %s, %s, %s, %s)",
+            (
+                "INSERT INTO jobs (id, spec_json, status, version, progress_json) "
+                "VALUES (%s, %s, %s, %s, %s)"
+            ),
             (
                 job.id,
                 _encode_spec(job.spec),
@@ -360,7 +364,7 @@ class PostgresArtifactRepository:
         )
 
 
-class PostgresRepositories:
+class PostgresRepositories(PostgresExecution):
     """Complete PostgreSQL job persistence with transaction-bound compound writes."""
 
     def __init__(self, connection: PostgresConnection) -> None:
@@ -382,7 +386,10 @@ class PostgresRepositories:
                 ).fetchone()
                 if existing is not None:
                     row = connection.execute(
-                        "SELECT id, spec_json, status, version, progress_json FROM jobs WHERE id = %s",
+                        (
+                            "SELECT id, spec_json, status, version, progress_json FROM jobs "
+                            "WHERE id = %s"
+                        ),
                         (str(existing["job_id"]),),
                     ).fetchone()
                     if row is None:
@@ -398,9 +405,17 @@ class PostgresRepositories:
         return job
 
     def update_job_and_append_event(
-        self, job: Job, *, expected_version: int, event_type: str
+        self,
+        job: Job,
+        *,
+        expected_version: int,
+        event_type: str,
+        artifact: Artifact | None = None,
+        lease: tuple[str, str] | None = None,
+        failure: tuple[str, str] | None = None,
     ) -> JobEvent:
         with self._connection.transaction() as connection:
+            self.check_lease(connection, lease)
             result = connection.execute(
                 """
                 UPDATE jobs SET status = %s, version = %s, progress_json = %s
@@ -416,16 +431,41 @@ class PostgresRepositories:
             )
             _require_one(result)
             sequence_row = connection.execute(
-                "SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM job_events WHERE job_id = %s",
+                (
+                    "SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM job_events "
+                    "WHERE job_id = %s"
+                ),
                 (job.id,),
             ).fetchone()
             if sequence_row is None:
                 raise RuntimeError("missing_event_sequence")
             event = JobEvent(job.id, int(sequence_row["sequence"]), event_type, job.progress)
             connection.execute(
-                "INSERT INTO job_events (job_id, sequence, event_type, progress_json) VALUES (%s, %s, %s, %s)",
+                (
+                    "INSERT INTO job_events (job_id, sequence, event_type, "
+                    "progress_json) VALUES (%s, %s, %s, %s)"
+                ),
                 (event.job_id, event.sequence, event.event_type, _encode_progress(event.progress)),
             )
+            if artifact is not None:
+                if job.status is not JobStatus.SUCCEEDED or artifact.job_id != job.id:
+                    raise ValueError("invalid_completion_artifact")
+                connection.execute(
+                    "INSERT INTO artifacts (id, job_id, path, format) VALUES (%s,%s,%s,%s)",
+                    (artifact.id, artifact.job_id, artifact.path, artifact.format),
+                )
+            if failure is not None:
+                connection.execute("INSERT INTO job_failures VALUES (%s,%s,%s)", (job.id, *failure))
+            billing = getattr(self, "billing", None)
+            if job.status.is_terminal:
+                connection.execute("UPDATE jobs SET terminal_at=now() WHERE id=%s", (job.id,))
+            if billing is not None and job.status.is_terminal:
+                billing.finalize(
+                    job.id,
+                    AuthorizationStatus.SETTLED
+                    if job.status is JobStatus.SUCCEEDED
+                    else AuthorizationStatus.RELEASED,
+                )
         return event
 
     def request_cancellation(self, job_id: str) -> Job:
@@ -472,7 +512,10 @@ class PostgresRepositories:
             )
             _require_one(result)
             sequence = connection.execute(
-                "SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM job_events WHERE job_id = %s",
+                (
+                    "SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM job_events "
+                    "WHERE job_id = %s"
+                ),
                 (job_id,),
             ).fetchone()
             if sequence is None:
@@ -489,11 +532,18 @@ class PostgresRepositories:
                     _encode_progress(cancelled.progress),
                 ),
             )
+            if cancelled.status.is_terminal:
+                connection.execute("UPDATE jobs SET terminal_at=now() WHERE id=%s", (job_id,))
+            if cancelled.status.is_terminal and hasattr(self, "billing"):
+                self.billing.finalize(job_id, AuthorizationStatus.RELEASED)
         return cancelled
 
-    def finish_dispatch_if_not_cancellation_requested(self, dispatch: Dispatch) -> bool:
+    def finish_dispatch_if_not_cancellation_requested(
+        self, dispatch: Dispatch, *, lease: tuple[str, str] | None = None
+    ) -> bool:
         """Prevent a worker from completing a dispatch after durable cancellation."""
         with self._connection.transaction() as connection:
+            self.check_lease(connection, lease)
             status = connection.execute(
                 "SELECT status FROM jobs WHERE id = %s",
                 (dispatch.job_id,),
@@ -533,18 +583,39 @@ class PostgresHostedRepository(PostgresRepositories):
         if credits < 1:
             raise ValueError("invalid_credit_amount")
         with self._connection.transaction() as connection:
+            # Serialize admissions for an account before checking replay or balance.
+            connection.execute(
+                "SELECT id FROM credit_accounts WHERE id = %s FOR UPDATE", (account_id,)
+            )
             if idempotency_key is not None:
                 existing = connection.execute(
                     "SELECT job_id FROM job_idempotency WHERE key = %s", (idempotency_key,)
                 ).fetchone()
                 if existing is not None:
                     row = connection.execute(
-                        "SELECT id, spec_json, status, version, progress_json FROM jobs WHERE id = %s",
+                        (
+                            "SELECT id, spec_json, status, version, progress_json FROM jobs "
+                            "WHERE id = %s"
+                        ),
                         (str(existing["job_id"]),),
                     ).fetchone()
                     if row is None:
                         raise RuntimeError("orphaned_idempotency_key")
-                    return _job_from_row(row)
+                    existing_job = _job_from_row(row)
+                    if existing_job.spec != job.spec:
+                        raise ValueError("idempotency_conflict")
+                    return existing_job
+            active = connection.execute(
+                "SELECT COUNT(*) AS count FROM jobs WHERE owner_id=%s AND status NOT IN ('succeeded','failed','cancelled')",
+                (owner_id,),
+            ).fetchone()
+            if active is not None and int(active["count"]) >= 3:
+                raise ValueError("active_job_limit")
+            source = connection.execute(
+                "SELECT id, deleted_at FROM assets WHERE id=%s FOR UPDATE", (job.spec.source_id,)
+            ).fetchone()
+            if source is not None and source.get("deleted_at") is not None:
+                raise ValueError("source_expired")
             available = connection.execute(
                 """
                 UPDATE credit_accounts SET available_credits = available_credits - %s
@@ -568,7 +639,7 @@ class PostgresHostedRepository(PostgresRepositories):
                 INSERT INTO credit_ledger_entries (id, account_id, authorization_id, kind, credits, reference)
                 VALUES (%s, %s, %s, 'reservation', %s, %s)
                 """,
-                (str(uuid4()), account_id, authorization_id, -credits, job.id),
+                (str(uuid4()), account_id, authorization_id, -credits, f"reservation:{job.id}"),
             )
             connection.execute(
                 """
@@ -659,7 +730,10 @@ class PostgresBillingRepository:
             raise ValueError("invalid_credit_amount")
         with self._connection.transaction() as connection:
             existing = connection.execute(
-                "SELECT id, job_id, account_id, credits, status FROM credit_authorizations WHERE job_id = %s",
+                (
+                    "SELECT id, job_id, account_id, credits, status FROM "
+                    "credit_authorizations WHERE job_id = %s"
+                ),
                 (job_id,),
             ).fetchone()
             if existing is not None:
@@ -677,7 +751,10 @@ class PostgresBillingRepository:
                 str(uuid4()), job_id, account_id, credits, AuthorizationStatus.RESERVED
             )
             connection.execute(
-                "INSERT INTO credit_authorizations (id, job_id, account_id, credits, status) VALUES (%s, %s, %s, %s, %s)",
+                (
+                    "INSERT INTO credit_authorizations (id, job_id, account_id, "
+                    "credits, status) VALUES (%s, %s, %s, %s, %s)"
+                ),
                 (
                     authorization.id,
                     authorization.job_id,
@@ -691,13 +768,16 @@ class PostgresBillingRepository:
                 INSERT INTO credit_ledger_entries (id, account_id, authorization_id, kind, credits, reference)
                 VALUES (%s, %s, %s, 'reservation', %s, %s)
                 """,
-                (str(uuid4()), account_id, authorization.id, -credits, job_id),
+                (str(uuid4()), account_id, authorization.id, -credits, f"reservation:{job_id}"),
             )
             return authorization
 
     def authorization_for_job(self, job_id: str) -> CreditAuthorization:
         row = self._connection.execute(
-            "SELECT id, job_id, account_id, credits, status FROM credit_authorizations WHERE job_id = %s",
+            (
+                "SELECT id, job_id, account_id, credits, status FROM "
+                "credit_authorizations WHERE job_id = %s"
+            ),
             (job_id,),
         ).fetchone()
         if row is None:
@@ -709,7 +789,10 @@ class PostgresBillingRepository:
             raise ValueError("invalid_final_authorization_status")
         with self._connection.transaction() as connection:
             current = connection.execute(
-                "SELECT id, job_id, account_id, credits, status FROM credit_authorizations WHERE job_id = %s FOR UPDATE",
+                (
+                    "SELECT id, job_id, account_id, credits, status FROM "
+                    "credit_authorizations WHERE job_id = %s FOR UPDATE"
+                ),
                 (job_id,),
             ).fetchone()
             if current is None:
@@ -727,7 +810,10 @@ class PostgresBillingRepository:
             _require_one(result)
             if status is AuthorizationStatus.RELEASED:
                 connection.execute(
-                    "UPDATE credit_accounts SET available_credits = available_credits + %s WHERE id = %s",
+                    (
+                        "UPDATE credit_accounts SET available_credits = available_credits "
+                        "+ %s WHERE id = %s"
+                    ),
                     (authorization.credits, authorization.account_id),
                 )
                 kind, credits = "release", authorization.credits
@@ -738,7 +824,14 @@ class PostgresBillingRepository:
                 INSERT INTO credit_ledger_entries (id, account_id, authorization_id, kind, credits, reference)
                 VALUES (%s, %s, %s, %s, %s, %s)
                 """,
-                (str(uuid4()), authorization.account_id, authorization.id, kind, credits, job_id),
+                (
+                    str(uuid4()),
+                    authorization.account_id,
+                    authorization.id,
+                    kind,
+                    credits,
+                    f"{kind}:{job_id}",
+                ),
             )
             return CreditAuthorization(
                 authorization.id,

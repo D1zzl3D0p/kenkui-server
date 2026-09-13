@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 
 import kenkui as kk
 from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 
+from kenkui_server.api.assets import _authorize_asset
 from kenkui_server.api.schemas import (
     CastingRequest,
     EventResponse,
@@ -25,12 +27,14 @@ from kenkui_server.jobs.models import (
     SingleVoiceCasting,
     TtsSettings,
 )
+from kenkui_server.jobs.pipeline import pipeline_from_job
 
 router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
 
 
-def _response(job: Job) -> JobResponse:
+def _response(job: Job, failure: dict[str, str] | None = None) -> JobResponse:
     return JobResponse(
+        failure=failure,
         id=job.id,
         status=job.status.value,
         progress=ProgressResponse(
@@ -86,8 +90,13 @@ def _spec(request: JobRequest, allowed_models: tuple[str, ...] = ()) -> JobSpec:
             source_id=request.source_id,
             chapters=tuple(request.chapters),
             casting=_casting(request.casting, allowed_models),
-            tts=TtsSettings(request.tts.normalize_text),
-            output=OutputSpec("artifact.m4b"),
+            tts=TtsSettings(),
+            output=OutputSpec(
+                "artifact.m4b",
+                request.output.title,
+                request.output.author,
+                request.output.source_cover,
+            ),
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
@@ -95,36 +104,63 @@ def _spec(request: JobRequest, allowed_models: tuple[str, ...] = ()) -> JobSpec:
 
 def _preflight(request: Request, payload: JobRequest) -> tuple[JobSpec, int]:
     services = request.app.state.services
-    spec = _spec(payload)
+    spec = _spec(payload, request.app.state.model_allowlist)
     try:
-        asset = services.repositories.assets.get(spec.source_id)
+        services.repositories.assets.get(spec.source_id)
+        _authorize_asset(request, spec.source_id)
         inspection = services.repositories.inspections.get(spec.source_id)
     except KeyError as error:
         raise HTTPException(status_code=404, detail="asset inspection not found") from error
     known = {chapter.id for chapter in inspection.chapters}
     if not set(spec.chapters).issubset(known):
         raise HTTPException(status_code=422, detail="unknown chapter id")
-    voice = next((voice for voice in services.voices if voice.id == spec.casting.voice_id), None)
-    if voice is None or not voice.enabled:
+    casting = spec.casting
+    voice_ids = (
+        (casting.voice_id,)
+        if isinstance(casting, SingleVoiceCasting)
+        else (casting.narrator_voice_id, casting.unknown_voice_id, *(v for _, v in casting.cast))
+    )
+    available = {voice.id for voice in services.voices if voice.enabled}
+    if not set(voice_ids).issubset(available):
         raise HTTPException(status_code=422, detail="voice is unavailable")
     try:
-        pipeline = kk.book(asset.path).select_chapters(*spec.chapters)
-        if spec.tts.normalize_text:
-            pipeline = pipeline.normalize_text()
-        inspected = pipeline.inspect()
+        with services.assets.materialize_source(spec.source_id) as source:
+            pipeline = pipeline_from_job(spec, source)
+            inspected = pipeline.inspect()
     except kk.KenkuiError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
-    return spec, sum(chapter.speech_characters or 0 for chapter in inspected.chapters)
+        raise HTTPException(status_code=422, detail=error.code.value) from error
+    characters = sum(chapter.speech_characters or 0 for chapter in inspected.chapters)
+    if characters <= 0:
+        raise HTTPException(422, "empty_speech")
+    if characters > request.app.state.max_speech_characters:
+        raise HTTPException(422, "job_size_limit")
+    return spec, characters
 
 
 @router.post("/preflight", response_model=PreflightResponse)
 def preflight(payload: JobRequest, request: Request) -> PreflightResponse:
     """Validate executable local intent without creating a Job or reservation."""
     spec, characters = _preflight(request, payload)
-    return PreflightResponse(source_id=spec.source_id, normalized_characters=characters)
+    services = request.app.state.hosted_services
+    if services is None:
+        return PreflightResponse(source_id=spec.source_id, normalized_characters=characters)
+    from kenkui_server.billing.pricing import credits_for_characters
+
+    identity = request.state.hosted_identity
+    account = services.repositories.billing.account(
+        services.account_id_for_identity(identity.user_id)
+    )
+    estimated = credits_for_characters(characters)
+    return PreflightResponse(
+        source_id=spec.source_id,
+        normalized_characters=characters,
+        estimated_credits=estimated,
+        available_credits=account.available_credits,
+        valid=account.available_credits >= estimated,
+    )
 
 
-@router.post("", response_model=JobResponse, status_code=202)
+@router.post("", response_model=JobResponse, response_model_exclude_none=True, status_code=202)
 def create_job(
     payload: JobRequest,
     request: Request,
@@ -134,7 +170,14 @@ def create_job(
     spec, characters = _preflight(request, payload)
     hosted_services = request.app.state.hosted_services
     if hosted_services is None:
-        job = request.app.state.services.dispatcher.submit(spec, idempotency_key=idempotency_key)
+        try:
+            job = request.app.state.services.dispatcher.submit(
+                spec, idempotency_key=idempotency_key
+            )
+        except ValueError as error:
+            if str(error) == "idempotency_conflict":
+                raise HTTPException(status_code=409, detail="idempotency_conflict") from error
+            raise
     else:
         identity = getattr(request.state, "hosted_identity", None)
         if identity is None:
@@ -148,13 +191,19 @@ def create_job(
                 idempotency_key=idempotency_key,
             )
         except ValueError as error:
-            if str(error) in {"empty_speech", "insufficient_credits"}:
+            if str(error) in {
+                "empty_speech",
+                "insufficient_credits",
+                "source_expired",
+                "active_job_limit",
+                "idempotency_conflict",
+            }:
                 raise HTTPException(status_code=409, detail=str(error)) from error
             raise
     return _response(job)
 
 
-@router.get("", response_model=JobListResponse)
+@router.get("", response_model=JobListResponse, response_model_exclude_none=True)
 def list_jobs(request: Request) -> JobListResponse:
     """Return local jobs, or only the caller's owned jobs in hosted mode."""
     jobs = request.app.state.services.repositories.jobs.list()
@@ -171,7 +220,7 @@ def list_jobs(request: Request) -> JobListResponse:
     return JobListResponse(items=[_response(job) for job in jobs])
 
 
-@router.get("/{job_id}", response_model=JobResponse)
+@router.get("/{job_id}", response_model=JobResponse, response_model_exclude_none=True)
 def get_job(job_id: str, request: Request) -> JobResponse:
     """Return the authoritative durable snapshot used for SSE reconnect recovery."""
     try:
@@ -179,10 +228,10 @@ def get_job(job_id: str, request: Request) -> JobResponse:
     except KeyError as error:
         raise HTTPException(status_code=404, detail="job not found") from error
     _authorize_job(request, job_id)
-    return _response(job)
+    return _response(job, request.app.state.services.repositories.failure_for_job(job_id))
 
 
-@router.post("/{job_id}/cancel", response_model=JobResponse)
+@router.post("/{job_id}/cancel", response_model=JobResponse, response_model_exclude_none=True)
 def cancel_job(job_id: str, request: Request) -> JobResponse:
     """Durably request cancellation once; repeated calls return the same snapshot."""
     repositories = request.app.state.services.repositories
@@ -194,7 +243,19 @@ def cancel_job(job_id: str, request: Request) -> JobResponse:
     return _response(repositories.request_cancellation(job_id))
 
 
-@router.get("/{job_id}/events")
+@router.get(
+    "/{job_id}/events",
+    responses={
+        200: {
+            "content": {
+                "text/event-stream": {
+                    "schema": {"type": "string"},
+                    "x-event-schema": {"$ref": "#/components/schemas/EventResponse"},
+                }
+            }
+        }
+    },
+)
 async def stream_events(
     job_id: str,
     request: Request,
@@ -212,7 +273,7 @@ async def stream_events(
     except ValueError:
         seen = 0
 
-    async def events() -> object:
+    async def events() -> AsyncIterator[str]:
         nonlocal seen
         while True:
             for event in repositories.events.list_for_job(job_id):
@@ -252,6 +313,12 @@ def get_artifact(job_id: str, request: Request) -> Response:
     if len(artifacts) != 1:
         raise HTTPException(status_code=404, detail="artifact not found")
     try:
-        return Response(services.assets.read_artifact(job_id), media_type="audio/mp4")
+        if request.app.state.hosted_services is None:
+            return FileResponse(artifacts[0].path, media_type="audio/mp4", filename=f"{job_id}.m4b")
+        return RedirectResponse(
+            services.assets.artifact_url(artifacts[0].path, filename=f"{job_id}.m4b"),
+            status_code=303,
+            headers={"Cache-Control": "no-store"},
+        )
     except FileNotFoundError as error:
         raise HTTPException(status_code=404, detail="artifact not found") from error

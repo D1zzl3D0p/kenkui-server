@@ -1,28 +1,45 @@
 """FastAPI application factory for the versioned local API."""
 
 import logging
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
+import anyio
 import kenkui as kk
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from kenkui_server.api import assets, billing, jobs
 from kenkui_server.api import voices as voices_api
+from kenkui_server.api.schemas import EventResponse
 from kenkui_server.auth.base import AuthBackend, Identity
+from kenkui_server.auth.browser import (
+    SESSION_COOKIE,
+    BrowserAuthBackend,
+    browser_auth_router,
+    set_session,
+)
 from kenkui_server.billing.service import BillingService
 from kenkui_server.billing.stripe import StripeWebhookHandler
 from kenkui_server.compute.base import ProcessRunner
 from kenkui_server.compute.local import LocalProcessRunner
-from kenkui_server.config import Capabilities, HostedConfig, local_capabilities
+from kenkui_server.config import (
+    AuthCapabilities,
+    BillingCapabilities,
+    Capabilities,
+    HostedConfig,
+    local_capabilities,
+)
 from kenkui_server.errors import ErrorDetail, ErrorResponse
 from kenkui_server.jobs.dispatcher import Dispatcher, HostedDispatcher
 from kenkui_server.observability import log_event
@@ -71,7 +88,7 @@ def hosted_identity(request: Request) -> Identity | None:
 
 REQUEST_ID_HEADER = "X-Request-ID"
 
-ERROR_RESPONSES = {
+ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     500: {
         "model": ErrorResponse,
         "description": "Normalized internal server error",
@@ -113,8 +130,13 @@ def _error_response(
 def create_app(
     *,
     data_dir: str | Path | None = None,
-    voices: Sequence[kk.Voice] = (),
+    voices: Sequence[kk.Voice] | None = None,
+    model_allowlist: tuple[str, ...] = (),
+    max_upload_bytes: int = 50 * 1024 * 1024,
+    max_speech_characters: int = 2_000_000,
     fixture_mode: bool = False,
+    max_jobs: int = 2,
+    render_workers: int = 1,
     web_build_path: str | Path | None = None,
     auth_backend: AuthBackend | None = None,
     job_owner_resolver: Callable[[str], UUID] | None = None,
@@ -132,7 +154,18 @@ def create_app(
     ):
         raise ValueError("hosted configuration owns authentication")
 
+    @asynccontextmanager
+    async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        yield
+        local_runner = getattr(application.state, "local_runner", None)
+        if local_runner is not None:
+            local_runner.close()
+        hosted_database = getattr(application.state, "hosted_database", None)
+        if hosted_database is not None:
+            hosted_database.close()
+
     app = FastAPI(
+        lifespan=lifespan,
         title="Kenkui Server API",
         version="1.0.0",
         openapi_url="/v1/openapi.json",
@@ -148,12 +181,23 @@ def create_app(
         database = Database(root / "server.sqlite3")
         repositories = Repositories(database)
         asset_store = AssetStore(root / "assets")
-        runner = LocalProcessRunner(database.path, asset_store.root, fixture_mode=fixture_mode)
+        runner = LocalProcessRunner(
+            database.path,
+            asset_store.root,
+            fixture_mode=fixture_mode,
+            max_jobs=max_jobs,
+            render_workers=render_workers,
+        )
+        app.state.local_runner = runner
         dispatcher: Any = Dispatcher(repositories, runner)
         services = LocalServices(
             repositories=repositories,
             assets=asset_store,
-            voices=tuple(voices),
+            voices=tuple(voices)
+            if voices is not None
+            else tuple(
+                voice for voice in kk.list_voices() if voice.enabled and voice.state == "loaded"
+            ),
             dispatcher=dispatcher,
         )
         app.state.local_services = services
@@ -179,18 +223,32 @@ def create_app(
             hosted_services.repositories.assets.owner_id,
         )
         app.state.hosted_services = hosted_services
+    if max_upload_bytes < 1:
+        raise ValueError("max_upload_bytes must be positive")
+    if max_speech_characters < 1:
+        raise ValueError("max_speech_characters must be positive")
+    app.state.max_speech_characters = max_speech_characters
+    app.state.max_upload_bytes = max_upload_bytes
+    app.state.model_allowlist = model_allowlist
     app.state.services = services
     dispatcher.recover()
     app.include_router(assets.router)
     app.include_router(voices_api.router)
     app.include_router(billing.router)
-    if hosted_config is not None and hosted_services is not None:
+    if (
+        hosted_config is not None
+        and hosted_services is not None
+        and hosted_config.stripe_webhook_secret.get_secret_value()
+    ):
         handler = StripeWebhookHandler(
             BillingService(hosted_services.repositories.billing),
             signing_secret=hosted_config.stripe_webhook_secret.get_secret_value(),
         )
         app.include_router(billing.stripe_webhook_router(handler))
     app.include_router(jobs.router)
+    configured_auth = app.state.hosted_auth
+    if configured_auth is not None and isinstance(configured_auth.backend, BrowserAuthBackend):
+        app.include_router(browser_auth_router(configured_auth.backend))
 
     @app.exception_handler(StarletteHTTPException)
     async def handle_http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
@@ -207,7 +265,7 @@ def create_app(
             request,
             status_code=exc.status_code,
             code="http_error",
-            message="Request failed",
+            message=exc.detail if isinstance(exc.detail, str) else "Request failed",
         )
 
     @app.exception_handler(RequestValidationError)
@@ -266,29 +324,53 @@ def create_app(
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         hosted_auth: HostedAuthServices | None = request.app.state.hosted_auth
-        protected = request.url.path.startswith("/v1/jobs") or request.url.path.startswith(
-            "/v1/assets"
+        path = request.url.path
+        protected = (
+            path.startswith("/v1/jobs")
+            or path.startswith("/v1/assets")
+            or path == "/v1/billing"
+            or path in {"/v1/auth/session", "/v1/auth/logout"}
         )
         if hosted_auth is None or not protected:
             return await call_next(request)
-        scheme, _, token = request.headers.get("Authorization", "").partition(" ")
-        if scheme.lower() != "bearer" or not token:
+        scheme, _, bearer = request.headers.get("Authorization", "").partition(" ")
+        cookie = request.cookies.get(SESSION_COOKIE)
+        token = bearer if scheme.lower() == "bearer" else cookie
+        if not token:
             return _error_response(
-                request,
-                status_code=401,
-                code="unauthenticated",
-                message="Authentication required",
+                request, status_code=401, code="unauthenticated", message="Sign in to continue."
             )
+        refreshed = None
         try:
-            request.state.hosted_identity = hosted_auth.backend.authenticate(token)
+            backend = hosted_auth.backend
+            if cookie and scheme.lower() != "bearer" and isinstance(backend, BrowserAuthBackend):
+                if request.method not in {"GET", "HEAD", "OPTIONS"}:
+                    redirect = urlsplit(backend.config.redirect_uri)
+                    trusted = {backend.config.web_origin, f"{redirect.scheme}://{redirect.netloc}"}
+                    if request.headers.get("Origin") not in trusted:
+                        return _error_response(
+                            request,
+                            status_code=403,
+                            code="invalid_origin",
+                            message="Request origin is not allowed.",
+                        )
+                identity, refreshed = await anyio.to_thread.run_sync(
+                    backend.authenticate_browser, token
+                )
+            else:
+                identity = await anyio.to_thread.run_sync(backend.authenticate, token)
+            request.state.hosted_identity = identity
         except PermissionError:
             return _error_response(
                 request,
                 status_code=401,
                 code="unauthenticated",
-                message="Authentication required",
+                message="Sign in with an invited account to continue.",
             )
-        return await call_next(request)
+        response = await call_next(request)
+        if refreshed is not None:
+            set_session(response, refreshed)
+        return response
 
     @app.get("/v1/health", responses=ERROR_RESPONSES)
     async def health() -> dict[str, str]:
@@ -300,7 +382,30 @@ def create_app(
         responses=ERROR_RESPONSES,
     )
     async def capabilities() -> Capabilities:
-        return local_capabilities()
+        result = local_capabilities(model_allowlist)
+        result.max_upload_bytes = max_upload_bytes
+        auth = app.state.hosted_auth
+        if auth is not None:
+            result.auth = AuthCapabilities(
+                mode="session" if isinstance(auth.backend, BrowserAuthBackend) else "bearer"
+            )
+        if hosted_services is not None:
+            result.billing = BillingCapabilities(mode="credits")
+        return result
+
+    def openapi_with_events() -> dict[str, Any]:
+        if app.openapi_schema is None:
+            document = get_openapi(title=app.title, version=app.version, routes=app.routes)
+            event = EventResponse.model_json_schema(
+                by_alias=True, ref_template="#/components/schemas/{model}"
+            )
+            definitions = event.pop("$defs", {})
+            document["components"]["schemas"].update(definitions)
+            document["components"]["schemas"]["EventResponse"] = event
+            app.openapi_schema = document
+        return app.openapi_schema
+
+    app.openapi = openapi_with_events  # type: ignore[method-assign]
 
     if web_build_path is not None:
         web_build = Path(web_build_path).resolve()
