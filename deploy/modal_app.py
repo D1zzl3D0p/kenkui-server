@@ -82,7 +82,8 @@ image = (
     )
     .env(
         {
-            "KENKUI_POCKET_MANIFEST": "/models/manifest.json",
+            "KENKUI_DEPLOYMENT": deployment,
+            "KENKUI_POCKET_MANIFEST": "/models/runtime/manifest.json",
             "KENKUI_MODAL_APP": app_name,
             "MODAL_ENVIRONMENT": deployment,
         }
@@ -92,6 +93,13 @@ models = modal.Volume.from_name(
     f"{app_name}-models", environment_name=deployment, create_if_missing=True
 )
 secrets = [modal.Secret.from_name(f"{app_name}-worker", environment_name=deployment)]
+
+
+def configure_model_manifest() -> None:
+    """Resolve Modal's volume symlink before the library records asset paths."""
+    manifest = Path(os.environ["KENKUI_POCKET_MANIFEST"]).resolve()
+    manifest.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.environ["KENKUI_POCKET_MANIFEST"] = str(manifest)
 
 
 @app.function(
@@ -109,6 +117,7 @@ def render_job(dispatch_id: str, token: str) -> None:
     from kenkui_server.compute.hosted import execute_hosted
     from kenkui_server.hosted import object_store, required
 
+    configure_model_manifest()
     execute_hosted(required("DATABASE_URL"), object_store(), dispatch_id, token)
 
 
@@ -120,6 +129,7 @@ def provision() -> None:
 
     from kenkui_server.hosted import required
 
+    configure_model_manifest()
     for voice_id in required("KENKUI_VOICE_IDS").split(","):
         kk.load_voice(voice_id.strip())
     models.commit()
