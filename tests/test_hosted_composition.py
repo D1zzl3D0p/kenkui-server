@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 from dataclasses import dataclass
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -218,5 +219,65 @@ def test_hosted_job_route_uses_single_atomic_durable_admission(
         key,
     ) = fixture.repositories.admissions[0]
     assert admitted_dispatch.job_id == admitted_job.id
-    assert (account_id, owner_id, credits, key) == ("account-1", str(OWNER), 2, hashlib.sha256(f"{OWNER}:request-1".encode()).hexdigest())
+    assert (account_id, owner_id, credits, key) == (
+        "account-1",
+        str(OWNER),
+        1000,
+        hashlib.sha256(f"{OWNER}:request-1".encode()).hexdigest(),
+    )
     assert fixture.runner.started == [admitted_dispatch.id]
+
+
+@pytest.mark.parametrize("characters", [1, 1_189_736, 3_238_498, 10_000_000])
+def test_preflight_and_admission_agree_on_flat_book_charge(monkeypatch, characters):
+    app, fixture = _hosted_app()
+    spec = JobSpec(
+        "source-1",
+        ("chapter-1",),
+        SingleVoiceCasting("narrator"),
+        TtsSettings(),
+        OutputSpec("artifact.m4b"),
+    )
+    monkeypatch.setattr(jobs, "_preflight", lambda request, payload: (spec, characters))
+    fixture.repositories.billing.account = lambda _: SimpleNamespace(available_credits=1000)
+    payload = {
+        "sourceId": "source-1",
+        "chapters": ["chapter-1"],
+        "casting": {"voiceId": "narrator"},
+        "output": {"format": "m4b"},
+    }
+    with TestClient(app) as client:
+        preflight = client.post(
+            "/v1/jobs/preflight", headers={"Authorization": "Bearer owner"}, json=payload
+        )
+        assert preflight.status_code == 200
+        assert preflight.json()["estimatedCredits"] == 1000
+        assert preflight.json()["valid"] is True
+        admitted = client.post("/v1/jobs", headers={"Authorization": "Bearer owner"}, json=payload)
+        assert admitted.status_code == 202
+    assert fixture.repositories.admissions[0][4] == 1000
+
+
+def test_insufficient_balance_rejects_flat_book_preflight(monkeypatch):
+    app, fixture = _hosted_app()
+    spec = JobSpec(
+        "source-1",
+        ("chapter-1",),
+        SingleVoiceCasting("narrator"),
+        TtsSettings(),
+        OutputSpec("artifact.m4b"),
+    )
+    monkeypatch.setattr(jobs, "_preflight", lambda request, payload: (spec, 1_189_736))
+    fixture.repositories.billing.account = lambda _: SimpleNamespace(available_credits=999)
+    with TestClient(app) as client:
+        result = client.post(
+            "/v1/jobs/preflight",
+            headers={"Authorization": "Bearer owner"},
+            json={
+                "sourceId": "source-1",
+                "chapters": ["chapter-1"],
+                "casting": {"voiceId": "narrator"},
+            },
+        )
+    assert result.json()["valid"] is False
+    assert fixture.repositories.admissions == []

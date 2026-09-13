@@ -126,3 +126,20 @@ The current API image includes the library's full locked dependencies, including
 Torch and CUDA packages, and is approximately 9 GB locally. Allow for image pull
 time and registry capacity during the staging rehearsal. A smaller API dependency
 set is a follow-up optimization that must preserve library inspection behavior.
+
+
+## Flat book pricing
+
+Each non-empty book conversion costs 1,000 credits, regardless of character count
+or selected chapter count. The default beta allowance covers one conversion;
+failed/cancelled jobs release the reservation. Existing balances and settled ledger
+entries are preserved. Downloads and an idempotent submission replay do not charge
+again. A new conversion, including a changed voice, creates a new charge.
+
+`KENKUI_MAX_SPEECH_CHARACTERS` defaults to 10,000,000, independently of credit
+pricing. The complete Project Gutenberg English *Les Misérables* EPUB (ebook 135)
+measured 3,238,498 speech characters with the pinned core. Dune was reported by the
+beta tester at 1,189,736. Empty speech, the 50 MiB upload limit, ownership, voice
+permissions and concurrent-job admission checks still apply. Modal allows up to
+24 hours per rendering attempt; this is not a throughput or cost guarantee. Measure
+complete-book runtime before claiming sub-dollar compute or long-book acceptance.

@@ -106,6 +106,7 @@ def create_hosted_app() -> FastAPI:
         hosted_config=config,
         hosted_services=services,
         allowed_origins=[session_config.web_origin],
+        max_speech_characters=int(os.environ.get("KENKUI_MAX_SPEECH_CHARACTERS", "10000000")),
         model_allowlist=tuple(
             filter(None, os.environ.get("KENKUI_MODEL_ALLOWLIST", "").split(","))
         ),

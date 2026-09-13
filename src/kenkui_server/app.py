@@ -133,7 +133,7 @@ def create_app(
     voices: Sequence[kk.Voice] | None = None,
     model_allowlist: tuple[str, ...] = (),
     max_upload_bytes: int = 50 * 1024 * 1024,
-    max_speech_characters: int = 2_000_000,
+    max_speech_characters: int = 10_000_000,
     fixture_mode: bool = False,
     max_jobs: int = 2,
     render_workers: int = 1,

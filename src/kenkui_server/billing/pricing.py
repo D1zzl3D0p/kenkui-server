@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import math
 import re
 import unicodedata
 
-CHARS_PER_CREDIT = 1_000
+CREDITS_PER_BOOK = 1_000
 
 
 def normalized_speech_characters(text: str) -> int:
@@ -17,10 +16,10 @@ def normalized_speech_characters(text: str) -> int:
 
 
 def credits_for_characters(character_count: int) -> int:
-    """Charge whole credits; an empty synthesis does not reserve a credit."""
+    """Charge a flat rate per conversion, independent of book length."""
     if character_count < 0:
         raise ValueError("invalid_character_count")
-    return math.ceil(character_count / CHARS_PER_CREDIT)
+    return CREDITS_PER_BOOK if character_count else 0
 
 
 def credits_for_text(text: str) -> int:

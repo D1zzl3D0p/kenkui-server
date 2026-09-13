@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID
 
 import kenkui as kk
@@ -95,7 +96,8 @@ def test_completion_rolls_back_if_artifact_registration_fails(tmp_path):
     )
     # A database failure after updating the job must roll back both state and event.
     database.connection.execute(
-        "CREATE TRIGGER reject_artifact BEFORE INSERT ON artifacts BEGIN SELECT RAISE(ABORT, 'disk failure'); END"
+        "CREATE TRIGGER reject_artifact BEFORE INSERT ON artifacts "
+        "BEGIN SELECT RAISE(ABORT, 'disk failure'); END"
     )
     completed = transition(running, Completed())
     with pytest.raises(Exception, match="disk failure"):
@@ -119,3 +121,38 @@ def test_default_voice_discovery_only_advertises_loaded_voices(tmp_path, monkeyp
     )
     with TestClient(create_app(data_dir=tmp_path)) as client:
         assert [v["id"] for v in client.get("/v1/voices").json()["items"]] == ["loaded"]
+
+
+@pytest.mark.parametrize("characters, expected", [(10_000_000, 200), (10_000_001, 422)])
+def test_book_size_cap_is_independent_of_credit_price(tmp_path, monkeypatch, characters, expected):
+    from kenkui_server.api import jobs
+
+    voice = kk.Voice("narrator", "Narrator", True, "test", "test", True)
+    app = create_app(data_dir=tmp_path, voices=(voice,), fixture_mode=True)
+    with TestClient(app) as client:
+        asset = client.post(
+            "/v1/assets",
+            content=SOURCE.read_bytes(),
+            headers={"Content-Type": "application/epub+zip"},
+        ).json()
+        book = client.get(f"/v1/assets/{asset['id']}/book").json()
+        monkeypatch.setattr(
+            jobs,
+            "pipeline_from_job",
+            lambda *_: SimpleNamespace(
+                inspect=lambda: SimpleNamespace(
+                    chapters=[SimpleNamespace(speech_characters=characters)]
+                )
+            ),
+        )
+        payload = {
+            "sourceId": asset["id"],
+            "chapters": [book["chapters"][0]["id"]],
+            "casting": {"voiceId": "narrator"},
+        }
+        result = client.post("/v1/jobs/preflight", json=payload)
+        assert result.status_code == expected
+        if expected == 422:
+            assert result.json()["error"]["message"] == "job_size_limit"
+            assert client.post("/v1/jobs", json=payload).status_code == 422
+    assert app.state.services.repositories.jobs.list() == ()

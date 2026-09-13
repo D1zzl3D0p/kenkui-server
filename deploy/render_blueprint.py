@@ -28,6 +28,7 @@ def blueprint(environment, image, worker_cidrs=()):
         "KENKUI_WEB_ORIGIN": web,
         "KENKUI_VOICE_IDS": "eponine",
         "KENKUI_MAX_JOBS": "2",
+        "KENKUI_MAX_SPEECH_CHARACTERS": "10000000",
         "KENKUI_BETA_CREDITS": "1000",
         "KENKUI_MODEL_ALLOWLIST": "",
     }

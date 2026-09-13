@@ -4,11 +4,16 @@ from kenkui_server.billing.models import AuthorizationStatus, InMemoryBillingRep
 from kenkui_server.billing.service import BillingService
 
 
-def test_credit_pricing_rounds_normalized_speech_characters_up() -> None:
+def test_credit_pricing_is_flat_for_short_and_long_books() -> None:
     service = BillingService(InMemoryBillingRepository())
 
-    assert service.credits_for_text("  hello\nworld  ") == 1
-    assert service.credits_for_text("x" * 1001) == 2
+    assert service.credits_for_text("  hello\nworld  ") == 1000
+    assert service.credits_for_text("x" * 1001) == 1000
+    from kenkui_server.billing.pricing import credits_for_characters
+
+    assert credits_for_characters(1_189_736) == 1000
+    assert credits_for_characters(10_000_000) == 1000
+    assert service.credits_for_text(" \n ") == 0
 
 
 def test_duplicate_completed_attempt_settles_one_authorization() -> None:

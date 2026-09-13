@@ -14,7 +14,7 @@ from kenkui_server.jobs.models import JobStatus
 def test_admission_reserves_before_queue_and_releases_when_queue_persistence_fails() -> None:
     repository = InMemoryBillingRepository()
     service = BillingService(repository)
-    service.grant_credits("account-1", 2, reference="purchase-1")
+    service.grant_credits("account-1", 1000, reference="purchase-1")
 
     with pytest.raises(RuntimeError, match="queue unavailable"):
         CreditAwareJobAdmission(service).admit(
@@ -24,7 +24,7 @@ def test_admission_reserves_before_queue_and_releases_when_queue_persistence_fai
             admit=lambda: (_ for _ in ()).throw(RuntimeError("queue unavailable")),
         )
 
-    assert repository.account("account-1").available_credits == 2
+    assert repository.account("account-1").available_credits == 1000
 
 
 def test_terminal_finalizer_settles_success_and_releases_other_terminal_outcomes() -> None:

@@ -108,7 +108,7 @@ def configure_model_manifest() -> None:
     volumes={"/models": models},
     cpu=2,
     memory=8192,
-    timeout=7200,
+    timeout=24 * 60 * 60,
     max_containers=2,
     retries=0,
     proxy=proxy,
