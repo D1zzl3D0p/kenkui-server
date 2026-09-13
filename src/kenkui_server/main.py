@@ -20,6 +20,7 @@ def create_uvicorn_config(server_config: ServerConfig | None = None) -> uvicorn.
             model_allowlist=config.model_allowlist,
             max_jobs=config.max_jobs,
             render_workers=config.render_workers,
+            allowed_origins=config.allowed_origins,
         ),
         host=config.host,
         port=config.port,

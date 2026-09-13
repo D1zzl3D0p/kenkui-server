@@ -43,3 +43,18 @@ def test_configured_web_build_serves_assets_and_spa_fallback_without_shadowing_v
     assert missing_api.status_code == 404
     assert missing_api.json()["error"]["code"] == "not_found"
 
+
+def test_allows_configured_cross_origin_clients(tmp_path):
+    """A browser served from a different origin must be able to call /v1."""
+    with TestClient(create_app(data_dir=tmp_path / "state", allowed_origins=["https://app.kenkui.example"])) as client:
+        response = client.get("/v1/capabilities", headers={"Origin": "https://app.kenkui.example"})
+
+    assert response.headers["access-control-allow-origin"] == "https://app.kenkui.example"
+
+
+def test_omits_cors_headers_when_no_origins_are_configured(tmp_path):
+    """A loopback-only server stays closed by default."""
+    with TestClient(create_app(data_dir=tmp_path / "state")) as client:
+        response = client.get("/v1/capabilities", headers={"Origin": "https://evil.example"})
+
+    assert "access-control-allow-origin" not in response.headers

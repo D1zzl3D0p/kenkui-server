@@ -1,9 +1,16 @@
 """Local-only server configuration and public capability DTOs."""
 
+import os
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
+
+
+def _allowed_origins_from_env() -> list[str]:
+    """Read the comma-separated KENKUI_ALLOWED_ORIGINS allowlist."""
+    raw = os.environ.get("KENKUI_ALLOWED_ORIGINS", "")
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
 class ServerConfig(BaseModel):
@@ -16,6 +23,7 @@ class ServerConfig(BaseModel):
     model_allowlist: tuple[str, ...] = ()
     max_jobs: int = Field(2, ge=1)
     render_workers: int = Field(1, ge=1)
+    allowed_origins: list[str] = Field(default_factory=_allowed_origins_from_env)
 
 
 class HostedConfig(BaseModel):

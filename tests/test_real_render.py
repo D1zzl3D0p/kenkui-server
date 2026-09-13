@@ -16,7 +16,9 @@ from kenkui_server.app import create_app
     not os.environ.get("KENKUI_BETA_TEST_VOICE"), reason="requires a provisioned voice"
 )
 def test_server_produces_playable_m4b(tmp_path: Path) -> None:
-    web_root = Path(__file__).resolve().parents[2] / "kenkui-web"
+    web_root = Path(
+        os.environ.get("KENKUI_WEB_ROOT") or Path(__file__).resolve().parents[2] / "kenkui-web"
+    )
     source = web_root / "tests/fixtures/book.epub"
     with TestClient(create_app(data_dir=tmp_path / "state")) as client:
         asset = client.post(

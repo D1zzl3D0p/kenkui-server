@@ -138,6 +138,7 @@ def create_app(
     max_jobs: int = 2,
     render_workers: int = 1,
     web_build_path: str | Path | None = None,
+    allowed_origins: list[str] | None = None,
     auth_backend: AuthBackend | None = None,
     job_owner_resolver: Callable[[str], UUID] | None = None,
     asset_owner_resolver: Callable[[str], UUID] | None = None,
@@ -172,6 +173,16 @@ def create_app(
         docs_url="/v1/docs",
         redoc_url=None,
     )
+    if allowed_origins:
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allowed_origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+            allow_headers=["Content-Type", "Idempotency-Key", "Authorization"],
+        )
     if hosted_services is None:
         root = (
             Path(data_dir)
