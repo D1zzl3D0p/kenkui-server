@@ -993,7 +993,7 @@ wheels = [
 
 [[package]]
 name = "kenkui"
-version = "0.1.0"
+version = "10.0.0"
 source = { editable = "../kenkui" }
 dependencies = [
     { name = "defusedxml" },
@@ -1033,7 +1033,7 @@ docs = [
 
 [[package]]
 name = "kenkui-server"
-version = "0.1.0"
+version = "10.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

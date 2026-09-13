@@ -39,30 +39,30 @@ the release as well. Run the real-render gate on a provisioned machine.
 
 ## 2. Modal network and environments
 
-Create Modal environments `staging` and `production`. Create an outbound Proxy
-in the appropriate environment and record all its static IPs. Modal currently
-requires Team or Enterprise for Proxies; this is an account prerequisite, and the
-Proxy feature is marked beta. See [Modal Proxies](https://modal.com/docs/guide/proxy-ips).
+Create Modal environments `staging` and `production`. Ordinary Modal workers
+connect directly to Render's external PostgreSQL endpoint using TLS and database
+credentials. No Team/Enterprise plan or fixed outbound IP is required.
 
-The render, recovery, and retention functions use this proxy. Model provisioning
-does not access PostgreSQL. The Render database allowlist must contain every proxy
-IP as a `/32` (or appropriate IPv6 range). A shared workspace proxy is acceptable
-if configured in each target environment, but credentials/databases remain separate.
+The default Blueprint permits authenticated database connections from dynamic
+IPv4 addresses. Use a dedicated database role and verify the server certificate.
+Optionally configure `KENKUI_MODAL_PROXY` and pass its static IPs with
+`--worker-cidr` when an IP allowlist is desired. Modal's optional Proxy requires
+Team/Enterprise. Do not configure an allowlist of static IPs without also routing
+all database-accessing worker functions through the matching proxy.
 
 ## 3. Generate and sync the Render Blueprint
 
-From the server checkout, using the real image digest and proxy IP:
+From the server checkout, using the real image digest :
 
 ```sh
 python deploy/render_blueprint.py --environment staging \
-  --image ghcr.io/OWNER/REPOSITORY@sha256:DIGEST \
-  --worker-cidr PROXY_IP/32 > render.staging.yaml
+  --image ghcr.io/OWNER/REPOSITORY@sha256:DIGEST > render.staging.yaml
 ```
 
 The output is JSON, which is valid YAML. Repeat with `production` and save as
 `render.production.yaml`. Commit the generated files to the deployment repository
 and select the corresponding file when creating each Render Blueprint. The
-generator requires immutable images and rejects unrestricted database access.
+generator requires immutable images and supports optional database IP restrictions.
 The generated document contains secret prompts, never secret values.
 
 Render injects the database's internal connection string into the API. Its
@@ -89,9 +89,9 @@ and browser session secrets are not needed in workers.
 ```sh
 uv run --extra hosted modal secret create kenkui-staging-worker \
   --env staging --from-dotenv /PRIVATE/PATH/worker.env
-KENKUI_DEPLOYMENT=staging KENKUI_MODAL_PROXY=PROXY_NAME \
+KENKUI_DEPLOYMENT=staging \
   uv run --extra hosted modal deploy deploy/modal_app.py --env staging
-KENKUI_DEPLOYMENT=staging KENKUI_MODAL_PROXY=PROXY_NAME \
+KENKUI_DEPLOYMENT=staging \
   uv run --extra hosted modal run deploy/modal_app.py::provision --env staging
 ```
 

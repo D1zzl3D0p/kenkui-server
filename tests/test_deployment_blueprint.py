@@ -24,14 +24,11 @@ def test_environments_do_not_share_databases_or_modal_apps():
         assert service["image"]["url"] == image
 
 
-@pytest.mark.parametrize(
-    "image,cidrs",
-    [
-        ("ghcr.io/kenkui/server:latest", ["192.0.2.1/32"]),
-        ("ghcr.io/kenkui/server@sha256:" + "a" * 64, ["0.0.0.0/0"]),
-        ("ghcr.io/kenkui/server@sha256:" + "a" * 64, []),
-    ],
-)
-def test_rejects_mutable_images_and_unrestricted_database_ingress(image, cidrs):
+def test_rejects_mutable_images():
     with pytest.raises(ValueError):
-        module.blueprint("production", image, cidrs)
+        module.blueprint("production", "ghcr.io/kenkui/server:latest")
+
+
+def test_dynamic_modal_network_does_not_require_a_proxy():
+    document = module.blueprint("production", "ghcr.io/kenkui/server@sha256:" + "a" * 64)
+    assert document["databases"][0]["ipAllowList"][0]["source"] == "0.0.0.0/0"

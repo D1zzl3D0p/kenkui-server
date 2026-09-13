@@ -13,9 +13,9 @@ if deployment not in {"staging", "production"}:
 app_name = f"kenkui-{deployment}"
 app = modal.App(app_name)
 proxy_name = os.environ.get("KENKUI_MODAL_PROXY")
-if not proxy_name:
-    raise ValueError("KENKUI_MODAL_PROXY must name the allowlisted outbound proxy")
-proxy = modal.Proxy.from_name(proxy_name, environment_name=deployment)
+proxy = (
+    modal.Proxy.from_name(proxy_name, environment_name=deployment) if proxy_name else None
+)
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("ffmpeg")

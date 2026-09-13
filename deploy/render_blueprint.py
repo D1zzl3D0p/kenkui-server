@@ -6,14 +6,16 @@ import json
 import re
 
 
-def blueprint(environment, image, worker_cidrs):
+def blueprint(environment, image, worker_cidrs=()):
     if environment not in {"staging", "production"}:
         raise ValueError("invalid deployment environment")
     if not re.fullmatch(r"[a-zA-Z0-9./_-]+@sha256:[a-f0-9]{64}", image):
         raise ValueError("image must be pinned to a registry sha256 digest")
     cidrs = [str(ipaddress.ip_network(value, strict=True)) for value in worker_cidrs]
-    if not cidrs or any(ipaddress.ip_network(value).prefixlen == 0 for value in cidrs):
-        raise ValueError("supply specific Modal outbound CIDRs; unrestricted access is forbidden")
+    # Ordinary Modal workers use dynamic outbound IPs; TLS and database
+    # credentials authenticate them. Fixed-IP restriction is an optional upgrade.
+    if not cidrs:
+        cidrs = ["0.0.0.0/0"]
     suffix = "" if environment == "production" else ".staging"
     api = f"api{suffix}.kenkui.fm"
     web = f"https://app{suffix}.kenkui.fm"
@@ -90,6 +92,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--environment", required=True, choices=["staging", "production"])
     parser.add_argument("--image", required=True)
-    parser.add_argument("--worker-cidr", required=True, action="append")
+    parser.add_argument("--worker-cidr", action="append", default=[])
     args = parser.parse_args()
     print(json.dumps(blueprint(args.environment, args.image, args.worker_cidr), indent=2))
