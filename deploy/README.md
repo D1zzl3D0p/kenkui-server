@@ -32,8 +32,8 @@ The real-render test creates its own temporary job/source/output directory.
 ```sh
 # Provision explicitly before serving. Rendering never downloads models.
 uv run python -c 'import kenkui as kk; kk.load_voice("eponine")'
-# Build ../kenkui-web first with npm run build.
-uv run kenkui-server --web-build-path ../kenkui-web/dist --max-jobs 2 --render-workers 1
+# Build ../kenkui-studio first with npm run build.
+uv run kenkui-server --web-build-path ../kenkui-studio/dist --max-jobs 2 --render-workers 1
 ```
 
 The server advertises loaded voices by default. `KENKUI_POCKET_MANIFEST` selects

@@ -8,10 +8,10 @@ commands = [
     ("kenkui-server", ["uv", "run", "mypy"]),
     ("kenkui-server", ["uv", "run", "ruff", "check", "src"]),
     ("kenkui-server", ["uv", "run", "python", "-m", "kenkui_server.export_openapi", "--check"]),
-    ("kenkui-web", ["npm", "run", "check:api"]),
-    ("kenkui-web", ["npm", "test"]),
-    ("kenkui-web", ["npm", "run", "build"]),
-    ("kenkui-web", ["npm", "run", "test:e2e"]),
+    ("kenkui-studio", ["npm", "run", "check:api"]),
+    ("kenkui-studio", ["npm", "test"]),
+    ("kenkui-studio", ["npm", "run", "build"]),
+    ("kenkui-studio", ["npm", "run", "test:e2e"]),
 ]
 for repository, command in commands:
     print(f"Verifying {repository}: {' '.join(command)}", flush=True)

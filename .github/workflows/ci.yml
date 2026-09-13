@@ -45,7 +45,7 @@ jobs:
         with:
           repository: ${{ vars.KENKUI_WEB_REPOSITORY }}
           ref: ${{ vars.KENKUI_WEB_REF }}
-          path: kenkui-web
+          path: kenkui-studio
           token: ${{ secrets.KENKUI_REPO_READ_TOKEN || github.token }}
       - uses: astral-sh/setup-uv@v5
         with:
@@ -56,7 +56,7 @@ jobs:
       - run: uv sync --frozen --all-groups --extra hosted
         working-directory: kenkui-server
       - run: npm ci
-        working-directory: kenkui-web
+        working-directory: kenkui-studio
       - run: npx playwright install --with-deps chromium
-        working-directory: kenkui-web
+        working-directory: kenkui-studio
       - run: python kenkui-server/scripts/verify-workspace.py

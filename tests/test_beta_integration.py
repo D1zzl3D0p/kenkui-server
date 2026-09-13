@@ -23,7 +23,7 @@ from kenkui_server.storage.database import Database
 from kenkui_server.storage.repositories import Repositories
 
 WEB_ROOT = Path(
-    os.environ.get("KENKUI_WEB_ROOT") or Path(__file__).resolve().parents[2] / "kenkui-web"
+    os.environ.get("KENKUI_WEB_ROOT") or Path(__file__).resolve().parents[2] / "kenkui-studio"
 )
 SOURCE = WEB_ROOT / "tests/fixtures/book.epub"
 
