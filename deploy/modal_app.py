@@ -37,6 +37,15 @@ image = (
             ".dev.vars*",
             ".serena",
             ".superpowers",
+            "__pycache__",
+            "*.pyc",
+            ".pytest_cache",
+            ".ruff_cache",
+            ".mypy_cache",
+            ".coverage*",
+            "htmlcov",
+            "dist",
+            "build",
         ],
     )
     .add_local_dir(
@@ -54,6 +63,15 @@ image = (
             ".dev.vars*",
             ".serena",
             ".superpowers",
+            "__pycache__",
+            "*.pyc",
+            ".pytest_cache",
+            ".ruff_cache",
+            ".mypy_cache",
+            ".coverage*",
+            "htmlcov",
+            "dist",
+            "build",
         ],
     )
     .workdir("/app/kenkui-server")
