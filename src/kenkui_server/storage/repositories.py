@@ -274,11 +274,12 @@ class DispatchRepository:
         return tuple(Dispatch(*row) for row in rows)
 
     def list_incomplete(self) -> tuple[Dispatch, ...]:
-        """Return pending or claimed work that must be reconciled after restart."""
+        """Recover by job truth, including legacy prematurely finished dispatches."""
         rows = self._database.query(
             """
-            SELECT id, job_id, status, version FROM dispatches
-            WHERE status IN ('pending', 'running') ORDER BY id
+            SELECT d.id, d.job_id, d.status, d.version FROM dispatches d
+            JOIN jobs j ON j.id = d.job_id
+            WHERE j.status NOT IN ('succeeded', 'failed', 'cancelled') ORDER BY d.id
             """
         ).fetchall()
         return tuple(Dispatch(*row) for row in rows)
@@ -505,7 +506,7 @@ class Repositories:
     def finish_dispatch_if_not_cancellation_requested(
         self, dispatch: Dispatch, *, lease: tuple[str, str] | None = None
     ) -> bool:
-        """Finish a dispatch only when its job was not durably cancelled first."""
+        """Finish terminal jobs; return False if cancellation still needs acknowledgement."""
         with self.database.transaction() as connection:
             self.check_lease(connection, lease)
             status = connection.execute(
@@ -515,6 +516,8 @@ class Repositories:
                 raise KeyError(dispatch.job_id)
             if status[0] == JobStatus.CANCEL_REQUESTED.value:
                 return False
+            if not JobStatus(status[0]).is_terminal:
+                raise StaleWriteError()
             result = connection.execute(
                 """
                 UPDATE dispatches SET status = 'done', version = ? WHERE id = ? AND version = ?

@@ -173,3 +173,46 @@ def test_retention_deletes_expired_unsubmitted_sources_once(database):
     assert retention.run() == 0
     with pytest.raises(KeyError):
         objects.read_source("expired")
+
+
+def test_legacy_orphan_recovery_preserves_reservation_and_refunds_on_exhaustion(database):
+    from kenkui_server.jobs.transitions import DispatchRequested, transition
+    from kenkui_server.storage.repositories import StaleWriteError
+
+    owner = PostgresIdentityRepository(database).user_id_for_subject("orphan-user")
+    account = str(uuid4())
+    database.execute(
+        "INSERT INTO credit_accounts (id, identity_id, available_credits) VALUES (%s,%s,1000)",
+        (account, str(owner)),
+    )
+    repo = PostgresHostedRepository(database)
+    job = Job(str(uuid4()), JobSpec(
+        "source", ("chapter",), SingleVoiceCasting("narrator"), TtsSettings(), OutputSpec("out.m4b")
+    ))
+    dispatch = Dispatch(str(uuid4()), job.id, "pending")
+    repo.admit(job, dispatch, account_id=account, owner_id=str(owner),
+               credits=1000, idempotency_key="orphan")
+    token = repo.claim_execution(dispatch.id, limit=1)
+    repo.update_job_and_append_event(
+        transition(job, DispatchRequested()), expected_version=0, event_type="running",
+        lease=(dispatch.id, token),
+    )
+    with pytest.raises(StaleWriteError):
+        repo.finish_dispatch_if_not_cancellation_requested(repo.dispatches.get(dispatch.id))
+    # Reproduce the corrupted state written by the pre-fix worker.
+    database.execute("UPDATE dispatches SET status='done' WHERE id=%s", (dispatch.id,))
+    repo.release_execution(dispatch.id, token)
+    assert [d.id for d in repo.dispatches.list_incomplete()] == [dispatch.id]
+    for _ in range(2):
+        token = repo.claim_execution(dispatch.id, limit=1)
+        assert token
+        assert repo.dispatches.get(dispatch.id).status == "pending"
+        assert repo.billing.account(account).available_credits == 0
+        assert repo.billing.authorization_for_job(job.id).status is AuthorizationStatus.RESERVED
+        repo.release_execution(dispatch.id, token)
+    assert repo.claim_execution(dispatch.id, limit=1) is None
+    assert repo.jobs.get(job.id).status.value == "failed"
+    assert repo.billing.account(account).available_credits == 1000
+    assert repo.dispatches.list_incomplete() == ()
+    entries = repo.billing.ledger_for_authorization(repo.billing.authorization_for_job(job.id).id)
+    assert sorted(e.kind for e in entries) == ["release", "reservation"]

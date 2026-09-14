@@ -135,6 +135,12 @@ class LocalJobRunner:
                 return
         elif job.status is JobStatus.RUNNING:
             running = job
+            if self._lease is not None:
+                # Attempts currently restart synthesis; do not display the
+                # previous attempt's completed chapters as current progress.
+                running = transition(job, ProgressReported("retrying", 0, job.progress.total))
+                if not self._update(repositories, running, "progress"):
+                    return
         else:
             return
         try:
@@ -238,6 +244,11 @@ class LocalJobRunner:
         self, repositories: Repositories, dispatch_id: str, job_id: str, output: Path | None
     ) -> None:
         while True:
+            current = repositories.jobs.get(job_id)
+            # An interrupted attempt is not a completed job. In particular,
+            # Modal preemption unwinds this finally block via BaseException.
+            if not current.status.is_terminal and current.status is not JobStatus.CANCEL_REQUESTED:
+                return
             current_dispatch = repositories.dispatches.get(dispatch_id)
             if current_dispatch.status == "done":
                 return

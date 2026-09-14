@@ -148,8 +148,8 @@ def test_cancellation_after_dispatch_finalization_terminalizes_atomically(tmp_pa
         Dispatch("dispatch-finalized", job.id, "pending"),
         idempotency_key=None,
     )
-    repositories.finish_dispatch_if_not_cancellation_requested(
-        repositories.dispatches.get("dispatch-finalized")
+    repositories.dispatches.update(
+        Dispatch("dispatch-finalized", job.id, "done", 1), expected_version=0
     )
 
     with TestClient(app) as client:

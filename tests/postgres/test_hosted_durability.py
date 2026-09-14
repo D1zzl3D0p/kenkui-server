@@ -154,20 +154,21 @@ def test_postgres_repositories_expose_event_and_dispatch_recovery_operations() -
     assert "INSERT INTO job_events" in sql
     assert "FROM job_events WHERE job_id = %s ORDER BY sequence" in sql
     assert "WHERE status = 'pending'" in sql
-    assert "WHERE status IN ('pending', 'running')" in sql
+    assert "WHERE j.status NOT IN ('succeeded', 'failed', 'cancelled')" in sql
 
 
 def test_postgres_worker_finishes_a_dispatch_only_when_cancellation_was_not_requested() -> None:
     connection = RecordingConnection()
     repositories = PostgresRepositories(connection)
 
-    finished = repositories.finish_dispatch_if_not_cancellation_requested(
-        Dispatch("dispatch-1", "job-1", "running", 1)
-    )
+    from kenkui_server.storage.repositories import StaleWriteError
 
-    assert finished is True
+    with pytest.raises(StaleWriteError):
+        repositories.finish_dispatch_if_not_cancellation_requested(
+            Dispatch("dispatch-1", "job-1", "running", 1)
+        )
     sql = "\n".join(statement for statement, _ in connection.statements)
-    assert "UPDATE dispatches SET status = 'done'" in sql
+    assert "UPDATE dispatches SET status = 'done'" not in sql
 
 
 def test_postgres_assets_persist_the_owner_used_by_hosted_authorization() -> None:
