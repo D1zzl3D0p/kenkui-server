@@ -106,8 +106,8 @@ def configure_model_manifest() -> None:
     image=image,
     secrets=secrets,
     volumes={"/models": models},
-    cpu=2,
-    memory=8192,
+    cpu=8,
+    memory=12288,
     timeout=24 * 60 * 60,
     max_containers=2,
     retries=0,
@@ -118,7 +118,13 @@ def render_job(dispatch_id: str, token: str) -> None:
     from kenkui_server.hosted import object_store, required
 
     configure_model_manifest()
-    execute_hosted(required("DATABASE_URL"), object_store(), dispatch_id, token)
+    execute_hosted(
+        required("DATABASE_URL"),
+        object_store(),
+        dispatch_id,
+        token,
+        render_workers=8,
+    )
 
 
 @app.function(
