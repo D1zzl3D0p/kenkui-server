@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from kenkui.voices.registry import load_pack
+from kenkui.voices.registry import load_builtin, load_pack
 from kenkui.voices.types import Voice
 
 VCTK_VOICE_SET = "vctk"
@@ -15,11 +15,15 @@ def select_hosted_voices(selector: str, catalog: Iterable[Voice]) -> tuple[Voice
     """Resolve a named commercial-safe set or an explicit comma-separated list."""
     available = tuple(voice for voice in catalog if voice.enabled)
     if selector.strip().lower() == VCTK_VOICE_SET:
-        pack_ids = {entry.id for entry in load_pack().entries if entry.dataset == VCTK_VOICE_SET}
+        vctk_ids = {
+            entry.id
+            for entry in (*load_builtin(), *load_pack().entries)
+            if entry.dataset == VCTK_VOICE_SET
+        }
         selected = tuple(
             voice
             for voice in available
-            if voice.id in pack_ids
+            if voice.id in vctk_ids
             and voice.license_id == "CC-BY-4.0"
             and (voice.provenance or "").startswith(_VCTK_ORIGIN)
         )
