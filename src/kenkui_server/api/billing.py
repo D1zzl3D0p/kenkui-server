@@ -1,6 +1,7 @@
 """Explicit unmetered local admission declaration."""
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response
+from pydantic import BaseModel, ConfigDict, StrictInt
 
 from kenkui_server.billing.stripe import StripeWebhookHandler
 
@@ -17,7 +18,11 @@ def billing(request: Request) -> dict[str, str]:
     account = services.repositories.billing.account(
         services.account_id_for_identity(identity.user_id)
     )
-    return {"mode": "credits", "availableCredits": str(account.available_credits)}
+    return {
+        "mode": "credits",
+        "availableCredits": str(account.available_credits),
+        "checkoutEnabled": "true" if request.app.state.stripe_checkout else "false",
+    }
 
 
 def stripe_webhook_router(handler: StripeWebhookHandler) -> APIRouter:
@@ -36,3 +41,30 @@ def stripe_webhook_router(handler: StripeWebhookHandler) -> APIRouter:
         return Response(status_code=204)
 
     return hosted_router
+
+
+class CheckoutRequest(BaseModel):
+    """Only a pack size comes from the browser; account and price are server-owned."""
+
+    model_config = ConfigDict(extra="forbid")
+    credits: StrictInt
+
+
+@router.post("/checkout")
+def checkout(payload: CheckoutRequest, request: Request) -> dict[str, str]:
+    from kenkui_server.billing.stripe import CREDIT_PACKS
+
+    services = request.app.state.hosted_services
+    provider = request.app.state.stripe_checkout
+    identity = getattr(request.state, "hosted_identity", None)
+    if services is None or provider is None:
+        raise HTTPException(503, "Card payments are not configured yet.")
+    if identity is None:
+        raise HTTPException(401, "Sign in to buy credits.")
+    if payload.credits not in CREDIT_PACKS:
+        raise HTTPException(422, "invalid_credit_pack")
+    account_id = services.account_id_for_identity(identity.user_id)
+    try:
+        return {"url": provider.create(account_id, payload.credits)}
+    except (OSError, ValueError) as error:
+        raise HTTPException(502, "Unable to start checkout. Please try again.") from error

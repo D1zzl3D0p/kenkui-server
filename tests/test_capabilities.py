@@ -12,5 +12,5 @@ def test_local_capabilities_are_versioned(client: TestClient) -> None:
         "billing": {"mode": "unmetered"},
         "sourceFormats": ["epub"],
         "outputFormats": ["m4b"],
-        "casting": {"modes": ["single"]},
+        "casting": {"modes": ["single"], "models": []},
     }

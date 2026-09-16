@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 from kenkui_server.billing.pricing import credits_for_characters
 from kenkui_server.compute.base import ProcessRunner
-from kenkui_server.jobs.models import Dispatch, Job, JobSpec
+from kenkui_server.jobs.models import CharacterCasting, Dispatch, Job, JobSpec
 from kenkui_server.storage.repositories import Repositories
 
 
@@ -55,7 +55,9 @@ class HostedDispatcher:
         normalized_speech_characters: int,
         idempotency_key: str | None = None,
     ) -> Job:
-        credits = credits_for_characters(normalized_speech_characters)
+        credits = credits_for_characters(
+            normalized_speech_characters, multivoice=isinstance(spec.casting, CharacterCasting)
+        )
         if credits < 1:
             raise ValueError("empty_speech")
         job = Job(str(uuid4()), spec)

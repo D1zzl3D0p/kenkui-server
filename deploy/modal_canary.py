@@ -32,13 +32,14 @@ def verify(source_bytes: bytes) -> dict:
 
     import kenkui as kk
 
-    from kenkui_server.hosted import object_store, required
+    from kenkui_server.hosted import object_store
+    from kenkui_server.voice_catalog import VCTK_VOICE_SET, select_hosted_voices
 
     configure_model_manifest()
     identifier = f"deployment-canary-{uuid4()}"
     store = object_store()
-    voice_id = required("KENKUI_VOICE_IDS").split(",")[0].strip()
-    voice = next(v for v in kk.list_voices() if v.id == voice_id)
+    voice = select_hosted_voices(VCTK_VOICE_SET, kk.list_voices())[0]
+    voice_id = voice.id
     if voice.state != "loaded":
         raise RuntimeError("Provision the worker voice before running the canary")
     started = time.monotonic()

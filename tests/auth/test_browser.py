@@ -67,6 +67,15 @@ def test_login_checks_state_and_sets_host_only_secure_session(tmp_path):
             == 403
         )
 
+        assert (
+            client.post(
+                "/v1/billing/checkout",
+                headers={"Origin": "https://stranger.example.com"},
+                json={"credits": 500},
+            ).status_code
+            == 403
+        )
+
 
 def test_uninvited_and_unverified_users_cannot_use_sessions():
     auth = backend()

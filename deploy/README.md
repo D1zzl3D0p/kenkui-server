@@ -1,8 +1,8 @@
 # Private beta release runbook
 
 The library is the audiobook engine. This release adapts the server, workers,
-storage and browser to its current public API. Paid checkout is disabled in the
-hosted beta composition; invited accounts receive a one-time allowance.
+storage and browser to its current public API. Card checkout is available when Stripe is configured; see [payments.md](payments.md).
+Invited accounts receive a one-time allowance.
 
 ## Verified locally
 
@@ -60,9 +60,10 @@ return URL. Set `KENKUI_INVITED_EMAILS` to the initial allowlist. No invitations
 or other email are sent by these scripts. Only verified, allowlisted email
 addresses receive access. Removing an address rejects subsequent requests.
 
-`KENKUI_VOICE_IDS` must name voices provisioned into the worker model volume.
-Configure a voice catalog appropriate for the intended use; the application does
-not infer voice rights from whether an embedding is present.
+`KENKUI_VOICE_SET=vctk` selects the enabled VCTK entries from the bundled
+`kenkui-voices` manifest and provisions that same set into the worker volume.
+The selector verifies the pack naming, CC BY 4.0 identifier, and VCTK origin;
+EARS and unreviewed voices are excluded from the hosted commercial pool.
 
 ## Build and deploy sequence
 
@@ -128,18 +129,12 @@ time and registry capacity during the staging rehearsal. A smaller API dependenc
 set is a follow-up optimization that must preserve library inspection behavior.
 
 
-## Flat book pricing
+## Cost-based book pricing
 
-Each non-empty book conversion costs 1,000 credits, regardless of character count
-or selected chapter count. The default beta allowance covers one conversion;
-failed/cancelled jobs release the reservation. Existing balances and settled ledger
-entries are preserved. Downloads and an idempotent submission replay do not charge
-again. A new conversion, including a changed voice, creates a new charge.
+See [payments.md](payments.md) for the pricing formula, Stripe setup, and payment
+rehearsal. Existing balances and settled entries are preserved. Downloads and
+idempotent submission replays do not charge again.
 
-`KENKUI_MAX_SPEECH_CHARACTERS` defaults to 10,000,000, independently of credit
-pricing. The complete Project Gutenberg English *Les Misérables* EPUB (ebook 135)
-measured 3,238,498 speech characters with the pinned core. Dune was reported by the
-beta tester at 1,189,736. Empty speech, the 50 MiB upload limit, ownership, voice
-permissions and concurrent-job admission checks still apply. Modal allows up to
-24 hours per rendering attempt; this is not a throughput or cost guarantee. Measure
-complete-book runtime before claiming sub-dollar compute or long-book acceptance.
+`KENKUI_MAX_SPEECH_CHARACTERS` defaults to 10,000,000 independently of pricing.
+The reported Dune reference is 1,189,736 speech characters. The 50 MiB upload
+limit, ownership, voice permissions, and concurrency checks continue to apply.

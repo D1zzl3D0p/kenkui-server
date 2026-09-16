@@ -4,15 +4,15 @@ from kenkui_server.billing.models import AuthorizationStatus, InMemoryBillingRep
 from kenkui_server.billing.service import BillingService
 
 
-def test_credit_pricing_is_flat_for_short_and_long_books() -> None:
+def test_credit_pricing_scales_with_estimated_cost() -> None:
     service = BillingService(InMemoryBillingRepository())
 
-    assert service.credits_for_text("  hello\nworld  ") == 1000
-    assert service.credits_for_text("x" * 1001) == 1000
+    assert service.credits_for_text("  hello\nworld  ") == 1
+    assert service.credits_for_text("x" * 1001) == 1
     from kenkui_server.billing.pricing import credits_for_characters
 
-    assert credits_for_characters(1_189_736) == 1000
-    assert credits_for_characters(10_000_000) == 1000
+    assert credits_for_characters(1_189_736) == 300
+    assert credits_for_characters(10_000_000) == 2520
     assert service.credits_for_text(" \n ") == 0
 
 
@@ -48,3 +48,17 @@ def test_failed_or_cancelled_job_releases_reserved_credits_once() -> None:
         "reservation",
         "release",
     ]
+
+
+def test_cost_calibration_and_multivoice_premium(monkeypatch):
+    import pytest
+
+    from kenkui_server.billing.pricing import credits_for_characters
+
+    assert credits_for_characters(1_189_736, multivoice=True) == 450
+    assert credits_for_characters(0, multivoice=True) == 0
+    with pytest.raises(ValueError):
+        credits_for_characters(-1)
+    monkeypatch.setenv("KENKUI_ESTIMATED_COST_CENTS_PER_MILLION", "150")
+    assert credits_for_characters(1_000_000) == 300
+    assert credits_for_characters(1_000_000, multivoice=True) == 450

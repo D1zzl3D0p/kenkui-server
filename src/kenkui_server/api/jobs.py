@@ -150,7 +150,11 @@ def preflight(payload: JobRequest, request: Request) -> PreflightResponse:
     account = services.repositories.billing.account(
         services.account_id_for_identity(identity.user_id)
     )
-    estimated = credits_for_characters(characters)
+    from kenkui_server.jobs.models import CharacterCasting
+
+    estimated = credits_for_characters(
+        characters, multivoice=isinstance(spec.casting, CharacterCasting)
+    )
     return PreflightResponse(
         source_id=spec.source_id,
         normalized_characters=characters,

@@ -118,6 +118,51 @@
         }
       }
     },
+    "/v1/billing/checkout": {
+      "post": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Checkout",
+        "operationId": "checkout_v1_billing_checkout_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Checkout V1 Billing Checkout Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/jobs/preflight": {
       "post": {
         "tags": [
@@ -629,7 +674,8 @@
             "default": {
               "modes": [
                 "single"
-              ]
+              ],
+              "models": []
             }
           },
           "maxUploadBytes": {
@@ -657,6 +703,13 @@
             "default": [
               "single"
             ]
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Models"
           }
         },
         "type": "object",
@@ -754,6 +807,21 @@
           "title"
         ],
         "title": "ChapterResponse"
+      },
+      "CheckoutRequest": {
+        "properties": {
+          "credits": {
+            "type": "integer",
+            "title": "Credits"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "credits"
+        ],
+        "title": "CheckoutRequest",
+        "description": "Only a pack size comes from the browser; account and price are server-owned."
       },
       "ErrorDetail": {
         "properties": {
@@ -1107,6 +1175,28 @@
               }
             ],
             "title": "Language"
+          },
+          "licenseId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Licenseid"
+          },
+          "voiceRights": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voicerights"
           }
         },
         "type": "object",

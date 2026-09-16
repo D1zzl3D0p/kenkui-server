@@ -11,10 +11,11 @@ from fastapi import FastAPI
 from kenkui_server.app import HostedServices, create_app
 from kenkui_server.auth.browser import BrowserAuthBackend, BrowserSessionConfig
 from kenkui_server.compute.modal import ModalProcessRunner
-from kenkui_server.config import HostedConfig
+from kenkui_server.config import DEFAULT_CHARACTER_MODEL, HostedConfig
 from kenkui_server.storage.assets import R2AssetStore
 from kenkui_server.storage.postgres import PostgresHostedRepository, PostgresIdentityRepository
 from kenkui_server.storage.postgres_database import PostgresDatabase
+from kenkui_server.voice_catalog import VCTK_VOICE_SET, select_hosted_voices
 
 
 def required(name: str) -> str:
@@ -48,10 +49,9 @@ def create_hosted_app() -> FastAPI:
         cookie_password=required("KENKUI_SESSION_SECRET"),
         invited_emails=frozenset(required("KENKUI_INVITED_EMAILS").split(",")),
     )
-    voice_ids = set(required("KENKUI_VOICE_IDS").split(","))
-    voices = tuple(voice for voice in kk.list_voices() if voice.id in voice_ids and voice.enabled)
-    if {voice.id for voice in voices} != voice_ids:
-        raise ValueError("configured voice is missing or disabled")
+    voices = select_hosted_voices(
+        os.environ.get("KENKUI_VOICE_SET", VCTK_VOICE_SET), kk.list_voices()
+    )
     database = PostgresDatabase(required("DATABASE_URL"))
     repositories = PostgresHostedRepository(database)
     auth = BrowserAuthBackend(
@@ -100,7 +100,9 @@ def create_hosted_app() -> FastAPI:
         r2_access_key_id=required("R2_ACCESS_KEY_ID"),
         r2_secret_access_key=required("R2_SECRET_ACCESS_KEY"),
         workos_api_key=required("WORKOS_API_KEY"),
-        stripe_webhook_secret="",
+        stripe_webhook_secret=os.environ.get("STRIPE_WEBHOOK_SECRET", ""),
+        stripe_secret_key=os.environ.get("STRIPE_SECRET_KEY", ""),
+        web_origin=session_config.web_origin,
     )
     app = create_app(
         hosted_config=config,
@@ -108,7 +110,12 @@ def create_hosted_app() -> FastAPI:
         allowed_origins=[session_config.web_origin],
         max_speech_characters=int(os.environ.get("KENKUI_MAX_SPEECH_CHARACTERS", "10000000")),
         model_allowlist=tuple(
-            filter(None, os.environ.get("KENKUI_MODEL_ALLOWLIST", "").split(","))
+            filter(
+                None,
+                (
+                    os.environ.get("KENKUI_MODEL_ALLOWLIST", "").strip() or DEFAULT_CHARACTER_MODEL
+                ).split(","),
+            )
         ),
     )
     app.state.hosted_database = database

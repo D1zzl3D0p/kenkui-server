@@ -231,6 +231,16 @@ def create_app(
     app.state.max_speech_characters = max_speech_characters
     app.state.max_upload_bytes = max_upload_bytes
     app.state.model_allowlist = model_allowlist
+    app.state.stripe_checkout = None
+    if hosted_config is not None and hosted_config.stripe_secret_key.get_secret_value():
+        from kenkui_server.billing.stripe import StripeCheckout
+
+        if not hosted_config.stripe_webhook_secret.get_secret_value():
+            raise ValueError("Stripe checkout requires a webhook signing secret")
+        app.state.stripe_checkout = StripeCheckout(
+            secret_key=hosted_config.stripe_secret_key.get_secret_value(),
+            web_origin=hosted_config.web_origin,
+        )
     app.state.services = services
     dispatcher.recover()
     app.include_router(assets.router)
@@ -329,7 +339,7 @@ def create_app(
         protected = (
             path.startswith("/v1/jobs")
             or path.startswith("/v1/assets")
-            or path == "/v1/billing"
+            or (path.startswith("/v1/billing") and path != "/v1/billing/webhooks/stripe")
             or path in {"/v1/auth/session", "/v1/auth/logout"}
         )
         if hosted_auth is None or not protected:

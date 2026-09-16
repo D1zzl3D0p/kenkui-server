@@ -13,9 +13,7 @@ if deployment not in {"staging", "production"}:
 app_name = f"kenkui-{deployment}"
 app = modal.App(app_name)
 proxy_name = os.environ.get("KENKUI_MODAL_PROXY")
-proxy = (
-    modal.Proxy.from_name(proxy_name, environment_name=deployment) if proxy_name else None
-)
+proxy = modal.Proxy.from_name(proxy_name, environment_name=deployment) if proxy_name else None
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("ffmpeg")
@@ -133,11 +131,11 @@ def render_job(dispatch_id: str, token: str) -> None:
 def provision() -> None:
     import kenkui as kk
 
-    from kenkui_server.hosted import required
+    from kenkui_server.voice_catalog import VCTK_VOICE_SET, select_hosted_voices
 
     configure_model_manifest()
-    for voice_id in required("KENKUI_VOICE_IDS").split(","):
-        kk.load_voice(voice_id.strip())
+    for voice in select_hosted_voices(VCTK_VOICE_SET, kk.list_voices()):
+        kk.load_voice(voice.id)
     models.commit()
 
 

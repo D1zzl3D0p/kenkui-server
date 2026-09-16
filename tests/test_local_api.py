@@ -18,11 +18,21 @@ def test_local_assets_and_voices_do_not_expose_private_paths(tmp_path: Path) -> 
         assert upload.status_code == 201
         assert set(upload.json()) == {"id", "format", "sha256"}
         assert client.get("/v1/voices").json() == {
-            "items": [{"id": "narrator", "name": "Narrator", "language": None}]
+            "items": [
+                {
+                    "id": "narrator",
+                    "name": "Narrator",
+                    "language": None,
+                    "licenseId": "test",
+                    "voiceRights": None,
+                }
+            ]
         }
 
 
-def test_configured_web_build_serves_assets_and_spa_fallback_without_shadowing_v1(tmp_path: Path) -> None:
+def test_configured_web_build_serves_assets_and_spa_fallback_without_shadowing_v1(
+    tmp_path: Path,
+) -> None:
     web_build = tmp_path / "web"
     assets = web_build / "assets"
     assets.mkdir(parents=True)
@@ -46,7 +56,9 @@ def test_configured_web_build_serves_assets_and_spa_fallback_without_shadowing_v
 
 def test_allows_configured_cross_origin_clients(tmp_path):
     """A browser served from a different origin must be able to call /v1."""
-    with TestClient(create_app(data_dir=tmp_path / "state", allowed_origins=["https://app.kenkui.example"])) as client:
+    with TestClient(
+        create_app(data_dir=tmp_path / "state", allowed_origins=["https://app.kenkui.example"])
+    ) as client:
         response = client.get("/v1/capabilities", headers={"Origin": "https://app.kenkui.example"})
 
     assert response.headers["access-control-allow-origin"] == "https://app.kenkui.example"

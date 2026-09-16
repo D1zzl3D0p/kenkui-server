@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import time
 from dataclasses import dataclass
 from types import SimpleNamespace
 from uuid import UUID
@@ -16,6 +17,7 @@ from kenkui_server.auth.base import Identity
 from kenkui_server.config import HostedConfig
 from kenkui_server.jobs.models import (
     Asset,
+    CharacterCasting,
     Dispatch,
     Job,
     JobSpec,
@@ -152,22 +154,41 @@ def test_hosted_config_composes_durable_services_and_installs_stripe_webhook() -
         {
             "id": "evt-1",
             "type": "checkout.session.completed",
-            "data": {"object": {"metadata": {"account_id": "account-1", "credits": "4"}}},
+            "data": {
+                "object": {
+                    "id": "cs_1",
+                    "mode": "payment",
+                    "client_reference_id": "account-1",
+                    "payment_status": "paid",
+                    "currency": "usd",
+                    "amount_total": 500,
+                    "amount_subtotal": 500,
+                    "total_details": {"amount_tax": 0, "amount_discount": 0, "amount_shipping": 0},
+                    "metadata": {
+                        "purpose": "kenkui_credits_v1",
+                        "account_id": "account-1",
+                        "credits": "500",
+                    },
+                }
+            },
         },
         separators=(",", ":"),
     ).encode()
-    digest = hmac.new(b"stripe-secret", b"123." + payload, hashlib.sha256).hexdigest()
+    timestamp = str(int(time.time()))
+    digest = hmac.new(
+        b"stripe-secret", timestamp.encode() + b"." + payload, hashlib.sha256
+    ).hexdigest()
 
     with TestClient(app) as client:
         response = client.post(
             "/v1/billing/webhooks/stripe",
             content=payload,
-            headers={"Stripe-Signature": f"t=123,v1={digest}"},
+            headers={"Stripe-Signature": f"t={timestamp},v1={digest}"},
         )
 
     assert response.status_code == 204
     assert app.state.services.repositories is fixture.repositories
-    assert fixture.repositories.billing.events == [("stripe", "evt-1", "account-1", 4)]
+    assert fixture.repositories.billing.events == [("stripe", "cs_1", "account-1", 500)]
 
 
 def test_hosted_assets_require_authentication_and_owner_access() -> None:
@@ -222,14 +243,17 @@ def test_hosted_job_route_uses_single_atomic_durable_admission(
     assert (account_id, owner_id, credits, key) == (
         "account-1",
         str(OWNER),
-        1000,
+        1,
         hashlib.sha256(f"{OWNER}:request-1".encode()).hexdigest(),
     )
     assert fixture.runner.started == [admitted_dispatch.id]
 
 
+@pytest.mark.parametrize("multivoice", [False, True])
 @pytest.mark.parametrize("characters", [1, 1_189_736, 3_238_498, 10_000_000])
-def test_preflight_and_admission_agree_on_flat_book_charge(monkeypatch, characters):
+def test_preflight_and_admission_agree_on_estimated_book_charge(
+    monkeypatch, characters, multivoice
+):
     app, fixture = _hosted_app()
     spec = JobSpec(
         "source-1",
@@ -238,8 +262,12 @@ def test_preflight_and_admission_agree_on_flat_book_charge(monkeypatch, characte
         TtsSettings(),
         OutputSpec("artifact.m4b"),
     )
+    if multivoice:
+        from dataclasses import replace
+
+        spec = replace(spec, casting=CharacterCasting("narrator", "narrator", (), "model", "model"))
     monkeypatch.setattr(jobs, "_preflight", lambda request, payload: (spec, characters))
-    fixture.repositories.billing.account = lambda _: SimpleNamespace(available_credits=1000)
+    fixture.repositories.billing.account = lambda _: SimpleNamespace(available_credits=10000)
     payload = {
         "sourceId": "source-1",
         "chapters": ["chapter-1"],
@@ -251,14 +279,20 @@ def test_preflight_and_admission_agree_on_flat_book_charge(monkeypatch, characte
             "/v1/jobs/preflight", headers={"Authorization": "Bearer owner"}, json=payload
         )
         assert preflight.status_code == 200
-        assert preflight.json()["estimatedCredits"] == 1000
+        assert (
+            preflight.json()["estimatedCredits"]
+            == (characters * (378 if multivoice else 252) + 999_999) // 1_000_000
+        )
         assert preflight.json()["valid"] is True
         admitted = client.post("/v1/jobs", headers={"Authorization": "Bearer owner"}, json=payload)
         assert admitted.status_code == 202
-    assert fixture.repositories.admissions[0][4] == 1000
+    assert (
+        fixture.repositories.admissions[0][4]
+        == (characters * (378 if multivoice else 252) + 999_999) // 1_000_000
+    )
 
 
-def test_insufficient_balance_rejects_flat_book_preflight(monkeypatch):
+def test_insufficient_balance_rejects_cost_based_preflight(monkeypatch):
     app, fixture = _hosted_app()
     spec = JobSpec(
         "source-1",
@@ -268,7 +302,7 @@ def test_insufficient_balance_rejects_flat_book_preflight(monkeypatch):
         OutputSpec("artifact.m4b"),
     )
     monkeypatch.setattr(jobs, "_preflight", lambda request, payload: (spec, 1_189_736))
-    fixture.repositories.billing.account = lambda _: SimpleNamespace(available_credits=999)
+    fixture.repositories.billing.account = lambda _: SimpleNamespace(available_credits=299)
     with TestClient(app) as client:
         result = client.post(
             "/v1/jobs/preflight",
@@ -281,3 +315,33 @@ def test_insufficient_balance_rejects_flat_book_preflight(monkeypatch):
         )
     assert result.json()["valid"] is False
     assert fixture.repositories.admissions == []
+
+
+def test_checkout_requires_auth_and_uses_callers_account():
+    app, _ = _hosted_app()
+    calls = []
+    app.state.stripe_checkout = SimpleNamespace(
+        create=lambda account, credits: (
+            calls.append((account, credits)) or "https://checkout.stripe.com/test"
+        )
+    )
+    with TestClient(app) as client:
+        assert client.post("/v1/billing/checkout", json={"credits": 500}).status_code == 401
+        headers = {"Authorization": "Bearer owner"}
+        for payload in [
+            {"credits": 1},
+            {"credits": "500"},
+            {"credits": 500, "account_id": "stranger"},
+        ]:
+            assert (
+                client.post("/v1/billing/checkout", json=payload, headers=headers).status_code
+                == 422
+            )
+        result = client.post("/v1/billing/checkout", json={"credits": 500}, headers=headers)
+        assert result.status_code == 200
+        assert calls == [("account-1", 500)]
+        app.state.stripe_checkout = None
+        assert (
+            client.post("/v1/billing/checkout", json={"credits": 500}, headers=headers).status_code
+            == 503
+        )
