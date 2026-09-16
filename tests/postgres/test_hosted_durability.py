@@ -35,7 +35,7 @@ class Cursor:
         return self._row
 
     def fetchall(self) -> list[dict[str, object]]:
-        return []
+        return [self._row] if self._row is not None else []
 
 
 class RecordingConnection:
@@ -52,6 +52,8 @@ class RecordingConnection:
     def execute(self, statement: str, parameters: tuple[object, ...]) -> Cursor:
         self.statements.append((statement, parameters))
         normalized = " ".join(statement.split())
+        if "credited-reserved-consumed AS available" in normalized:
+            return Cursor({"id": "grant-1", "available": 10})
         if "available_credits = available_credits -" in normalized:
             return Cursor(None if self.insufficient_credits else {"id": "account-1"})
         if "SELECT COALESCE(MAX(sequence)" in normalized:

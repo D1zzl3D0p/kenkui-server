@@ -63,7 +63,11 @@ addresses receive access. Removing an address rejects subsequent requests.
 `KENKUI_VOICE_SET=vctk` selects the enabled VCTK entries from the bundled
 `kenkui-voices` manifest and provisions that same set into the worker volume.
 The selector verifies the pack naming, CC BY 4.0 identifier, and VCTK origin;
-EARS and unreviewed voices are excluded from the hosted commercial pool.
+EARS and unreviewed voices are excluded from the named VCTK selection. This
+metadata filter is not a speaker-consent or commercial-rights review. CC BY 4.0
+permits commercial copyright uses subject to its conditions; deployment operators
+must separately document attribution and any applicable personality/privacy rights.
+The library's conservative commercial-use flags are not overridden by this filter.
 
 ## Build and deploy sequence
 

@@ -17,6 +17,7 @@ from kenkui_server.billing.models import (
     AuthorizationStatus,
     CreditAccount,
     CreditAuthorization,
+    CreditLot,
     LedgerEntry,
 )
 from kenkui_server.jobs.models import (
@@ -29,6 +30,7 @@ from kenkui_server.jobs.models import (
     JobEvent,
     JobStatus,
 )
+from kenkui_server.storage.credit_lots import PostgresCreditLots
 from kenkui_server.storage.postgres_execution import PostgresExecution
 from kenkui_server.storage.repositories import (
     StaleWriteError,
@@ -637,6 +639,7 @@ class PostgresHostedRepository(PostgresRepositories):
                 """,
                 (authorization_id, job.id, account_id, credits),
             )
+            PostgresCreditLots(connection).reserve(authorization_id, account_id, credits)
             connection.execute(
                 """
                 INSERT INTO credit_ledger_entries (id, account_id, authorization_id, kind, credits, reference)
@@ -681,6 +684,9 @@ class PostgresBillingRepository:
             raise KeyError(account_id)
         return CreditAccount(str(row["id"]), int(row["available_credits"]))
 
+    def credit_lots(self, account_id: str) -> tuple[CreditLot, ...]:
+        return PostgresCreditLots(self._connection).list(account_id)
+
     def grant(self, account_id: str, credits: int, *, reference: str) -> CreditAccount:
         if credits < 1:
             raise ValueError("invalid_credit_amount")
@@ -693,20 +699,22 @@ class PostgresBillingRepository:
         if credits < 1:
             raise ValueError("invalid_credit_amount")
         with self._connection.transaction() as connection:
-            received = connection.execute(
+            connection.execute(
                 """
                 INSERT INTO payment_events (provider, provider_event_id)
                 VALUES (%s, %s) ON CONFLICT DO NOTHING RETURNING provider_event_id
                 """,
                 (provider, provider_event_id),
             ).fetchone()
-            if received is None:
-                return self.account(account_id)
-            return self._grant(connection, account_id, credits, f"{provider}:{provider_event_id}")
+            return self._grant(
+                connection, account_id, credits, f"{provider}:{provider_event_id}", kind="purchase"
+            )
 
     def _grant(
-        self, connection: PostgresConnection, account_id: str, credits: int, reference: str
+        self, connection: PostgresConnection, account_id: str, credits: int, reference: str,
+        *, kind: str = "grant",
     ) -> CreditAccount:
+        connection.execute("SELECT id FROM credit_accounts WHERE id=%s FOR UPDATE", (account_id,))
         inserted = connection.execute(
             """
             INSERT INTO credit_ledger_entries (id, account_id, authorization_id, kind, credits, reference)
@@ -716,7 +724,16 @@ class PostgresBillingRepository:
             (str(uuid4()), account_id, credits, reference),
         ).fetchone()
         if inserted is None:
+            existing = connection.execute(
+                "SELECT account_id, credits FROM credit_ledger_entries WHERE reference=%s",
+                (reference,),
+            ).fetchone()
+            if existing is None or (str(existing["account_id"]), int(existing["credits"])) != (
+                account_id, credits
+            ):
+                raise ValueError("payment_reference_conflict")
             return self.account(account_id)
+        PostgresCreditLots(connection).grant(account_id, credits, reference, kind)
         row = connection.execute(
             """
             UPDATE credit_accounts SET available_credits = available_credits + %s
@@ -732,6 +749,9 @@ class PostgresBillingRepository:
         if credits < 1:
             raise ValueError("invalid_credit_amount")
         with self._connection.transaction() as connection:
+            connection.execute(
+                "SELECT id FROM credit_accounts WHERE id=%s FOR UPDATE", (account_id,)
+            )
             existing = connection.execute(
                 (
                     "SELECT id, job_id, account_id, credits, status FROM "
@@ -740,7 +760,10 @@ class PostgresBillingRepository:
                 (job_id,),
             ).fetchone()
             if existing is not None:
-                return _authorization_from_row(existing)
+                authorization = _authorization_from_row(existing)
+                if (authorization.account_id, authorization.credits) != (account_id, credits):
+                    raise ValueError("authorization_conflict")
+                return authorization
             available = connection.execute(
                 """
                 UPDATE credit_accounts SET available_credits = available_credits - %s
@@ -766,6 +789,7 @@ class PostgresBillingRepository:
                     authorization.status.value,
                 ),
             )
+            PostgresCreditLots(connection).reserve(authorization.id, account_id, credits)
             connection.execute(
                 """
                 INSERT INTO credit_ledger_entries (id, account_id, authorization_id, kind, credits, reference)
@@ -791,6 +815,10 @@ class PostgresBillingRepository:
         if status not in {AuthorizationStatus.SETTLED, AuthorizationStatus.RELEASED}:
             raise ValueError("invalid_final_authorization_status")
         with self._connection.transaction() as connection:
+            account_id = self.authorization_for_job(job_id).account_id
+            connection.execute(
+                "SELECT id FROM credit_accounts WHERE id=%s FOR UPDATE", (account_id,)
+            )
             current = connection.execute(
                 (
                     "SELECT id, job_id, account_id, credits, status FROM "
@@ -803,6 +831,9 @@ class PostgresBillingRepository:
             authorization = _authorization_from_row(current)
             if authorization.status is not AuthorizationStatus.RESERVED:
                 return authorization
+            PostgresCreditLots(connection).finalize(
+                authorization.id, authorization.account_id, authorization.credits, status
+            )
             result = connection.execute(
                 """
                 UPDATE credit_authorizations SET status = %s, finalized_at = now()

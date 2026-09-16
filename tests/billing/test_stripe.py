@@ -232,3 +232,61 @@ def test_managed_checkout_rejects_inconsistent_amounts(changes):
     with pytest.raises(ValueError):
         handler.handle(payload, signature)
     assert repo.account("account-1").available_credits == 0
+
+
+def test_bonus_pack_charges_its_price_and_fulfills_credits_once(monkeypatch):
+    import io
+    from urllib.parse import parse_qs
+
+    from kenkui_server.billing.stripe import CREDIT_PACKS, StripeCheckout
+
+    monkeypatch.setitem(CREDIT_PACKS, 1100, 1000)
+    requests = []
+
+    def open_request(request, timeout):
+        requests.append(request)
+        return io.BytesIO(b'{"url":"https://checkout.stripe.com/c/pay/cs_bonus"}')
+
+    monkeypatch.setattr("kenkui_server.billing.stripe.urlopen", open_request)
+    StripeCheckout(secret_key="test", web_origin="https://app.kenkui.fm").create("account-1", 1100)
+    form = parse_qs(requests[0].data.decode())
+    assert form["line_items[0][price_data][unit_amount]"] == ["1000"]
+    assert form["metadata[credits]"] == ["1100"]
+    repo = InMemoryBillingRepository()
+    handler = StripeWebhookHandler(BillingService(repo), signing_secret="secret")
+    session = paid_session()
+    session["metadata"]["credits"] = "1100"
+    session["metadata"]["purpose"] = "kenkui_credits_v2"
+    session["amount_subtotal"] = 1000
+    session["amount_total"] = 1080
+    session["total_details"]["amount_tax"] = 80
+    event = {"type": "checkout.session.completed", "data": {"object": session}}
+    payload, signature = signed_event("secret", event)
+    handler.handle(payload, signature)
+    handler.handle(payload, signature)
+    assert repo.account("account-1").available_credits == 1100
+    session["amount_subtotal"] = 1100
+    session["amount_total"] = 1180
+    payload, signature = signed_event("secret", event)
+    with pytest.raises(ValueError, match="invalid_payment_event"):
+        handler.handle(payload, signature)
+
+
+@pytest.mark.parametrize("credits, price, purpose", [
+    (500, 500, "kenkui_credits_v2"),
+    (1100, 1000, "kenkui_credits_v2"),
+    (2400, 2000, "kenkui_credits_v2"),
+    (1000, 1000, "kenkui_credits_v1"),
+    (2000, 2000, "kenkui_credits_v1"),
+])
+def test_current_and_existing_checkout_sessions_keep_their_pack_terms(credits, price, purpose):
+    repo = InMemoryBillingRepository()
+    handler = StripeWebhookHandler(BillingService(repo), signing_secret="secret")
+    session = paid_session()
+    session["metadata"].update(credits=str(credits), purpose=purpose)
+    session.update(amount_subtotal=price, amount_total=price)
+    payload, signature = signed_event("secret", {
+        "type": "checkout.session.completed", "data": {"object": session},
+    })
+    handler.handle(payload, signature)
+    assert repo.account("account-1").available_credits == credits

@@ -16,6 +16,7 @@ def test_checked_openapi_contract_matches_the_v1_application() -> None:
         "/v1/assets/{asset_id}/cover",
         "/v1/billing",
         "/v1/billing/checkout",
+        "/v1/billing/history",
         "/v1/capabilities",
         "/v1/health",
         "/v1/jobs",

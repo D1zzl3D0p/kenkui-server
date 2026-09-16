@@ -1,7 +1,9 @@
 # Credit card payments
 
-Pricing is 100 credits per US dollar. Checkout offers $5 / 500 credits,
-$10 / 1,000 credits, and $20 / 2,000 credits. The server owns the price and
+The standard rate is 100 credits per US dollar. Checkout offers $5 / 500 credits,
+$10 / 1,100 credits, and $20 / 2,400 credits. These are one-time purchases:
+the larger packs include 100 / 400 bonus credits (10% / 20% more credits,
+equivalent to 9.09% / 16.67% lower unit prices). The server owns the price and
 account association. Stripe Managed Payments collects payment, calculates tax,
 and handles its merchant-of-record responsibilities. Applicable tax is added
 to the pack price; the credit amount is unchanged. Stripe may offer additional
@@ -44,10 +46,14 @@ accept payments without fulfillment. Existing balances and settled charges are
 preserved; failed/cancelled render reservations continue to be released.
 
 Webhook fulfillment requires a signed delivery within five minutes, a paid
-payment-mode USD session, matching USD subtotal/account and a total consistent with tax, and Kenkui purchase metadata.
+payment-mode USD session, matching versioned pack price/account and a total
+consistent with tax, and Kenkui purchase metadata. New sessions use
+`kenkui_credits_v2`; existing `kenkui_credits_v1` sessions retain their original
+500 / 1,000 / 2,000 credit quantities and prices. Bonus credits are part of a
+pack, not Stripe coupons. `/v1/billing` publishes the active pack catalog for Studio.
 It deduplicates on Checkout Session ID, including distinct events for the same
-purchase. Refunds and disputes require an operator ledger adjustment; automatic
-reversal is not implemented in this release.
+purchase. Refunds and disputes are not reversed automatically; a dedicated
+lot-aware reversal workflow is still required before processing them.
 
 Reference: https://docs.stripe.com/checkout/fulfillment
 
@@ -89,3 +95,38 @@ configuration.
 References:
 - https://docs.stripe.com/payments/managed-payments/update-checkout
 - https://docs.stripe.com/payments/managed-payments/eligibility
+
+## Per-pack usage tracking
+
+Apply `0004_credit_lots.sql` with the API, render workers, recovery jobs and
+payment webhook writers paused, then start all writers on this release. Do not
+run older writers against the migrated database: they do not maintain pack
+allocations. Queue/replay webhook deliveries after the updated service is ready.
+The migration does not change available balances or old ledger entries. It
+creates one legacy credit lot per existing account containing its available
+balance plus outstanding reservations, and assigns those reservations to it.
+Historical packs cannot be certified unused from that aggregate balance.
+
+New confirmed payment sessions create one purchased lot (including bonus
+credits), keyed by the existing unique provider/session reference. Complimentary
+grants create separate non-purchase lots. Duplicate deliveries do not add lots.
+Reservations allocate complimentary/legacy credits first, then purchased packs
+oldest first. Account locks serialize purchases, admissions and finalization.
+Successful jobs consume the exact allocated credits; failures/cancellations
+release them to the same lots, even if jobs complete in a different order.
+Allocation rows remain as an audit trail linked to job authorizations.
+
+`GET /v1/billing/history` returns only the signed-in account's credit lots:
+credited, available, reserved, consumed, source, reference, recorded timestamp
+and usage status. Billing advertises `creditHistoryAvailable` so older clients
+and servers remain compatible. Status is usage evidence, not refund approval.
+The recorded timestamp is when the ledger received credits, not authoritative
+proof of the payment date. Check the Stripe receipt for the 14-day window.
+Legacy balances require manual review; complimentary credits are not purchases.
+
+This release tracks usage, but does not issue refunds or remove/refund lots.
+A future refund operation must atomically prevent new reservations, remove all
+credits in the unused pack, and reconcile successful/refused/replayed Stripe
+refund events. Never adjust only `credit_accounts.available_credits`: it would
+break the lot/account invariant. New admission fails closed if there are not
+enough tracked credits, rolling back the reservation and job together.

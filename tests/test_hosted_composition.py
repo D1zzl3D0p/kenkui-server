@@ -345,3 +345,69 @@ def test_checkout_requires_auth_and_uses_callers_account():
             client.post("/v1/billing/checkout", json={"credits": 500}, headers=headers).status_code
             == 503
         )
+
+
+def test_billing_publishes_pack_prices_and_accepts_the_published_quantities():
+    app, fixture = _hosted_app()
+    fixture.repositories.billing.account = lambda _: SimpleNamespace(available_credits=0)
+    calls = []
+    app.state.stripe_checkout = SimpleNamespace(
+        create=lambda account, credits: (
+            calls.append((account, credits)) or "https://checkout.stripe.com/test"
+        )
+    )
+    headers = {"Authorization": "Bearer owner"}
+    with TestClient(app) as client:
+        response = client.get("/v1/billing", headers=headers)
+        assert response.status_code == 200
+        packs = response.json()["packs"]
+        assert packs == [
+            {"credits": 500, "priceUsdCents": 500},
+            {"credits": 1100, "priceUsdCents": 1000},
+            {"credits": 2400, "priceUsdCents": 2000},
+        ]
+        for pack in packs:
+            assert (
+                client.post(
+                    "/v1/billing/checkout", headers=headers, json={"credits": pack["credits"]}
+                ).status_code
+                == 200
+            )
+        assert (
+            client.post("/v1/billing/checkout", headers=headers, json={"credits": 1000}).status_code
+            == 422
+        )
+    assert calls == [("account-1", 500), ("account-1", 1100), ("account-1", 2400)]
+
+
+def test_credit_history_is_scoped_to_authenticated_account():
+    from kenkui_server.billing.models import AuthorizationStatus, InMemoryBillingRepository
+
+    app, fixture = _hosted_app()
+    ledger = InMemoryBillingRepository()
+    ledger.process_payment_event("stripe", "owner-pack", "account-1", 500)
+    ledger.process_payment_event("stripe", "other-pack", "account-2", 2400)
+    ledger.reserve("pending", "account-1", 20)
+    fixture.repositories.billing = ledger
+    with TestClient(app) as client:
+        assert client.get("/v1/billing/history").status_code == 401
+        response = client.get(
+            "/v1/billing/history?account_id=account-2", headers={"Authorization": "Bearer owner"}
+        )
+        assert response.status_code == 200
+        (pack,) = response.json()["items"]
+        assert pack["reference"] == "stripe:owner-pack"
+        assert (pack["credited"], pack["available"], pack["reserved"], pack["consumed"]) == (
+            500,
+            480,
+            20,
+            0,
+        )
+        assert pack["usageStatus"] == "reserved"
+        ledger.finalize("pending", AuthorizationStatus.RELEASED)
+        assert (
+            client.get("/v1/billing/history", headers={"Authorization": "Bearer owner"}).json()[
+                "items"
+            ][0]["usageStatus"]
+            == "unused"
+        )

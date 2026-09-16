@@ -13,7 +13,15 @@ from urllib.request import Request, urlopen
 
 from kenkui_server.billing.service import BillingService
 
-CREDIT_PACKS = (500, 1000, 2000)
+# Credits and purchase price are separate: bonus credits must not change the
+# amount charged, and webhooks must validate the actual server-owned pack price.
+CREDIT_PACKS = {500: 500, 1100: 1000, 2400: 2000}  # credits: USD cents
+# Keep old sessions fulfillable after a catalog change, without offering them
+# for new purchases. Never rewrite the meaning of a previously issued version.
+PURCHASE_CATALOGS = {
+    "kenkui_credits_v1": {500: 500, 1000: 1000, 2000: 2000},
+    "kenkui_credits_v2": CREDIT_PACKS,
+}
 
 
 class StripeCheckout:
@@ -37,9 +45,9 @@ class StripeCheckout:
             "client_reference_id": account_id,
             "metadata[account_id]": account_id,
             "metadata[credits]": str(credits),
-            "metadata[purpose]": "kenkui_credits_v1",
+            "metadata[purpose]": "kenkui_credits_v2",
             "line_items[0][price_data][currency]": "usd",
-            "line_items[0][price_data][unit_amount]": str(credits),
+            "line_items[0][price_data][unit_amount]": str(CREDIT_PACKS[credits]),
             "line_items[0][price_data][tax_behavior]": "exclusive",
             "line_items[0][price_data][product_data][tax_code]": os.environ.get(
                 "KENKUI_STRIPE_TAX_CODE", "txcd_10105001"
@@ -107,7 +115,8 @@ class StripeWebhookHandler:
                 return None
             session = event["data"]["object"]
             metadata = session.get("metadata") or {}
-            if metadata.get("purpose") != "kenkui_credits_v1":
+            catalog = PURCHASE_CATALOGS.get(metadata.get("purpose"))
+            if catalog is None:
                 return None
             if session.get("payment_status") != "paid":
                 return None
@@ -116,24 +125,25 @@ class StripeWebhookHandler:
             session_id = session["id"]
             totals = session.get("total_details") or {}
             tax = totals.get("amount_tax")
-            # Credit value is the USD subtotal. Tax and optional local-currency
-            # presentment must never add credits or reject a legitimate purchase.
+            price = catalog.get(credits)
+            # Tax and local-currency presentment do not change the pack's credits.
 
             if (
                 not isinstance(account_id, str)
                 or not account_id
                 or not isinstance(session_id, str)
                 or not session_id.startswith("cs_")
-                or credits not in CREDIT_PACKS
+                or credits not in catalog
+                or price is None
                 or session.get("client_reference_id") != account_id
                 or session.get("mode") != "payment"
                 or session.get("currency") != "usd"
-                or session.get("amount_subtotal") != credits
+                or session.get("amount_subtotal") != price
                 or type(tax) is not int
                 or tax < 0
                 or totals.get("amount_discount") != 0
                 or totals.get("amount_shipping") != 0
-                or session.get("amount_total") != credits + tax
+                or session.get("amount_total") != price + tax
             ):
                 raise ValueError("invalid_payment_event")
         except (KeyError, TypeError, AttributeError, ValueError) as error:

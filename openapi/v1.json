@@ -173,6 +173,27 @@
         }
       }
     },
+    "/v1/billing/history": {
+      "get": {
+        "tags": [
+          "billing"
+        ],
+        "summary": "Credit History",
+        "operationId": "credit_history_v1_billing_history_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreditHistoryResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/billing": {
       "get": {
         "tags": [
@@ -187,11 +208,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Billing V1 Billing Get"
+                  "$ref": "#/components/schemas/BillingResponse"
                 }
               }
             }
@@ -677,6 +694,66 @@
         "title": "BillingCapabilities",
         "description": "Billing modes supported by this server."
       },
+      "BillingResponse": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "availableCredits": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Availablecredits"
+          },
+          "checkoutEnabled": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkoutenabled"
+          },
+          "packs": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CreditPackResponse"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Packs"
+          },
+          "creditHistoryAvailable": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credithistoryavailable"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode"
+        ],
+        "title": "BillingResponse"
+      },
       "BookResponse": {
         "properties": {
           "sourceId": {
@@ -932,6 +1009,106 @@
         },
         "type": "object",
         "title": "CoverCapabilities"
+      },
+      "CreditHistoryResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CreditLotResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "CreditHistoryResponse"
+      },
+      "CreditLotResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "purchase",
+              "grant",
+              "legacy"
+            ],
+            "title": "Source"
+          },
+          "reference": {
+            "type": "string",
+            "title": "Reference"
+          },
+          "credited": {
+            "type": "integer",
+            "title": "Credited"
+          },
+          "available": {
+            "type": "integer",
+            "title": "Available"
+          },
+          "reserved": {
+            "type": "integer",
+            "title": "Reserved"
+          },
+          "consumed": {
+            "type": "integer",
+            "title": "Consumed"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recordedat"
+          },
+          "usageStatus": {
+            "type": "string",
+            "enum": [
+              "unused",
+              "reserved",
+              "used",
+              "manual_review",
+              "not_purchased"
+            ],
+            "title": "Usagestatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "reference",
+          "credited",
+          "available",
+          "reserved",
+          "consumed",
+          "recordedAt",
+          "usageStatus"
+        ],
+        "title": "CreditLotResponse"
+      },
+      "CreditPackResponse": {
+        "properties": {
+          "credits": {
+            "type": "integer",
+            "title": "Credits"
+          },
+          "priceUsdCents": {
+            "type": "integer",
+            "title": "Priceusdcents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "credits",
+          "priceUsdCents"
+        ],
+        "title": "CreditPackResponse"
       },
       "ErrorDetail": {
         "properties": {
