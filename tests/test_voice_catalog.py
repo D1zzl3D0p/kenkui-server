@@ -6,7 +6,7 @@ from kenkui.voices.types import Voice
 from kenkui_server.voice_catalog import select_hosted_voices
 
 
-def test_vctk_set_uses_only_enabled_pack_voices() -> None:
+def test_vctk_set_includes_builtin_and_pack_voices() -> None:
     catalog = tuple(
         Voice(
             id=entry.id,
@@ -20,7 +20,22 @@ def test_vctk_set_uses_only_enabled_pack_voices() -> None:
     )
     selected = select_hosted_voices("vctk", catalog)
 
-    assert len(selected) == 47
+    assert len(selected) == 59
+    assert {
+        "anna",
+        "vera",
+        "fantine",
+        "charles",
+        "paul",
+        "eponine",
+        "azelma",
+        "george",
+        "mary",
+        "jane",
+        "michael",
+        "eve",
+    } <= {voice.id for voice in selected}
+    assert not {"jean", "cosette", "alba", "giovanni", "lola"} & {voice.id for voice in selected}
     assert all(voice.license_id == "CC-BY-4.0" for voice in selected)
     assert all("/vctk/" in (voice.provenance or "") for voice in selected)
 
