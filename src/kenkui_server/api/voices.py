@@ -13,7 +13,13 @@ def list_voices(request: Request) -> VoiceListResponse:
     voices = request.app.state.services.voices
     return VoiceListResponse(
         items=[
-            VoiceResponse(id=voice.id, name=voice.name, language=voice.language)
+            VoiceResponse(
+                id=voice.id,
+                name=voice.name,
+                language=voice.language,
+                license_id=voice.license_id,
+                voice_rights=voice.voice_rights,
+            )
             for voice in voices
             if voice.enabled
         ]

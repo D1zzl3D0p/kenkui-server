@@ -60,9 +60,10 @@ return URL. Set `KENKUI_INVITED_EMAILS` to the initial allowlist. No invitations
 or other email are sent by these scripts. Only verified, allowlisted email
 addresses receive access. Removing an address rejects subsequent requests.
 
-`KENKUI_VOICE_IDS` must name voices provisioned into the worker model volume.
-Configure a voice catalog appropriate for the intended use; the application does
-not infer voice rights from whether an embedding is present.
+`KENKUI_VOICE_SET=vctk` selects the enabled VCTK entries from the bundled
+`kenkui-voices` manifest and provisions that same set into the worker volume.
+The selector verifies the pack naming, CC BY 4.0 identifier, and VCTK origin;
+EARS and unreviewed voices are excluded from the hosted commercial pool.
 
 ## Build and deploy sequence
 

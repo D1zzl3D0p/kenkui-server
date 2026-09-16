@@ -78,13 +78,14 @@ production service's `KENKUI_INVITED_EMAILS`. That file is not loaded automatica
 
 Create the environment-specific Modal secret from a private environment file
 containing `DATABASE_URL`, `R2_BUCKET`, `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`,
-`R2_SECRET_ACCESS_KEY`, `R2_KEY_SALT`, and `KENKUI_VOICE_IDS`.
+`R2_SECRET_ACCESS_KEY`, `R2_KEY_SALT`, and `OPENROUTER_API_KEY`.
 Use Render's **external** PostgreSQL URL here, with `sslmode=verify-full` and
 the platform's trusted certificate chain. Verify connectivity from Modal before
 admitting jobs. Do not copy Render's internal hostname to the workers.
 
-R2 credentials and key salt must match the API in that environment. WorkOS keys
-and browser session secrets are not needed in workers.
+R2 credentials and key salt must match the API in that environment. The public
+`KENKUI_VOICE_SET=vctk` policy is part of the release rather than a secret.
+WorkOS keys and browser session secrets are not needed in workers.
 
 ```sh
 uv run --extra hosted modal secret create kenkui-staging-worker \

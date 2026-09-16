@@ -26,11 +26,11 @@ def blueprint(environment, image, worker_cidrs=()):
         "KENKUI_MODAL_APP": name,
         "WORKOS_REDIRECT_URI": f"https://{api}/v1/auth/callback",
         "KENKUI_WEB_ORIGIN": web,
-        "KENKUI_VOICE_IDS": "eponine",
+        "KENKUI_VOICE_SET": "vctk",
         "KENKUI_MAX_JOBS": "2",
         "KENKUI_MAX_SPEECH_CHARACTERS": "10000000",
         "KENKUI_BETA_CREDITS": "1000",
-        "KENKUI_MODEL_ALLOWLIST": "",
+        "KENKUI_MODEL_ALLOWLIST": "openrouter/deepseek/deepseek-v4-flash",
     }
     env = [{"key": key, "value": value} for key, value in variables.items()]
     env += [

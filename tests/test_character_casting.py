@@ -80,8 +80,10 @@ def test_characters_advertised_only_with_an_allowlist() -> None:
     from kenkui_server.config import local_capabilities
 
     assert local_capabilities().casting.modes == ["single"]
+    assert local_capabilities().casting.models == []
     configured = local_capabilities(("fake/model",))
     assert configured.casting.modes == ["single", "characters"]
+    assert configured.casting.models == ["fake/model"]
 
 
 def test_an_unlisted_model_is_refused_before_a_job_exists() -> None:

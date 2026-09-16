@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
+DEFAULT_CHARACTER_MODEL = "openrouter/deepseek/deepseek-v4-flash"
+
 
 def _allowed_origins_from_env() -> list[str]:
     """Read the comma-separated KENKUI_ALLOWED_ORIGINS allowlist."""
@@ -59,6 +61,7 @@ class CastingCapabilities(BaseModel):
     """
 
     modes: list[Literal["single", "characters"]] = Field(default=["single"])
+    models: list[str] = Field(default_factory=list)
 
 
 class Capabilities(BaseModel):
@@ -89,4 +92,4 @@ def local_capabilities(model_allowlist: tuple[str, ...] = ()) -> Capabilities:
     modes: list[Literal["single", "characters"]] = ["single"]
     if model_allowlist:
         modes.append("characters")
-    return Capabilities(casting=CastingCapabilities(modes=modes))
+    return Capabilities(casting=CastingCapabilities(modes=modes, models=list(model_allowlist)))

@@ -34,6 +34,8 @@ class VoiceResponse(_Model):
     id: str
     name: str
     language: str | None
+    license_id: str | None = Field(None, serialization_alias="licenseId")
+    voice_rights: str | None = Field(None, serialization_alias="voiceRights")
 
 
 class VoiceListResponse(_Model):

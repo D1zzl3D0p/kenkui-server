@@ -629,7 +629,8 @@
             "default": {
               "modes": [
                 "single"
-              ]
+              ],
+              "models": []
             }
           },
           "maxUploadBytes": {
@@ -657,6 +658,13 @@
             "default": [
               "single"
             ]
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Models"
           }
         },
         "type": "object",
@@ -1107,6 +1115,28 @@
               }
             ],
             "title": "Language"
+          },
+          "licenseId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Licenseid"
+          },
+          "voiceRights": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voicerights"
           }
         },
         "type": "object",
