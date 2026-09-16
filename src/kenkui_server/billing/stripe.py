@@ -115,7 +115,10 @@ class StripeWebhookHandler:
                 return None
             session = event["data"]["object"]
             metadata = session.get("metadata") or {}
-            catalog = PURCHASE_CATALOGS.get(metadata.get("purpose"))
+            purpose = metadata.get("purpose")
+            if not isinstance(purpose, str):
+                return None
+            catalog = PURCHASE_CATALOGS.get(purpose)
             if catalog is None:
                 return None
             if session.get("payment_status") != "paid":
