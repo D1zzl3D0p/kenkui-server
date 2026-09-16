@@ -98,3 +98,16 @@ def test_browser_receives_auth_errors_and_preflight_without_a_session(tmp_path: 
     for response in (missing, forbidden, preflight):
         assert response.headers["access-control-allow-origin"] == origin
         assert response.headers["access-control-allow-credentials"] == "true"
+
+
+def test_bearer_identity_scopes_studio_drafts_without_exposing_tokens(tmp_path: Path) -> None:
+    owner = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    backend = RecordingAuthBackend(Identity(owner, "user-1"))
+    app = create_app(
+        data_dir=tmp_path / "state", auth_backend=backend, job_owner_resolver=lambda _: owner
+    )
+    with TestClient(app) as client:
+        assert client.get("/v1/auth/session").status_code == 401
+        response = client.get("/v1/auth/session", headers={"Authorization": "Bearer secret"})
+    assert response.status_code == 200
+    assert response.json() == {"userId": str(owner)}

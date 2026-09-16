@@ -260,6 +260,14 @@ def create_app(
     configured_auth = app.state.hosted_auth
     if configured_auth is not None and isinstance(configured_auth.backend, BrowserAuthBackend):
         app.include_router(browser_auth_router(configured_auth.backend))
+    elif configured_auth is not None:
+
+        @app.get("/v1/auth/session")
+        def current_bearer_identity(request: Request) -> dict[str, str]:
+            identity = hosted_identity(request)
+            if identity is None:
+                raise HTTPException(401, "unauthenticated")
+            return {"userId": str(identity.user_id)}
 
     @app.exception_handler(StarletteHTTPException)
     async def handle_http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:

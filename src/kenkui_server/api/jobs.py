@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import AsyncIterator
 
 import kenkui as kk
@@ -35,6 +36,16 @@ router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
 def _response(job: Job, failure: dict[str, str] | None = None) -> JobResponse:
     return JobResponse(
         failure=failure,
+        source_id=job.spec.source_id,
+        source_cover=job.spec.output.source_cover,
+        title=job.spec.output.title,
+        author=job.spec.output.author,
+        narrator_voice_id=(
+            job.spec.casting.voice_id
+            if isinstance(job.spec.casting, SingleVoiceCasting)
+            else job.spec.casting.narrator_voice_id
+        ),
+        casting_mode="single" if isinstance(job.spec.casting, SingleVoiceCasting) else "characters",
         id=job.id,
         status=job.status.value,
         progress=ProgressResponse(
@@ -316,11 +327,16 @@ def get_artifact(job_id: str, request: Request) -> Response:
     artifacts = services.repositories.artifacts.list_for_job(job_id)
     if len(artifacts) != 1:
         raise HTTPException(status_code=404, detail="artifact not found")
+    filename = (
+        re.sub(r'[\x00-\x1f\x7f\\/:*?"<>|]', "_", job.spec.output.title or job_id)[:180].strip(" .")
+        or job_id
+    )
+    filename += ".m4b"
     try:
         if request.app.state.hosted_services is None:
-            return FileResponse(artifacts[0].path, media_type="audio/mp4", filename=f"{job_id}.m4b")
+            return FileResponse(artifacts[0].path, media_type="audio/mp4", filename=filename)
         return RedirectResponse(
-            services.assets.artifact_url(artifacts[0].path, filename=f"{job_id}.m4b"),
+            services.assets.artifact_url(artifacts[0].path, filename=filename),
             status_code=303,
             headers={"Cache-Control": "no-store"},
         )

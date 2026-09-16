@@ -1036,6 +1036,7 @@ name = "kenkui-server"
 version = "10.0.0"
 source = { editable = "." }
 dependencies = [
+    { name = "defusedxml" },
     { name = "fastapi" },
     { name = "kenkui" },
     { name = "pydantic" },
@@ -1062,6 +1063,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", marker = "extra == 'hosted'", specifier = ">=1.35,<2" },
+    { name = "defusedxml", specifier = ">=0.7.1,<0.8" },
     { name = "fastapi", specifier = ">=0.115,<0.130" },
     { name = "kenkui", editable = "../kenkui" },
     { name = "modal", marker = "extra == 'hosted'", specifier = ">=1,<2" },

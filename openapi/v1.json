@@ -70,6 +70,87 @@
         }
       }
     },
+    "/v1/assets/{asset_id}/cover": {
+      "get": {
+        "tags": [
+          "assets"
+        ],
+        "summary": "Get Cover",
+        "operationId": "get_cover_v1_assets__asset_id__cover_get",
+        "parameters": [
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Asset Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "assets"
+        ],
+        "summary": "Upload Cover",
+        "description": "Create a new owned EPUB; never mutate a source used by another draft/job.",
+        "operationId": "upload_cover_v1_assets__asset_id__cover_post",
+        "parameters": [
+          {
+            "name": "asset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Asset Id"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/voices": {
       "get": {
         "tags": [
@@ -678,6 +759,14 @@
               "models": []
             }
           },
+          "covers": {
+            "$ref": "#/components/schemas/CoverCapabilities",
+            "default": {
+              "read": true,
+              "upload": true,
+              "maxUploadBytes": 8388608
+            }
+          },
           "maxUploadBytes": {
             "type": "integer",
             "title": "Maxuploadbytes",
@@ -823,6 +912,27 @@
         "title": "CheckoutRequest",
         "description": "Only a pack size comes from the browser; account and price are server-owned."
       },
+      "CoverCapabilities": {
+        "properties": {
+          "read": {
+            "type": "boolean",
+            "title": "Read",
+            "default": true
+          },
+          "upload": {
+            "type": "boolean",
+            "title": "Upload",
+            "default": true
+          },
+          "maxUploadBytes": {
+            "type": "integer",
+            "title": "Maxuploadbytes",
+            "default": 8388608
+          }
+        },
+        "type": "object",
+        "title": "CoverCapabilities"
+      },
       "ErrorDetail": {
         "properties": {
           "code": {
@@ -934,6 +1044,72 @@
       },
       "JobResponse": {
         "properties": {
+          "sourceCover": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcecover"
+          },
+          "sourceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceid"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "narratorVoiceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Narratorvoiceid"
+          },
+          "castingMode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Castingmode"
+          },
           "failure": {
             "anyOf": [
               {

@@ -66,6 +66,12 @@ class CastingCapabilities(BaseModel):
     models: list[str] = Field(default_factory=list)
 
 
+class CoverCapabilities(BaseModel):
+    read: bool = True
+    upload: bool = True
+    max_upload_bytes: int = Field(8 * 1024 * 1024, serialization_alias="maxUploadBytes")
+
+
 class Capabilities(BaseModel):
     """Public, versioned declaration of local server features."""
 
@@ -81,6 +87,7 @@ class Capabilities(BaseModel):
         default=["m4b"], serialization_alias="outputFormats"
     )
     casting: CastingCapabilities = CastingCapabilities()
+    covers: CoverCapabilities = CoverCapabilities()
     max_upload_bytes: int = Field(50 * 1024 * 1024, serialization_alias="maxUploadBytes")
 
 

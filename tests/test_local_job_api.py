@@ -12,16 +12,44 @@ def _epub() -> bytes:
     result = BytesIO()
     with ZipFile(result, "w") as archive:
         archive.writestr("mimetype", "application/epub+zip", compress_type=ZIP_STORED)
-        archive.writestr("META-INF/container.xml", """<container xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\"><rootfiles><rootfile full-path=\"OPS/book.opf\"/></rootfiles></container>""")
-        archive.writestr("OPS/book.opf", """<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\"><metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><dc:title>Tiny</dc:title><dc:creator>Ada</dc:creator></metadata><manifest><item id=\"one\" href=\"one.xhtml\" media-type=\"application/xhtml+xml\"/></manifest><spine><itemref idref=\"one\"/></spine></package>""")
-        archive.writestr("OPS/one.xhtml", "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><p>Hello narrator.</p></body></html>")
+        archive.writestr(
+            "META-INF/container.xml",
+            '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+            "<rootfiles>"
+            '<rootfile full-path="OPS/book.opf"/>'
+            "</rootfiles>"
+            "</container>",
+        )
+        archive.writestr(
+            "OPS/book.opf",
+            '<package xmlns="http://www.idpf.org/2007/opf" version="3.0">'
+            '<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+            "<dc:title>Tiny</dc:title>"
+            "<dc:creator>Ada</dc:creator>"
+            "</metadata>"
+            "<manifest>"
+            '<item id="one" href="one.xhtml" media-type="application/xhtml+xml"/>'
+            "</manifest>"
+            "<spine>"
+            '<itemref idref="one"/>'
+            "</spine>"
+            "</package>",
+        )
+        archive.writestr(
+            "OPS/one.xhtml",
+            '<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Hello narrator.</p></body></html>',
+        )
     return result.getvalue()
 
 
 def test_preflight_then_idempotent_job_creation(tmp_path: Path) -> None:
     voice = kk.Voice("narrator", "Narrator", True, "local", "test", True)
-    with TestClient(create_app(data_dir=tmp_path / "state", voices=(voice,), fixture_mode=True)) as client:
-        asset = client.post("/v1/assets", content=_epub(), headers={"Content-Type": "application/epub+zip"}).json()
+    with TestClient(
+        create_app(data_dir=tmp_path / "state", voices=(voice,), fixture_mode=True)
+    ) as client:
+        asset = client.post(
+            "/v1/assets", content=_epub(), headers={"Content-Type": "application/epub+zip"}
+        ).json()
         book = client.get(f"/v1/assets/{asset['id']}/book").json()
         request = {
             "sourceId": asset["id"],
@@ -40,8 +68,6 @@ def test_preflight_then_idempotent_job_creation(tmp_path: Path) -> None:
         assert "path" not in first.text
 
 
-
-
 def test_list_jobs_returns_authoritative_snapshots(tmp_path: Path) -> None:
     from kenkui_server.jobs.models import (
         Job,
@@ -58,13 +84,25 @@ def test_list_jobs_returns_authoritative_snapshots(tmp_path: Path) -> None:
     repositories.jobs.create(
         Job(
             "job-b",
-            JobSpec("source-b", ("chapter-1",), SingleVoiceCasting("narrator"), TtsSettings(), OutputSpec("artifact.m4b")),
+            JobSpec(
+                "source-b",
+                ("chapter-1",),
+                SingleVoiceCasting("narrator"),
+                TtsSettings(),
+                OutputSpec("artifact.m4b"),
+            ),
         )
     )
     repositories.jobs.create(
         Job(
             "job-a",
-            JobSpec("source-a", ("chapter-1",), SingleVoiceCasting("narrator"), TtsSettings(), OutputSpec("artifact.m4b")),
+            JobSpec(
+                "source-a",
+                ("chapter-1",),
+                SingleVoiceCasting("narrator"),
+                TtsSettings(),
+                OutputSpec("artifact.m4b"),
+            ),
             status=JobStatus.RUNNING,
             version=1,
             progress=Progress("synthesis", 2, 3),
@@ -77,8 +115,24 @@ def test_list_jobs_returns_authoritative_snapshots(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert response.json() == {
         "items": [
-            {"id": "job-a", "status": "running", "progress": {"stage": "synthesis", "completed": 2, "total": 3}},
-            {"id": "job-b", "status": "queued", "progress": {"stage": "queued", "completed": 0, "total": 0}},
+            {
+                "sourceId": "source-a",
+                "sourceCover": True,
+                "castingMode": "single",
+                "narratorVoiceId": "narrator",
+                "id": "job-a",
+                "status": "running",
+                "progress": {"stage": "synthesis", "completed": 2, "total": 3},
+            },
+            {
+                "sourceId": "source-b",
+                "sourceCover": True,
+                "castingMode": "single",
+                "narratorVoiceId": "narrator",
+                "id": "job-b",
+                "status": "queued",
+                "progress": {"stage": "queued", "completed": 0, "total": 0},
+            },
         ]
     }
 
@@ -98,7 +152,13 @@ def test_cancelling_running_job_returns_a_durable_cancellation_request(tmp_path:
     repositories = app.state.local_services.repositories
     job = Job(
         "job-running",
-        JobSpec("source", ("chapter-1",), SingleVoiceCasting("narrator"), TtsSettings(), OutputSpec("artifact.m4b")),
+        JobSpec(
+            "source",
+            ("chapter-1",),
+            SingleVoiceCasting("narrator"),
+            TtsSettings(),
+            OutputSpec("artifact.m4b"),
+        ),
         status=JobStatus.RUNNING,
         version=1,
         progress=Progress("synthesis", 1, 3),
@@ -109,12 +169,22 @@ def test_cancelling_running_job_returns_a_durable_cancellation_request(tmp_path:
         first = client.post(f"/v1/jobs/{job.id}/cancel")
         second = client.post(f"/v1/jobs/{job.id}/cancel")
 
-    expected = {"id": job.id, "status": "cancel_requested", "progress": {"stage": "synthesis", "completed": 1, "total": 3}}
+    expected = {
+        "id": job.id,
+        "status": "cancel_requested",
+        "progress": {"stage": "synthesis", "completed": 1, "total": 3},
+    }
     assert first.status_code == 200
+    expected.update(
+        sourceId="source", sourceCover=True, castingMode="single", narratorVoiceId="narrator"
+    )
     assert first.json() == expected
     assert second.json() == expected
     assert repositories.jobs.get(job.id).status is JobStatus.CANCEL_REQUESTED
-    assert [event.event_type for event in repositories.events.list_for_job(job.id)] == ["cancel_requested"]
+    assert [event.event_type for event in repositories.events.list_for_job(job.id)] == [
+        "cancel_requested"
+    ]
+
 
 def test_cancellation_after_dispatch_finalization_terminalizes_atomically(tmp_path: Path) -> None:
     from kenkui_server.jobs.models import (
@@ -162,15 +232,24 @@ def test_cancellation_after_dispatch_finalization_terminalizes_atomically(tmp_pa
         "progress": {"stage": "synthesis", "completed": 1, "total": 3},
     }
     assert first.status_code == 200
+    expected.update(
+        sourceId="source", sourceCover=True, castingMode="single", narratorVoiceId="narrator"
+    )
     assert first.json() == expected
     assert second.json() == expected
     assert repositories.jobs.get(job.id).status is JobStatus.CANCELLED
     assert repositories.dispatches.get("dispatch-finalized").status == "done"
     assert [event.event_type for event in repositories.events.list_for_job(job.id)] == ["cancelled"]
+
+
 def test_fixture_worker_publishes_one_authorized_artifact(tmp_path: Path) -> None:
     voice = kk.Voice("narrator", "Narrator", True, "local", "test", True)
-    with TestClient(create_app(data_dir=tmp_path / "state", voices=(voice,), fixture_mode=True)) as client:
-        asset = client.post("/v1/assets", content=_epub(), headers={"Content-Type": "application/epub+zip"}).json()
+    with TestClient(
+        create_app(data_dir=tmp_path / "state", voices=(voice,), fixture_mode=True)
+    ) as client:
+        asset = client.post(
+            "/v1/assets", content=_epub(), headers={"Content-Type": "application/epub+zip"}
+        ).json()
         book = client.get(f"/v1/assets/{asset['id']}/book").json()
         job = client.post(
             "/v1/jobs",
@@ -196,8 +275,12 @@ def test_fixture_worker_publishes_one_authorized_artifact(tmp_path: Path) -> Non
 
 def test_cancellation_is_idempotent_and_artifact_remains_private(tmp_path: Path) -> None:
     voice = kk.Voice("narrator", "Narrator", True, "local", "test", True)
-    with TestClient(create_app(data_dir=tmp_path / "state", voices=(voice,), fixture_mode=True)) as client:
-        asset = client.post("/v1/assets", content=_epub(), headers={"Content-Type": "application/epub+zip"}).json()
+    with TestClient(
+        create_app(data_dir=tmp_path / "state", voices=(voice,), fixture_mode=True)
+    ) as client:
+        asset = client.post(
+            "/v1/assets", content=_epub(), headers={"Content-Type": "application/epub+zip"}
+        ).json()
         book = client.get(f"/v1/assets/{asset['id']}/book").json()
         job = client.post(
             "/v1/jobs",
@@ -220,8 +303,12 @@ def test_cancellation_is_idempotent_and_artifact_remains_private(tmp_path: Path)
 
 def test_sse_replays_monotonic_durable_history(tmp_path: Path) -> None:
     voice = kk.Voice("narrator", "Narrator", True, "local", "test", True)
-    with TestClient(create_app(data_dir=tmp_path / "state", voices=(voice,), fixture_mode=True)) as client:
-        asset = client.post("/v1/assets", content=_epub(), headers={"Content-Type": "application/epub+zip"}).json()
+    with TestClient(
+        create_app(data_dir=tmp_path / "state", voices=(voice,), fixture_mode=True)
+    ) as client:
+        asset = client.post(
+            "/v1/assets", content=_epub(), headers={"Content-Type": "application/epub+zip"}
+        ).json()
         book = client.get(f"/v1/assets/{asset['id']}/book").json()
         job = client.post(
             "/v1/jobs",
@@ -272,7 +359,9 @@ def test_restart_recovers_unclaimed_dispatch_from_durable_state(tmp_path: Path) 
             OutputSpec("artifact.m4b"),
         ),
     )
-    services.repositories.create_job_and_dispatch(job, Dispatch("dispatch-restart", job.id, "pending"), idempotency_key=None)
+    services.repositories.create_job_and_dispatch(
+        job, Dispatch("dispatch-restart", job.id, "pending"), idempotency_key=None
+    )
 
     restarted = create_app(data_dir=root, fixture_mode=True)
     for _ in range(50):
@@ -309,8 +398,19 @@ def test_running_worker_polls_durable_cancellation(monkeypatch, tmp_path: Path) 
     repositories = Repositories(database)
     source = store.put_source("asset-cancel", b"source")
     repositories.assets.put(Asset("asset-cancel", str(source), "digest", "epub"))
-    job = Job("job-cancel", JobSpec("asset-cancel", ("chapter-1",), SingleVoiceCasting("narrator"), TtsSettings(), OutputSpec("artifact.m4b")))
-    repositories.create_job_and_dispatch(job, Dispatch("dispatch-cancel", job.id, "pending"), idempotency_key=None)
+    job = Job(
+        "job-cancel",
+        JobSpec(
+            "asset-cancel",
+            ("chapter-1",),
+            SingleVoiceCasting("narrator"),
+            TtsSettings(),
+            OutputSpec("artifact.m4b"),
+        ),
+    )
+    repositories.create_job_and_dispatch(
+        job, Dispatch("dispatch-cancel", job.id, "pending"), idempotency_key=None
+    )
     observed = threading.Event()
 
     class BlockingPipeline:
@@ -332,7 +432,9 @@ def test_running_worker_polls_durable_cancellation(monkeypatch, tmp_path: Path) 
         if current.status.value == "running":
             break
         time.sleep(0.01)
-    repositories.jobs.update(transition(current, CancelRequested()), expected_version=current.version)
+    repositories.jobs.update(
+        transition(current, CancelRequested()), expected_version=current.version
+    )
     thread.join(timeout=1)
 
     assert observed.is_set()
@@ -424,6 +526,7 @@ def test_stale_completion_after_cancellation_discards_output_and_terminalizes_jo
     finally:
         database.close()
 
+
 def test_cancellation_committed_after_stale_completion_recovery_stays_recoverable(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -486,10 +589,9 @@ def test_cancellation_committed_after_stale_completion_recovery_stays_recoverabl
                 cancellation, expected_version=snapshot.version, event_type="cancel_requested"
             )
         return snapshot
+
     monkeypatch.setattr(repositories, "update_job_and_append_event", reject_completed_snapshot)
     monkeypatch.setattr(repositories.jobs, "get", get_with_post_recovery_cancellation)
-
-
 
     try:
         LocalJobRunner(database.path, store.root, fixture_mode=True)._run(
@@ -508,15 +610,22 @@ def test_cancellation_committed_after_stale_completion_recovery_stays_recoverabl
         database.close()
 
 
-
 def test_sse_honors_last_event_id_for_incremental_reconnect(tmp_path: Path) -> None:
     voice = kk.Voice("narrator", "Narrator", True, "local", "test", True)
-    with TestClient(create_app(data_dir=tmp_path / "state", voices=(voice,), fixture_mode=True)) as client:
-        asset = client.post("/v1/assets", content=_epub(), headers={"Content-Type": "application/epub+zip"}).json()
+    with TestClient(
+        create_app(data_dir=tmp_path / "state", voices=(voice,), fixture_mode=True)
+    ) as client:
+        asset = client.post(
+            "/v1/assets", content=_epub(), headers={"Content-Type": "application/epub+zip"}
+        ).json()
         book = client.get(f"/v1/assets/{asset['id']}/book").json()
         job = client.post(
             "/v1/jobs",
-            json={"sourceId": asset["id"], "chapters": [book["chapters"][0]["id"]], "casting": {"voiceId": "narrator"}},
+            json={
+                "sourceId": asset["id"],
+                "chapters": [book["chapters"][0]["id"]],
+                "casting": {"voiceId": "narrator"},
+            },
         ).json()
         for _ in range(50):
             if client.get(f"/v1/jobs/{job['id']}").json()["status"] == "succeeded":
@@ -549,13 +658,21 @@ def test_restart_reclaims_running_dispatch_after_worker_death(tmp_path: Path) ->
     services.repositories.assets.put(Asset("asset-running", str(source), "digest", "epub"))
     job = Job(
         "job-running",
-        JobSpec("asset-running", ("chapter-1",), SingleVoiceCasting("narrator"), TtsSettings(), OutputSpec("artifact.m4b")),
+        JobSpec(
+            "asset-running",
+            ("chapter-1",),
+            SingleVoiceCasting("narrator"),
+            TtsSettings(),
+            OutputSpec("artifact.m4b"),
+        ),
         status=JobStatus.RUNNING,
         version=1,
         progress=Progress("running", 0, 0),
     )
     services.repositories.jobs.create(job)
-    services.repositories.dispatches.create(Dispatch("dispatch-running", job.id, "running", version=1))
+    services.repositories.dispatches.create(
+        Dispatch("dispatch-running", job.id, "running", version=1)
+    )
 
     restarted = create_app(data_dir=root, fixture_mode=True)
     for _ in range(50):

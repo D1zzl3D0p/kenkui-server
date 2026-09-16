@@ -105,6 +105,12 @@ class ProgressResponse(_Model):
 
 
 class JobResponse(_Model):
+    source_cover: bool | None = Field(None, alias="sourceCover")
+    source_id: str | None = Field(None, alias="sourceId")
+    title: str | None = None
+    author: str | None = None
+    narrator_voice_id: str | None = Field(None, alias="narratorVoiceId")
+    casting_mode: str | None = Field(None, alias="castingMode")
     failure: dict[str, str] | None = None
     id: str
     status: Literal["queued", "running", "cancel_requested", "succeeded", "failed", "cancelled"]
