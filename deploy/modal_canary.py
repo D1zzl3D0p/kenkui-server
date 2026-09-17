@@ -79,7 +79,10 @@ def verify(source_bytes: bytes) -> dict:
                 text=True,
             )
             metadata = json.loads(probe.stdout)
-            if float(metadata["format"]["duration"]) <= 0 or len(metadata["chapters"]) != len(chapter_ids):
+            if (
+                float(metadata["format"]["duration"]) <= 0
+                or len(metadata["chapters"]) != len(chapter_ids)
+            ):
                 raise RuntimeError("Canary audio or chapter validation failed")
             subprocess.run(
                 ["ffmpeg", "-v", "error", "-i", str(output), "-f", "null", "-"],
