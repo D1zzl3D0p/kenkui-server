@@ -96,6 +96,15 @@ class R2AssetStore:
     def upload_artifact_file(self, identifier: str, path: Path) -> None:
         self._client.upload_file(str(path), self._bucket, self._key("artifact", identifier))
 
+    def upload_checkpoint(self, identifier: str, path: Path) -> None:
+        self._client.upload_file(str(path), self._bucket, self._key("checkpoint", identifier))
+
+    def download_checkpoint(self, identifier: str, path: Path) -> None:
+        self._client.download_file(self._bucket, self._key("checkpoint", identifier), str(path))
+
+    def delete_checkpoint(self, identifier: str) -> None:
+        self._delete("checkpoint", identifier)
+
     def artifact_url(self, identifier: str, *, filename: str) -> str:
         return self._client.generate_presigned_url(
             "get_object",

@@ -29,6 +29,7 @@ from kenkui_server.auth.browser import (
     browser_auth_router,
     set_session,
 )
+from kenkui_server.auth.native import native_auth_router
 from kenkui_server.billing.service import BillingService
 from kenkui_server.billing.stripe import StripeWebhookHandler
 from kenkui_server.compute.base import ProcessRunner
@@ -260,6 +261,7 @@ def create_app(
     configured_auth = app.state.hosted_auth
     if configured_auth is not None and isinstance(configured_auth.backend, BrowserAuthBackend):
         app.include_router(browser_auth_router(configured_auth.backend))
+        app.include_router(native_auth_router(configured_auth.backend))
     elif configured_auth is not None:
 
         @app.get("/v1/auth/session")
@@ -296,7 +298,10 @@ def create_app(
             status_code=422,
             code="validation_error",
             message="Request validation failed",
-            details={"errors": jsonable_encoder(exc.errors())},
+            # Native auth bodies contain refresh credentials and PKCE material.
+            details=None
+            if request.url.path.startswith("/v1/auth/native/")
+            else {"errors": jsonable_encoder(exc.errors())},
         )
 
     @app.exception_handler(Exception)
@@ -326,6 +331,9 @@ def create_app(
         request_id = request.headers.get(REQUEST_ID_HEADER)
         request.state.request_id = request_id if request_id else str(uuid4())
         response = await call_next(request)
+        if request.url.path.startswith("/v1/auth/native/"):
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Pragma"] = "no-cache"
         log_event(
             LOGGER,
             "request.completed",

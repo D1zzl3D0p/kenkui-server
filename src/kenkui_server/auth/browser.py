@@ -28,6 +28,7 @@ class BrowserSessionConfig:
     web_origin: str
     cookie_password: str = field(repr=False)
     invited_emails: frozenset[str]
+    native_redirect_uri: str | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -43,6 +44,8 @@ class BrowserSessionConfig:
                 raise ValueError("hosted browser sessions require HTTPS origins")
         if not self.invited_emails:
             raise ValueError("private beta requires an invitation allowlist")
+        if self.native_redirect_uri not in (None, "http://127.0.0.1:43827/callback"):
+            raise ValueError("native redirect must be http://127.0.0.1:43827/callback")
 
 
 class BrowserAuthBackend:
@@ -78,7 +81,12 @@ class BrowserAuthBackend:
         return self._identity(refreshed.user), refreshed.sealed_session
 
     def authenticate(self, token: str) -> Identity:
-        return self.authenticate_browser(token)[0]
+        # Bearer clients rotate refresh tokens explicitly. An implicit refresh
+        # here would discard the rotated credential and race concurrent requests.
+        result = self.session(token).authenticate()
+        if not result.authenticated:
+            raise PermissionError("unauthenticated")
+        return self._identity(result.user)
 
     def authorize(self, actor_id: UUID, owner_id: UUID) -> bool:
         return actor_id == owner_id
