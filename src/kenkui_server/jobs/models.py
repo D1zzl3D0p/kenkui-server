@@ -72,10 +72,34 @@ class TtsSettings:
     """Deterministic, provider-independent synthesis intent."""
 
     normalize_text: bool = True
+    chapter_pauses: bool = False
+    prepare_numbers: bool = False
+    pronunciation_corrections: bool = False
+    stutter_handling: bool = False
+    chapter_pause_ms: int | None = None
+    heading_before_pause_ms: int = 0
+    heading_after_pause_ms: int = 0
+    paragraph_pause_ms: int = 0
+    line_pause_ms: int = 0
 
     def __post_init__(self) -> None:
-        if not isinstance(self.normalize_text, bool):
-            raise ValueError("invalid_normalize_text")
+        # False defaults preserve jobs stored before speech settings existed.
+        for name in (
+            "normalize_text", "chapter_pauses", "prepare_numbers",
+            "pronunciation_corrections", "stutter_handling",
+        ):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"invalid_{name}")
+
+        for name in (
+            "chapter_pause_ms", "heading_before_pause_ms", "heading_after_pause_ms",
+            "paragraph_pause_ms", "line_pause_ms",
+        ):
+            value = getattr(self, name)
+            if name == "chapter_pause_ms" and value is None:
+                continue
+            if type(value) is not int or not 0 <= value <= 60_000:
+                raise ValueError(f"invalid_{name}")
 
 
 @dataclass(frozen=True, slots=True)

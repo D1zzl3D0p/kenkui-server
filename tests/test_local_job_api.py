@@ -682,3 +682,31 @@ def test_restart_reclaims_running_dispatch_after_worker_death(tmp_path: Path) ->
         __import__("time").sleep(0.02)
 
     assert snapshot.status.value == "succeeded"
+
+
+def test_speech_settings_preflight_persistence_and_idempotency(tmp_path: Path) -> None:
+    voice = kk.Voice("narrator", "Narrator", True, "local", "test", True)
+    app = create_app(data_dir=tmp_path / "state", voices=(voice,), fixture_mode=True)
+    with TestClient(app) as client:
+        asset = client.post(
+            "/v1/assets", content=_epub(), headers={"Content-Type": "application/epub+zip"}
+        ).json()
+        book = client.get(f"/v1/assets/{asset['id']}/book").json()
+        payload = {
+            "sourceId": asset["id"], "chapters": [book["chapters"][0]["id"]],
+            "casting": {"voiceId": "narrator"},
+            "tts": {"chapterPauses": True, "prepareNumbers": True,
+                    "pronunciationCorrections": True, "stutterHandling": False},
+        }
+        estimate = client.post("/v1/jobs/preflight", json=payload)
+        assert estimate.status_code == 200
+        assert estimate.json()["normalizedCharacters"] == 15
+        response = client.post("/v1/jobs", json=payload,
+                               headers={"Idempotency-Key": "speech-settings"})
+        assert response.status_code == 202
+        settings = app.state.local_services.repositories.jobs.get(response.json()["id"]).spec.tts
+        assert settings.chapter_pauses and settings.prepare_numbers
+        assert settings.pronunciation_corrections and not settings.stutter_handling
+        payload["tts"]["chapterPauses"] = False
+        assert client.post("/v1/jobs", json=payload,
+                           headers={"Idempotency-Key": "speech-settings"}).status_code == 409

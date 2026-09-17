@@ -88,6 +88,8 @@ class Capabilities(BaseModel):
     )
     casting: CastingCapabilities = CastingCapabilities()
     covers: CoverCapabilities = CoverCapabilities()
+    pause_lengths: bool = Field(True, serialization_alias="pauseLengths")
+    speech_settings: bool = Field(True, serialization_alias="speechSettings")
     max_upload_bytes: int = Field(50 * 1024 * 1024, serialization_alias="maxUploadBytes")
 
 

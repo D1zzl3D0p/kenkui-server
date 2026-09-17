@@ -46,7 +46,7 @@ def _encode_spec(spec: JobSpec) -> str:
             "source_id": spec.source_id,
             "chapters": spec.chapters,
             "casting": _casting_to_row(spec.casting),
-            "tts": {"normalize_text": spec.tts.normalize_text},
+            "tts": asdict(spec.tts),
             "output": asdict(spec.output),
         }
     )
@@ -58,7 +58,7 @@ def _decode_spec(raw: str) -> JobSpec:
         source_id=value["source_id"],
         chapters=tuple(value["chapters"]),
         casting=_casting_from_row(value["casting"]),
-        tts=TtsSettings(value["tts"]["normalize_text"]),
+        tts=TtsSettings(**value["tts"]),
         output=OutputSpec(**value["output"]),
     )
 

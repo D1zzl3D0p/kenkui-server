@@ -7,6 +7,8 @@ def test_local_capabilities_are_versioned(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.json() == {
         "apiVersion": "1",
+        "speechSettings": True,
+        "pauseLengths": True,
         "covers": {"read": True, "upload": True, "maxUploadBytes": 8 * 1024 * 1024},
         "maxUploadBytes": 50 * 1024 * 1024,
         "auth": {"mode": "none"},

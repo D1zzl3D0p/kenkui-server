@@ -844,6 +844,16 @@
               "maxUploadBytes": 8388608
             }
           },
+          "pauseLengths": {
+            "type": "boolean",
+            "title": "Pauselengths",
+            "default": true
+          },
+          "speechSettings": {
+            "type": "boolean",
+            "title": "Speechsettings",
+            "default": true
+          },
           "maxUploadBytes": {
             "type": "integer",
             "title": "Maxuploadbytes",
@@ -1200,7 +1210,15 @@
           "tts": {
             "$ref": "#/components/schemas/TtsRequest",
             "default": {
-              "normalizeText": true
+              "normalizeText": true,
+              "chapterPauses": false,
+              "prepareNumbers": false,
+              "pronunciationCorrections": false,
+              "stutterHandling": false,
+              "headingBeforePauseMs": 0,
+              "headingAfterPauseMs": 0,
+              "paragraphPauseMs": 0,
+              "linePauseMs": 0
             }
           },
           "output": {
@@ -1447,6 +1465,68 @@
             "description": "Legacy field. Kenkui always normalizes source text.",
             "default": true,
             "deprecated": true
+          },
+          "chapterPauses": {
+            "type": "boolean",
+            "title": "Chapterpauses",
+            "default": false,
+            "deprecated": true
+          },
+          "prepareNumbers": {
+            "type": "boolean",
+            "title": "Preparenumbers",
+            "default": false
+          },
+          "pronunciationCorrections": {
+            "type": "boolean",
+            "title": "Pronunciationcorrections",
+            "default": false
+          },
+          "stutterHandling": {
+            "type": "boolean",
+            "title": "Stutterhandling",
+            "default": false
+          },
+          "chapterPauseMs": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 60000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapterpausems"
+          },
+          "headingBeforePauseMs": {
+            "type": "integer",
+            "maximum": 60000.0,
+            "minimum": 0.0,
+            "title": "Headingbeforepausems",
+            "default": 0
+          },
+          "headingAfterPauseMs": {
+            "type": "integer",
+            "maximum": 60000.0,
+            "minimum": 0.0,
+            "title": "Headingafterpausems",
+            "default": 0
+          },
+          "paragraphPauseMs": {
+            "type": "integer",
+            "maximum": 60000.0,
+            "minimum": 0.0,
+            "title": "Paragraphpausems",
+            "default": 0
+          },
+          "linePauseMs": {
+            "type": "integer",
+            "maximum": 60000.0,
+            "minimum": 0.0,
+            "title": "Linepausems",
+            "default": 0
           }
         },
         "type": "object",

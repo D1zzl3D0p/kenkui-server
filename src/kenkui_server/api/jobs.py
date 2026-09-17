@@ -101,7 +101,17 @@ def _spec(request: JobRequest, allowed_models: tuple[str, ...] = ()) -> JobSpec:
             source_id=request.source_id,
             chapters=tuple(request.chapters),
             casting=_casting(request.casting, allowed_models),
-            tts=TtsSettings(),
+            tts=TtsSettings(
+                chapter_pauses=request.tts.chapter_pauses,
+                prepare_numbers=request.tts.prepare_numbers,
+                pronunciation_corrections=request.tts.pronunciation_corrections,
+                stutter_handling=request.tts.stutter_handling,
+                chapter_pause_ms=request.tts.chapter_pause_ms,
+                heading_before_pause_ms=request.tts.heading_before_pause_ms,
+                heading_after_pause_ms=request.tts.heading_after_pause_ms,
+                paragraph_pause_ms=request.tts.paragraph_pause_ms,
+                line_pause_ms=request.tts.line_pause_ms,
+            ),
             output=OutputSpec(
                 "artifact.m4b",
                 request.output.title,

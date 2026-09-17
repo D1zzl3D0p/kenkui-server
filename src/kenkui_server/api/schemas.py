@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 
 
 class _Model(BaseModel):
@@ -73,6 +73,19 @@ class TtsRequest(_Model):
         deprecated=True,
         description="Legacy field. Kenkui always normalizes source text.",
     )
+
+    chapter_pauses: StrictBool = Field(
+        False, alias="chapterPauses", json_schema_extra={"deprecated": True}
+    )
+    prepare_numbers: StrictBool = Field(False, alias="prepareNumbers")
+    pronunciation_corrections: StrictBool = Field(False, alias="pronunciationCorrections")
+    stutter_handling: StrictBool = Field(False, alias="stutterHandling")
+
+    chapter_pause_ms: StrictInt | None = Field(None, alias="chapterPauseMs", ge=0, le=60_000)
+    heading_before_pause_ms: StrictInt = Field(0, alias="headingBeforePauseMs", ge=0, le=60_000)
+    heading_after_pause_ms: StrictInt = Field(0, alias="headingAfterPauseMs", ge=0, le=60_000)
+    paragraph_pause_ms: StrictInt = Field(0, alias="paragraphPauseMs", ge=0, le=60_000)
+    line_pause_ms: StrictInt = Field(0, alias="linePauseMs", ge=0, le=60_000)
 
 
 class OutputRequest(_Model):
