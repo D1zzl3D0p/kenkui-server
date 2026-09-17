@@ -69,7 +69,8 @@ class BrowserAuthBackend:
         result = session.authenticate()
         if result.authenticated:
             return self._identity(result.user), None
-        if result.reason != "invalid_jwt":
+        # WorkOS returns an enum, not a string, for authentication failures.
+        if getattr(result.reason, "value", result.reason) != "invalid_jwt":
             raise PermissionError("unauthenticated")
         refreshed = session.refresh()
         if not refreshed.authenticated:

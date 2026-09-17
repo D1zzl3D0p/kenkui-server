@@ -105,3 +105,39 @@ def test_configured_key_can_seal_a_real_workos_session():
     session = pytest.importorskip("workos.session").Session
     auth = backend()
     assert session.seal_data({"user": {"id": "test"}}, auth.config.cookie_password)
+
+
+def test_expired_access_token_refreshes_session_cookie(tmp_path):
+    reason = pytest.importorskip("workos.session").AuthenticateWithSessionCookieFailureReason
+    auth = backend()
+    session = auth.client.user_management.load_sealed_session.return_value
+    user = session.authenticate.return_value.user
+    session.authenticate.return_value = SimpleNamespace(
+        authenticated=False, reason=reason.INVALID_JWT
+    )
+    session.refresh.return_value = SimpleNamespace(
+        authenticated=True, user=user, sealed_session="renewed"
+    )
+    app = create_app(
+        data_dir=tmp_path, voices=(), auth_backend=auth, job_owner_resolver=lambda _: UUID(int=1)
+    )
+    with TestClient(app, base_url="https://api.example.com") as client:
+        client.cookies.set(SESSION_COOKIE, "expired", domain="api.example.com", path="/")
+        response = client.get("/v1/auth/session")
+        assert response.status_code == 200
+        session.refresh.assert_called_once()
+        assert client.cookies[SESSION_COOKIE] == "renewed"
+        assert "Max-Age=604800" in response.headers["set-cookie"]
+
+
+def test_revoked_refresh_token_requires_sign_in():
+    reason = pytest.importorskip("workos.session").AuthenticateWithSessionCookieFailureReason
+    auth = backend()
+    session = auth.client.user_management.load_sealed_session.return_value
+    session.authenticate.return_value = SimpleNamespace(
+        authenticated=False, reason=reason.INVALID_JWT
+    )
+    session.refresh.return_value = SimpleNamespace(authenticated=False)
+    with pytest.raises(PermissionError, match="unauthenticated"):
+        auth.authenticate_browser("expired")
+    session.refresh.assert_called_once()
