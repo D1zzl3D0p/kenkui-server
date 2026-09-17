@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import replace
 from pathlib import Path
 from threading import Event, Thread
@@ -56,6 +57,9 @@ class LocalJobRunner:
 
     def _publish(self, store: Any, job_id: str, output: Path) -> str:
         return str(output)
+
+    def _checkpoints(self, job_id: str) -> AbstractContextManager[None]:
+        return nullcontext()
 
     def run(self, dispatch_id: str) -> None:
         database = self._database()
@@ -202,7 +206,10 @@ class LocalJobRunner:
                     self._update(repositories, next_job, "progress")
 
                 try:
-                    with store.materialize_source(running.spec.source_id) as source:
+                    with (
+                        self._checkpoints(running.id),
+                        store.materialize_source(running.spec.source_id) as source,
+                    ):
                         pipeline_from_job(running.spec, source).write(
                             output,
                             on_event=on_event,

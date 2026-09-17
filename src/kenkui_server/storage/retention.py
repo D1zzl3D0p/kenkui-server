@@ -135,4 +135,19 @@ class PostgresRetention:
                     "UPDATE stored_objects SET deleted_at=now() WHERE id=%s", (item["id"],)
                 )
                 deleted += 1
+        with self.database.transaction():
+            checkpoints = self.database.execute("""
+                SELECT c.id FROM job_checkpoints c JOIN jobs j ON j.id=c.job_id
+                WHERE (NOT c.ready AND c.created_at < now() - interval '24 hours')
+                   OR (j.status='succeeded' AND j.terminal_at < now() - interval '24 hours')
+                   OR (j.status IN ('failed','cancelled')
+                       AND j.terminal_at < now() - interval '7 days')
+                ORDER BY c.created_at LIMIT 100 FOR UPDATE OF c SKIP LOCKED
+            """).fetchall()
+            for checkpoint in checkpoints:
+                self.objects.delete_checkpoint(checkpoint["id"])
+                self.database.execute(
+                    "DELETE FROM job_checkpoints WHERE id=%s", (checkpoint["id"],)
+                )
+                deleted += 1
         return deleted

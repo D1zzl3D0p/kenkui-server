@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
+from kenkui.checkpoints import checkpointing
+
+from kenkui_server.storage.checkpoints import HostedCheckpointStore
 from kenkui_server.storage.postgres import PostgresHostedRepository
 from kenkui_server.storage.postgres_database import PostgresDatabase
 from kenkui_server.worker import LocalJobRunner
@@ -52,6 +57,17 @@ class HostedJobRunner(LocalJobRunner):
 
     def _store(self) -> HostedWorkerStore:
         return HostedWorkerStore(self.objects, self._assets_root)
+
+    @contextmanager
+    def _checkpoints(self, job_id: str) -> Iterator[None]:
+        if self._lease is None:
+            raise RuntimeError("hosted_checkpoint_lease_required")
+        database = self._database()
+        try:
+            with checkpointing(HostedCheckpointStore(database, self.objects, job_id, self._lease)):
+                yield
+        finally:
+            database.close()
 
     def _publish(self, store: Any, job_id: str, output: Path) -> str:
         identifier = output.stem
