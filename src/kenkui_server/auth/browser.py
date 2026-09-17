@@ -27,7 +27,8 @@ class BrowserSessionConfig:
     redirect_uri: str
     web_origin: str
     cookie_password: str = field(repr=False)
-    invited_emails: frozenset[str]
+    # An empty allowlist means open signup; any verified email may sign in.
+    invited_emails: frozenset[str] = frozenset()
     native_redirect_uri: str | None = None
 
     def __post_init__(self) -> None:
@@ -42,8 +43,6 @@ class BrowserSessionConfig:
         for url in (self.redirect_uri, self.web_origin):
             if urlsplit(url).scheme != "https" or not urlsplit(url).netloc:
                 raise ValueError("hosted browser sessions require HTTPS origins")
-        if not self.invited_emails:
-            raise ValueError("private beta requires an invitation allowlist")
         if self.native_redirect_uri not in (None, "http://127.0.0.1:43827/callback"):
             raise ValueError("native redirect must be http://127.0.0.1:43827/callback")
 
@@ -57,8 +56,10 @@ class BrowserAuthBackend:
         self.config = config
 
     def _identity(self, user: Any) -> Identity:
+        if not user.email_verified:
+            raise PermissionError("invitation_required")
         invited = {email.strip().casefold() for email in self.config.invited_emails}
-        if not user.email_verified or user.email.casefold() not in invited:
+        if invited and user.email.casefold() not in invited:
             raise PermissionError("invitation_required")
         return Identity(self.identities.user_id_for_subject(user.id), user.id)
 

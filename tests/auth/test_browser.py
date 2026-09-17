@@ -141,3 +141,38 @@ def test_revoked_refresh_token_requires_sign_in():
     with pytest.raises(PermissionError, match="unauthenticated"):
         auth.authenticate_browser("expired")
     session.refresh.assert_called_once()
+
+
+def open_backend():
+    """A deployment with no allowlist configured: signup is open to anyone."""
+    auth = backend()
+    auth.config = BrowserSessionConfig(
+        "https://api.example.com/v1/auth/callback",
+        "https://app.example.com",
+        "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=",
+    )
+    return auth
+
+
+def test_empty_allowlist_is_accepted_at_startup():
+    assert open_backend().config.invited_emails == frozenset()
+
+
+def test_open_signup_admits_any_verified_email():
+    auth = open_backend()
+    user = SimpleNamespace(id="user", email="stranger@example.com", email_verified=True)
+    auth.client.user_management.load_sealed_session.return_value.authenticate.return_value = (
+        SimpleNamespace(authenticated=True, user=user)
+    )
+    identity, _ = auth.authenticate_browser("sealed")
+    assert identity.provider_subject == "user"
+
+
+def test_open_signup_still_rejects_unverified_email():
+    auth = open_backend()
+    user = SimpleNamespace(id="user", email="stranger@example.com", email_verified=False)
+    auth.client.user_management.load_sealed_session.return_value.authenticate.return_value = (
+        SimpleNamespace(authenticated=True, user=user)
+    )
+    with pytest.raises(PermissionError):
+        auth.authenticate("sealed")

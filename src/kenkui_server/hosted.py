@@ -47,7 +47,13 @@ def create_hosted_app() -> FastAPI:
         redirect_uri=required("WORKOS_REDIRECT_URI"),
         web_origin=required("KENKUI_WEB_ORIGIN").rstrip("/"),
         cookie_password=required("KENKUI_SESSION_SECRET"),
-        invited_emails=frozenset(required("KENKUI_INVITED_EMAILS").split(",")),
+        invited_emails=frozenset(
+            email
+            for email in (
+                raw.strip() for raw in os.environ.get("KENKUI_INVITED_EMAILS", "").split(",")
+            )
+            if email
+        ),
         native_redirect_uri=os.environ.get("KENKUI_NATIVE_REDIRECT_URI") or None,
     )
     voices = select_hosted_voices(
