@@ -710,3 +710,28 @@ def test_speech_settings_preflight_persistence_and_idempotency(tmp_path: Path) -
         payload["tts"]["chapterPauses"] = False
         assert client.post("/v1/jobs", json=payload,
                            headers={"Idempotency-Key": "speech-settings"}).status_code == 409
+
+
+def test_the_book_endpoint_counts_every_chapter_for_the_chooser(tmp_path: Path) -> None:
+    """A chapter's size is what makes a long one visible before submission."""
+    with TestClient(create_app(data_dir=tmp_path / "state", fixture_mode=True)) as client:
+        asset = client.post(
+            "/v1/assets", content=_epub(), headers={"Content-Type": "application/epub+zip"}
+        ).json()
+
+        book = client.get(f"/v1/assets/{asset['id']}/book").json()
+
+        assert [chapter["speechCharacters"] for chapter in book["chapters"]] == [15]
+
+
+def test_capabilities_publish_the_narration_estimate_the_renderer_uses(
+    tmp_path: Path,
+) -> None:
+    """The browser estimates with the server's numbers rather than its own copy."""
+    from kenkui import limits
+
+    with TestClient(create_app(data_dir=tmp_path / "state")) as client:
+        narration = client.get("/v1/capabilities").json()["narration"]
+
+    assert narration["charactersPerSecond"] == limits.TYPICAL_SPEECH_CHARACTERS_PER_SECOND
+    assert narration["longChapterHours"] == limits.LONG_CHAPTER_HOURS

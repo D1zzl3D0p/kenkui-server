@@ -844,6 +844,13 @@
               "maxUploadBytes": 8388608
             }
           },
+          "narration": {
+            "$ref": "#/components/schemas/NarrationCapabilities",
+            "default": {
+              "charactersPerSecond": 13,
+              "longChapterHours": 6.0
+            }
+          },
           "pauseLengths": {
             "type": "boolean",
             "title": "Pauselengths",
@@ -1346,6 +1353,23 @@
           "progress"
         ],
         "title": "JobResponse"
+      },
+      "NarrationCapabilities": {
+        "properties": {
+          "charactersPerSecond": {
+            "type": "integer",
+            "title": "Characterspersecond",
+            "default": 13
+          },
+          "longChapterHours": {
+            "type": "number",
+            "title": "Longchapterhours",
+            "default": 6.0
+          }
+        },
+        "type": "object",
+        "title": "NarrationCapabilities",
+        "description": "How this server's renderer turns text into time.\n\nPublished so a browser can show what a chapter will cost before anyone\nsubmits it, using the same numbers the renderer reports against rather than\na copy that can drift from them."
       },
       "OutputRequest": {
         "properties": {
