@@ -1,5 +1,7 @@
 from fastapi.testclient import TestClient
 
+from kenkui import limits
+
 
 def test_local_capabilities_are_versioned(client: TestClient) -> None:
     response = client.get("/v1/capabilities")
@@ -16,4 +18,8 @@ def test_local_capabilities_are_versioned(client: TestClient) -> None:
         "sourceFormats": ["epub"],
         "outputFormats": ["m4b"],
         "casting": {"modes": ["single"], "models": []},
+        "narration": {
+            "charactersPerSecond": limits.TYPICAL_SPEECH_CHARACTERS_PER_SECOND,
+            "longChapterHours": limits.LONG_CHAPTER_HOURS,
+        },
     }

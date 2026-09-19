@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
+from kenkui import limits as kk_limits
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 DEFAULT_CHARACTER_MODEL = "openrouter/deepseek/deepseek-v4-flash"
@@ -72,6 +73,25 @@ class CoverCapabilities(BaseModel):
     max_upload_bytes: int = Field(8 * 1024 * 1024, serialization_alias="maxUploadBytes")
 
 
+class NarrationCapabilities(BaseModel):
+    """How this server's renderer turns text into time.
+
+    Published so a browser can show what a chapter will cost before anyone
+    submits it, using the same numbers the renderer reports against rather than
+    a copy that can drift from them.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    characters_per_second: int = Field(
+        kk_limits.TYPICAL_SPEECH_CHARACTERS_PER_SECOND,
+        serialization_alias="charactersPerSecond",
+    )
+    long_chapter_hours: float = Field(
+        kk_limits.LONG_CHAPTER_HOURS, serialization_alias="longChapterHours"
+    )
+
+
 class Capabilities(BaseModel):
     """Public, versioned declaration of local server features."""
 
@@ -88,6 +108,7 @@ class Capabilities(BaseModel):
     )
     casting: CastingCapabilities = CastingCapabilities()
     covers: CoverCapabilities = CoverCapabilities()
+    narration: NarrationCapabilities = NarrationCapabilities()
     pause_lengths: bool = Field(True, serialization_alias="pauseLengths")
     speech_settings: bool = Field(True, serialization_alias="speechSettings")
     max_upload_bytes: int = Field(50 * 1024 * 1024, serialization_alias="maxUploadBytes")
