@@ -90,7 +90,12 @@ image = (
 models = modal.Volume.from_name(
     f"{app_name}-models", environment_name=deployment, create_if_missing=True
 )
-secrets = [modal.Secret.from_name(f"{app_name}-worker", environment_name=deployment)]
+secrets = [
+    modal.Secret.from_name(f"{app_name}-worker", environment_name=deployment),
+    # Completion mail is a separate secret so worker credentials are never
+    # rewritten to add it. An empty SMTP password leaves the deployment silent.
+    modal.Secret.from_name(f"{app_name}-mail", environment_name=deployment),
+]
 
 
 def configure_model_manifest() -> None:

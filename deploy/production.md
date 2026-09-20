@@ -80,10 +80,14 @@ production service's `KENKUI_INVITED_EMAILS`. That file is not loaded automatica
 Create the environment-specific Modal secret from a private environment file
 containing `DATABASE_URL`, `R2_BUCKET`, `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`,
 `R2_SECRET_ACCESS_KEY`, `R2_KEY_SALT`, and `OPENROUTER_API_KEY`.
-Completion email is sent by the worker, so it also needs `KENKUI_SMTP_PASSWORD`,
-`KENKUI_SMTP_SENDER`, `KENKUI_SMTP_USERNAME`, `KENKUI_WEB_ORIGIN`,
-`KENKUI_API_ORIGIN`, and `KENKUI_UNSUBSCRIBE_SECRET`. Omitting the SMTP password
-is a supported configuration: the deployment simply sends no mail.
+Completion email is sent by the worker from a **second** Modal secret,
+`kenkui-{environment}-mail`, holding `KENKUI_SMTP_PASSWORD`, `KENKUI_SMTP_SENDER`,
+`KENKUI_SMTP_USERNAME`, `KENKUI_WEB_ORIGIN`, `KENKUI_API_ORIGIN`, and
+`KENKUI_UNSUBSCRIBE_SECRET`. It is separate so adding mail never rewrites worker
+credentials that cannot be read back. Both secrets must exist in an environment
+before deploying it; leaving the SMTP password empty is supported and simply
+sends no mail. iCloud+ custom domains authenticate as the Apple ID, so
+`KENKUI_SMTP_USERNAME` is that address and `KENKUI_SMTP_SENDER` is the alias.
 Use Render's **external** PostgreSQL URL here, with `sslmode=verify-full` and
 the platform's trusted certificate chain. Verify connectivity from Modal before
 admitting jobs. Do not copy Render's internal hostname to the workers.
