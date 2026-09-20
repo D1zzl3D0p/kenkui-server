@@ -74,7 +74,8 @@ def test_custom_pause_lengths_round_trip_and_reach_pipeline(full_cast: bool) -> 
     from kenkui._domain.operations import Pauses
 
     spec = _spec(request(chapterPauseMs=2200, headingBeforePauseMs=150,
-                         headingAfterPauseMs=600, paragraphPauseMs=250, linePauseMs=100))
+                         headingAfterPauseMs=600, paragraphPauseMs=250, linePauseMs=100,
+                         scenePauseMs=900))
     if full_cast:
         spec = replace(spec, casting=CharacterCasting(
             "narrator", "narrator", (), "gendered", "test/model",
@@ -84,8 +85,27 @@ def test_custom_pause_lengths_round_trip_and_reach_pipeline(full_cast: bool) -> 
     pipeline = pipeline_from_job(restored, "book.epub")
     assert next(op for op in pipeline.operations if isinstance(op, Pauses)) == Pauses(
         chapter_ms=2200, heading_before_ms=150, heading_after_ms=600,
-        paragraph_ms=250, line_ms=100,
+        paragraph_ms=250, line_ms=100, scene_ms=900,
     )
+
+
+def test_scene_pause_is_independent_of_every_other_tier() -> None:
+    from kenkui._domain.operations import Pauses
+
+    spec = _spec(request(scenePauseMs=900))
+    pipeline = pipeline_from_job(spec, "book.epub")
+    assert next(op for op in pipeline.operations if isinstance(op, Pauses)) == Pauses(
+        scene_ms=900,
+    )
+
+
+def test_chapter_pause_implies_no_scene_pause() -> None:
+    from kenkui._domain.operations import Pauses
+
+    spec = _spec(request(chapterPauses=True))
+    pauses = next(op for op in pipeline_from_job(spec, "book.epub").operations
+                  if isinstance(op, Pauses))
+    assert pauses.scene_ms == 0
 
 
 def test_zero_explicitly_overrides_old_chapter_toggle() -> None:
@@ -97,7 +117,7 @@ def test_zero_explicitly_overrides_old_chapter_toggle() -> None:
 
 
 @pytest.mark.parametrize("field", ["chapterPauseMs", "headingBeforePauseMs", "headingAfterPauseMs",
-                                   "paragraphPauseMs", "linePauseMs"])
+                                   "paragraphPauseMs", "linePauseMs", "scenePauseMs"])
 @pytest.mark.parametrize("value", [-1, 60001, 1.5, True, "1500"])
 def test_pause_lengths_reject_invalid_values(field: str, value: object) -> None:
     with pytest.raises(ValidationError):

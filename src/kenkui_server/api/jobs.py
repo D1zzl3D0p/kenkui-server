@@ -111,6 +111,7 @@ def _spec(request: JobRequest, allowed_models: tuple[str, ...] = ()) -> JobSpec:
                 heading_after_pause_ms=request.tts.heading_after_pause_ms,
                 paragraph_pause_ms=request.tts.paragraph_pause_ms,
                 line_pause_ms=request.tts.line_pause_ms,
+                scene_pause_ms=request.tts.scene_pause_ms,
             ),
             output=OutputSpec(
                 "artifact.m4b",

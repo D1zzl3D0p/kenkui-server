@@ -28,6 +28,7 @@ def pipeline_from_job(spec: JobSpec, source: str | os.PathLike[str]) -> kk.Pipel
         "heading_after_ms": spec.tts.heading_after_pause_ms,
         "paragraph_ms": spec.tts.paragraph_pause_ms,
         "line_ms": spec.tts.line_pause_ms,
+        "scene_ms": spec.tts.scene_pause_ms,
     }
     if any(pauses.values()):
         pipeline = pipeline.pauses(**pauses)

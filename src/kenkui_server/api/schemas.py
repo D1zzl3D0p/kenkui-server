@@ -86,6 +86,7 @@ class TtsRequest(_Model):
     heading_after_pause_ms: StrictInt = Field(0, alias="headingAfterPauseMs", ge=0, le=60_000)
     paragraph_pause_ms: StrictInt = Field(0, alias="paragraphPauseMs", ge=0, le=60_000)
     line_pause_ms: StrictInt = Field(0, alias="linePauseMs", ge=0, le=60_000)
+    scene_pause_ms: StrictInt = Field(0, alias="scenePauseMs", ge=0, le=60_000)
 
 
 class OutputRequest(_Model):
