@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -10,8 +11,13 @@ from typing import Any
 
 from kenkui.checkpoints import checkpointing
 
+from kenkui_server.jobs.models import Job
+from kenkui_server.notifications.composition import notification_settings_from_environment
 from kenkui_server.storage.checkpoints import HostedCheckpointStore
-from kenkui_server.storage.postgres import PostgresHostedRepository
+from kenkui_server.storage.postgres import (
+    PostgresHostedRepository,
+    PostgresNotificationRepository,
+)
 from kenkui_server.storage.postgres_database import PostgresDatabase
 from kenkui_server.worker import LocalJobRunner
 
@@ -66,6 +72,16 @@ class HostedJobRunner(LocalJobRunner):
         try:
             with checkpointing(HostedCheckpointStore(database, self.objects, job_id, self._lease)):
                 yield
+        finally:
+            database.close()
+
+    def _notify_completed(self, job: Job) -> None:
+        settings = notification_settings_from_environment(os.environ)
+        if settings is None:
+            return
+        database = self._database()
+        try:
+            settings.notifier(PostgresNotificationRepository(database)).completed(job)
         finally:
             database.close()
 

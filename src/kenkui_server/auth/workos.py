@@ -15,9 +15,13 @@ class WorkOSClient(Protocol):
 
 
 class IdentityRepository(Protocol):
-    """Persists the provider-to-internal-ID mapping."""
+    """Persists the provider-to-internal-ID mapping and its notifiable address."""
 
-    def user_id_for_subject(self, provider_subject: str) -> UUID: ...
+    def user_id_for_subject(self, provider_subject: str, email: str | None = None) -> UUID: ...
+
+    def notification_settings(self, identity_id: UUID) -> tuple[str | None, bool]: ...
+
+    def set_notify_by_email(self, identity_id: UUID, enabled: bool) -> None: ...
 
 
 class InMemoryIdentityRepository:
@@ -25,9 +29,25 @@ class InMemoryIdentityRepository:
 
     def __init__(self) -> None:
         self._identities: dict[str, UUID] = {}
+        self._emails: dict[UUID, str | None] = {}
+        self._notify: dict[UUID, bool] = {}
 
-    def user_id_for_subject(self, provider_subject: str) -> UUID:
-        return self._identities.setdefault(provider_subject, uuid4())
+    def user_id_for_subject(self, provider_subject: str, email: str | None = None) -> UUID:
+        identity_id = self._identities.setdefault(provider_subject, uuid4())
+        if email is not None or identity_id not in self._emails:
+            self._emails[identity_id] = email or self._emails.get(identity_id)
+        self._notify.setdefault(identity_id, True)
+        return identity_id
+
+    def notification_settings(self, identity_id: UUID) -> tuple[str | None, bool]:
+        if identity_id not in self._notify:
+            raise RuntimeError("unknown_identity")
+        return self._emails.get(identity_id), self._notify[identity_id]
+
+    def set_notify_by_email(self, identity_id: UUID, enabled: bool) -> None:
+        if identity_id not in self._notify:
+            raise RuntimeError("unknown_identity")
+        self._notify[identity_id] = enabled
 
 
 class FakeWorkOSClient:

@@ -41,6 +41,9 @@ class HostedConfig(BaseModel):
     stripe_webhook_secret: SecretStr
     stripe_secret_key: SecretStr = SecretStr("")
     web_origin: str = ""
+    email_notifications: bool = False
+    # Signs unsubscribe links. Shared with the worker that sends them.
+    unsubscribe_secret: SecretStr = SecretStr("")
 
 
 class AuthCapabilities(BaseModel):
@@ -92,6 +95,18 @@ class NarrationCapabilities(BaseModel):
     )
 
 
+class NotificationCapabilities(BaseModel):
+    """How this server can tell a reader their book finished.
+
+    Advertised so a client offers an email preference only where mail is
+    actually configured, rather than a switch that silently does nothing.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    email: bool = False
+
+
 class Capabilities(BaseModel):
     """Public, versioned declaration of local server features."""
 
@@ -109,6 +124,7 @@ class Capabilities(BaseModel):
     casting: CastingCapabilities = CastingCapabilities()
     covers: CoverCapabilities = CoverCapabilities()
     narration: NarrationCapabilities = NarrationCapabilities()
+    notifications: NotificationCapabilities = NotificationCapabilities()
     pause_lengths: bool = Field(True, serialization_alias="pauseLengths")
     scene_pauses: bool = Field(True, serialization_alias="scenePauses")
     speech_settings: bool = Field(True, serialization_alias="speechSettings")

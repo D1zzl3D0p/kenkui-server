@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
-from kenkui_server.api import assets, billing, jobs
+from kenkui_server.api import assets, billing, jobs, notifications
 from kenkui_server.api import voices as voices_api
 from kenkui_server.api.schemas import EventResponse
 from kenkui_server.auth.base import AuthBackend, Identity
@@ -39,6 +39,7 @@ from kenkui_server.config import (
     BillingCapabilities,
     Capabilities,
     HostedConfig,
+    NotificationCapabilities,
     local_capabilities,
 )
 from kenkui_server.errors import ErrorDetail, ErrorResponse
@@ -71,6 +72,8 @@ class HostedServices:
     runner: ProcessRunner
     auth_backend: AuthBackend
     account_id_for_identity: Callable[[UUID], str]
+    # Owns the notifiable address and its preference. Absent on older compositions.
+    identities: Any = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +228,7 @@ def create_app(
             hosted_services.repositories.assets.owner_id,
         )
         app.state.hosted_services = hosted_services
+    app.state.hosted_config = hosted_config
     if max_upload_bytes < 1:
         raise ValueError("max_upload_bytes must be positive")
     if max_speech_characters < 1:
@@ -258,6 +262,9 @@ def create_app(
         )
         app.include_router(billing.stripe_webhook_router(handler))
     app.include_router(jobs.router)
+    # Always part of the contract; the routes report their own unavailability so
+    # a local server still describes them rather than hiding them from clients.
+    app.include_router(notifications.router)
     configured_auth = app.state.hosted_auth
     if configured_auth is not None and isinstance(configured_auth.backend, BrowserAuthBackend):
         app.include_router(browser_auth_router(configured_auth.backend))
@@ -356,6 +363,11 @@ def create_app(
             path.startswith("/v1/jobs")
             or path.startswith("/v1/assets")
             or (path.startswith("/v1/billing") and path != "/v1/billing/webhooks/stripe")
+            # Unsubscribe links are opened by mail clients that carry no session.
+            or (
+                path.startswith("/v1/notifications")
+                and path != "/v1/notifications/unsubscribe"
+            )
             or path in {"/v1/auth/session", "/v1/auth/logout"}
         )
         if hosted_auth is None or not protected:
@@ -418,6 +430,8 @@ def create_app(
             )
         if hosted_services is not None:
             result.billing = BillingCapabilities(mode="credits")
+        if hosted_config is not None and hosted_config.email_notifications:
+            result.notifications = NotificationCapabilities(email=True)
         return result
 
     def openapi_with_events() -> dict[str, Any]:
