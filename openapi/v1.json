@@ -856,6 +856,11 @@
             "title": "Pauselengths",
             "default": true
           },
+          "scenePauses": {
+            "type": "boolean",
+            "title": "Scenepauses",
+            "default": true
+          },
           "speechSettings": {
             "type": "boolean",
             "title": "Speechsettings",
@@ -1225,7 +1230,8 @@
               "headingBeforePauseMs": 0,
               "headingAfterPauseMs": 0,
               "paragraphPauseMs": 0,
-              "linePauseMs": 0
+              "linePauseMs": 0,
+              "scenePauseMs": 0
             }
           },
           "output": {
@@ -1550,6 +1556,13 @@
             "maximum": 60000.0,
             "minimum": 0.0,
             "title": "Linepausems",
+            "default": 0
+          },
+          "scenePauseMs": {
+            "type": "integer",
+            "maximum": 60000.0,
+            "minimum": 0.0,
+            "title": "Scenepausems",
             "default": 0
           }
         },

@@ -110,6 +110,7 @@ class Capabilities(BaseModel):
     covers: CoverCapabilities = CoverCapabilities()
     narration: NarrationCapabilities = NarrationCapabilities()
     pause_lengths: bool = Field(True, serialization_alias="pauseLengths")
+    scene_pauses: bool = Field(True, serialization_alias="scenePauses")
     speech_settings: bool = Field(True, serialization_alias="speechSettings")
     max_upload_bytes: int = Field(50 * 1024 * 1024, serialization_alias="maxUploadBytes")
 

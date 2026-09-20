@@ -11,6 +11,7 @@ def test_local_capabilities_are_versioned(client: TestClient) -> None:
         "apiVersion": "1",
         "speechSettings": True,
         "pauseLengths": True,
+        "scenePauses": True,
         "covers": {"read": True, "upload": True, "maxUploadBytes": 8 * 1024 * 1024},
         "maxUploadBytes": 50 * 1024 * 1024,
         "auth": {"mode": "none"},
