@@ -120,6 +120,13 @@ class LocalJobRunner:
             return False
         return True
 
+    def _notify_completed(self, job: Job) -> None:
+        """Tell a job's owner it finished.
+
+        A local server has no addressable owner and no mail provider, so this
+        is a no-op that hosted composition overrides.
+        """
+
     def _run(self, repositories: Repositories, store: AssetStore, dispatch_id: str) -> None:
         dispatch = repositories.dispatches.get(dispatch_id)
         if dispatch.status != "pending":
@@ -229,7 +236,10 @@ class LocalJobRunner:
             artifact = Artifact(
                 str(uuid4()), completed.id, self._publish(store, completed.id, output), "m4b"
             )
-            if not self._update(repositories, completed, "completed", artifact):
+            if self._update(repositories, completed, "completed", artifact):
+                # Only a committed completion notifies, so a lost race stays silent.
+                self._notify_completed(completed)
+            else:
                 current = repositories.jobs.get(running.id)
                 if current.status is JobStatus.CANCEL_REQUESTED:
                     output.unlink(missing_ok=True)

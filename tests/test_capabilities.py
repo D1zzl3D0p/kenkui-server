@@ -19,6 +19,7 @@ def test_local_capabilities_are_versioned(client: TestClient) -> None:
         "sourceFormats": ["epub"],
         "outputFormats": ["m4b"],
         "casting": {"modes": ["single"], "models": []},
+        "notifications": {"email": False},
         "narration": {
             "charactersPerSecond": limits.TYPICAL_SPEECH_CHARACTERS_PER_SECOND,
             "longChapterHours": limits.LONG_CHAPTER_HOURS,

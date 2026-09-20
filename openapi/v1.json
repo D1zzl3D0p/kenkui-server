@@ -575,6 +575,66 @@
         }
       }
     },
+    "/v1/notifications": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Preference",
+        "operationId": "preference_v1_notifications_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferenceResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Set Preference",
+        "operationId": "set_preference_v1_notifications_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPreferenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPreferenceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/health": {
       "get": {
         "summary": "Health",
@@ -849,6 +909,12 @@
             "default": {
               "charactersPerSecond": 13,
               "longChapterHours": 6.0
+            }
+          },
+          "notifications": {
+            "$ref": "#/components/schemas/NotificationCapabilities",
+            "default": {
+              "email": false
             }
           },
           "pauseLengths": {
@@ -1376,6 +1442,54 @@
         "type": "object",
         "title": "NarrationCapabilities",
         "description": "How this server's renderer turns text into time.\n\nPublished so a browser can show what a chapter will cost before anyone\nsubmits it, using the same numbers the renderer reports against rather than\na copy that can drift from them."
+      },
+      "NotificationCapabilities": {
+        "properties": {
+          "email": {
+            "type": "boolean",
+            "title": "Email",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "NotificationCapabilities",
+        "description": "How this server can tell a reader their book finished.\n\nAdvertised so a client offers an email preference only where mail is\nactually configured, rather than a switch that silently does nothing."
+      },
+      "NotificationPreferenceRequest": {
+        "properties": {
+          "emailOnCompletion": {
+            "type": "boolean",
+            "title": "Emailoncompletion"
+          }
+        },
+        "type": "object",
+        "required": [
+          "emailOnCompletion"
+        ],
+        "title": "NotificationPreferenceRequest"
+      },
+      "NotificationPreferenceResponse": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "emailOnCompletion": {
+            "type": "boolean",
+            "title": "Emailoncompletion",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "NotificationPreferenceResponse",
+        "description": "What completion mail would do for the signed-in reader right now."
       },
       "OutputRequest": {
         "properties": {

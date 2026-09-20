@@ -30,6 +30,7 @@ from kenkui_server.jobs.models import (
     JobEvent,
     JobStatus,
 )
+from kenkui_server.notifications.service import Recipient
 from kenkui_server.storage.credit_lots import PostgresCreditLots
 from kenkui_server.storage.postgres_execution import PostgresExecution
 from kenkui_server.storage.repositories import (
@@ -152,20 +153,79 @@ class PostgresIdentityRepository:
     def __init__(self, connection: PostgresConnection) -> None:
         self._connection = connection
 
-    def user_id_for_subject(self, provider_subject: str) -> UUID:
+    def user_id_for_subject(self, provider_subject: str, email: str | None = None) -> UUID:
+        # The provider owns the address, so refresh it on every sign-in. COALESCE
+        # keeps a stored address when a session happens to carry none.
         row = self._connection.execute(
             """
-            INSERT INTO identities (id, workos_subject)
-            VALUES (%s, %s)
+            INSERT INTO identities (id, workos_subject, email)
+            VALUES (%s, %s, %s)
             ON CONFLICT (workos_subject)
-            DO UPDATE SET workos_subject = EXCLUDED.workos_subject
+            DO UPDATE SET email = COALESCE(EXCLUDED.email, identities.email)
             RETURNING id
             """,
-            (str(uuid4()), provider_subject),
+            (str(uuid4()), provider_subject, email),
         ).fetchone()
         if row is None:
             raise RuntimeError("identity_upsert_failed")
         return UUID(str(row["id"]))
+
+    def notification_settings(self, identity_id: UUID) -> tuple[str | None, bool]:
+        """The address completion mail would reach, and whether it is wanted."""
+        row = self._connection.execute(
+            "SELECT email, notify_by_email FROM identities WHERE id = %s",
+            (str(identity_id),),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError("unknown_identity")
+        return row["email"], bool(row["notify_by_email"])
+
+    def set_notify_by_email(self, identity_id: UUID, enabled: bool) -> None:
+        self._connection.execute(
+            "UPDATE identities SET notify_by_email = %s WHERE id = %s",
+            (enabled, str(identity_id)),
+        )
+
+
+class PostgresNotificationRepository:
+    """Recipients and at-most-once send records for completion mail."""
+
+    def __init__(self, connection: PostgresConnection) -> None:
+        self._connection = connection
+
+    def recipient_for_job(self, job_id: str) -> Recipient | None:
+        row = self._connection.execute(
+            """
+            SELECT identities.id AS identity_id, identities.email, identities.notify_by_email
+            FROM jobs JOIN identities ON identities.id = jobs.owner_id
+            WHERE jobs.id = %s
+            """,
+            (job_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return Recipient(
+            UUID(str(row["identity_id"])), row["email"], bool(row["notify_by_email"])
+        )
+
+    def claim(self, job_id: str, channel: str) -> bool:
+        """Insert the send record first, so only one attempt may mail."""
+        row = self._connection.execute(
+            """
+            INSERT INTO job_notifications (job_id, channel)
+            VALUES (%s, %s)
+            ON CONFLICT (job_id, channel) DO NOTHING
+            RETURNING job_id
+            """,
+            (job_id, channel),
+        ).fetchone()
+        return row is not None
+
+    def mark_delivered(self, job_id: str, channel: str) -> None:
+        self._connection.execute(
+            "UPDATE job_notifications SET delivered_at = now() WHERE job_id = %s AND channel = %s",
+            (job_id, channel),
+        )
 
 
 class PostgresJobEventRepository:

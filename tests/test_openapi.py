@@ -25,6 +25,7 @@ def test_checked_openapi_contract_matches_the_v1_application() -> None:
         "/v1/jobs/{job_id}/artifact",
         "/v1/jobs/{job_id}/cancel",
         "/v1/jobs/{job_id}/events",
+        "/v1/notifications",
         "/v1/voices",
     }
     assert all(path.startswith("/v1/") for path in document["paths"])

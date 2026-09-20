@@ -61,7 +61,11 @@ class BrowserAuthBackend:
         invited = {email.strip().casefold() for email in self.config.invited_emails}
         if invited and user.email.casefold() not in invited:
             raise PermissionError("invitation_required")
-        return Identity(self.identities.user_id_for_subject(user.id), user.id)
+        # Capture the address here: this is the only point a verified provider
+        # user becomes an internal identity, and the worker cannot reach WorkOS.
+        return Identity(
+            self.identities.user_id_for_subject(user.id, getattr(user, "email", None)), user.id
+        )
 
     def session(self, token: str) -> Any:
         return self.client.user_management.load_sealed_session(

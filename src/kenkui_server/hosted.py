@@ -12,6 +12,7 @@ from kenkui_server.app import HostedServices, create_app
 from kenkui_server.auth.browser import BrowserAuthBackend, BrowserSessionConfig
 from kenkui_server.compute.modal import ModalProcessRunner
 from kenkui_server.config import DEFAULT_CHARACTER_MODEL, HostedConfig
+from kenkui_server.notifications.composition import notification_settings_from_environment
 from kenkui_server.storage.assets import R2AssetStore
 from kenkui_server.storage.postgres import PostgresHostedRepository, PostgresIdentityRepository
 from kenkui_server.storage.postgres_database import PostgresDatabase
@@ -61,9 +62,10 @@ def create_hosted_app() -> FastAPI:
     )
     database = PostgresDatabase(required("DATABASE_URL"))
     repositories = PostgresHostedRepository(database)
+    identities = PostgresIdentityRepository(database)
     auth = BrowserAuthBackend(
         WorkOSClient(api_key=required("WORKOS_API_KEY"), client_id=required("WORKOS_CLIENT_ID")),
-        PostgresIdentityRepository(database),
+        identities,
         session_config,
     )
     allowance = int(os.environ.get("KENKUI_BETA_CREDITS", "1000"))
@@ -99,6 +101,7 @@ def create_hosted_app() -> FastAPI:
         ),
         auth,
         account_for_identity,
+        identities,
     )
     config = HostedConfig(
         database_url=required("DATABASE_URL"),
@@ -110,6 +113,9 @@ def create_hosted_app() -> FastAPI:
         stripe_webhook_secret=os.environ.get("STRIPE_WEBHOOK_SECRET", ""),
         stripe_secret_key=os.environ.get("STRIPE_SECRET_KEY", ""),
         web_origin=session_config.web_origin,
+        # The worker sends the mail; the API only advertises and unsubscribes.
+        email_notifications=notification_settings_from_environment(os.environ) is not None,
+        unsubscribe_secret=os.environ.get("KENKUI_UNSUBSCRIBE_SECRET", ""),
     )
     app = create_app(
         hosted_config=config,
