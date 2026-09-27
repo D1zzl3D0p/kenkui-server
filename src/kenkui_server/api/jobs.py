@@ -10,7 +10,7 @@ import kenkui as kk
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 
-from kenkui_server.api.assets import _authorize_asset
+from kenkui_server.api.assets import STALE_INSPECTION_MESSAGE, _authorize_asset
 from kenkui_server.api.schemas import (
     CastingRequest,
     EventResponse,
@@ -150,6 +150,8 @@ def _preflight(request: Request, payload: JobRequest) -> tuple[JobSpec, int]:
             pipeline = pipeline_from_job(spec, source)
             inspected = pipeline.inspect()
     except kk.KenkuiError as error:
+        if error.code == kk.ErrorCode.CHAPTER_NOT_FOUND:
+            raise HTTPException(status_code=409, detail=STALE_INSPECTION_MESSAGE) from error
         raise HTTPException(status_code=422, detail=error.code.value) from error
     characters = sum(chapter.speech_characters or 0 for chapter in inspected.chapters)
     if characters <= 0:

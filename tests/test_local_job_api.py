@@ -693,23 +693,33 @@ def test_speech_settings_preflight_persistence_and_idempotency(tmp_path: Path) -
         ).json()
         book = client.get(f"/v1/assets/{asset['id']}/book").json()
         payload = {
-            "sourceId": asset["id"], "chapters": [book["chapters"][0]["id"]],
+            "sourceId": asset["id"],
+            "chapters": [book["chapters"][0]["id"]],
             "casting": {"voiceId": "narrator"},
-            "tts": {"chapterPauses": True, "prepareNumbers": True,
-                    "pronunciationCorrections": True, "stutterHandling": False},
+            "tts": {
+                "chapterPauses": True,
+                "prepareNumbers": True,
+                "pronunciationCorrections": True,
+                "stutterHandling": False,
+            },
         }
         estimate = client.post("/v1/jobs/preflight", json=payload)
         assert estimate.status_code == 200
         assert estimate.json()["normalizedCharacters"] == 15
-        response = client.post("/v1/jobs", json=payload,
-                               headers={"Idempotency-Key": "speech-settings"})
+        response = client.post(
+            "/v1/jobs", json=payload, headers={"Idempotency-Key": "speech-settings"}
+        )
         assert response.status_code == 202
         settings = app.state.local_services.repositories.jobs.get(response.json()["id"]).spec.tts
         assert settings.chapter_pauses and settings.prepare_numbers
         assert settings.pronunciation_corrections and not settings.stutter_handling
         payload["tts"]["chapterPauses"] = False
-        assert client.post("/v1/jobs", json=payload,
-                           headers={"Idempotency-Key": "speech-settings"}).status_code == 409
+        assert (
+            client.post(
+                "/v1/jobs", json=payload, headers={"Idempotency-Key": "speech-settings"}
+            ).status_code
+            == 409
+        )
 
 
 def test_the_book_endpoint_counts_every_chapter_for_the_chooser(tmp_path: Path) -> None:
@@ -735,3 +745,34 @@ def test_capabilities_publish_the_narration_estimate_the_renderer_uses(
 
     assert narration["charactersPerSecond"] == limits.TYPICAL_SPEECH_CHARACTERS_PER_SECOND
     assert narration["longChapterHours"] == limits.LONG_CHAPTER_HOURS
+
+
+def test_stale_chapter_snapshot_requests_reupload_without_rewriting_history(tmp_path: Path) -> None:
+    from kenkui_server.jobs.models import InspectedChapter, Inspection
+
+    voice = kk.Voice("narrator", "Narrator", True, "local", "test", True)
+    app = create_app(data_dir=tmp_path / "state", voices=(voice,), fixture_mode=True)
+    with TestClient(app) as client:
+        asset = client.post(
+            "/v1/assets", content=_epub(), headers={"Content-Type": "application/epub+zip"}
+        ).json()
+        stored = Inspection(
+            asset["id"], "Tiny", "Ada", (InspectedChapter("old-file-id", "Chapter 11"),)
+        )
+        app.state.services.repositories.inspections.put(stored)
+        book = client.get(f"/v1/assets/{asset['id']}/book")
+        request = {
+            "sourceId": asset["id"],
+            "chapters": ["old-file-id"],
+            "casting": {"voiceId": "narrator"},
+            "output": {"format": "m4b"},
+        }
+        preflight = client.post("/v1/jobs/preflight", json=request)
+        for response in (book, preflight):
+            assert response.status_code == 409
+            assert "Upload the book again" in response.text
+        assert app.state.services.repositories.inspections.get(asset["id"]) == stored
+        fresh = client.post(
+            "/v1/assets", content=_epub(), headers={"Content-Type": "application/epub+zip"}
+        ).json()
+        assert client.get(f"/v1/assets/{fresh['id']}/book").status_code == 200
