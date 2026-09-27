@@ -68,3 +68,55 @@ Read current logs:
 ```sh
 .venv/bin/modal app logs ap-dwnmO3DPFCTZiYmKmzlsoC --env production --tail 100 --timestamps
 ```
+
+## Follow-up: 336 missing quote answers
+
+Logging commits: core `0e3ed51`, server `eb6b55a`.
+
+The recorded response for the affected chapter contains exactly 73 attribution
+entries with integer IDs 0 through 72. The remaining IDs, 73 through 408, are
+absent from the stored model payload, not removed later by speaker resolution.
+The nearby model completion event reports 43,519 input tokens, 1,179 output
+tokens, and 37.416 seconds. The original provider finish reason and raw response
+were not retained, so output-budget termination versus an early model stop
+cannot be established from these artifacts.
+
+The acceptance path has two related defects:
+
+1. `llm._validated` checks only that `attributions` exists and is a list.
+   `complete_json_checkpointed` saves that payload before chapter-specific
+   coverage is checked. Reads return it without revalidating coverage.
+2. `attribute_chapter` counts omitted IDs but sets `failed` only when no usable
+   response was returned. `resolve_attribution` therefore saves this book as
+   complete, including fallback narration for the omitted quotes.
+
+An offline reproduction used the actual saved 73-entry payload with a synthetic
+409-quote chapter, confirming all 409 IDs were present in the generated prompt:
+
+```json
+{"quotes":409,"answered":8,"unknown":65,"dropped":336,"failed":false}
+```
+
+Two chapter attempts made only one fake-client call. Two book-attribution
+attempts likewise made one call, returned identical results, and left a saved
+book-level attribution. This reproduction made no provider requests. The final
+real Modal snapshot independently contains one attribution, one referencing
+cast, and sixteen model-response checkpoints.
+
+There is also a prompt formatting defect: `_escaped(json.dumps(quotes))` inserts
+literal doubled object braces into `{quotes}`. `str.format` does not recursively
+interpret braces inside replacement values. An offline reconstruction retains
+all 409 IDs but its embedded quote list fails `json.loads`. This is a candidate
+contributor to poor compliance, not a demonstrated cause of this response's
+73-entry prefix; other chapters succeeded with the same formatting.
+
+Next corrective work should enforce exact quote-ID coverage and entry validity
+before accepting/caching responses, while allowing explicit `unknown` answers.
+Existing response checkpoints and aggregate attribution caches both need a
+repair/invalidation strategy: changing only the aggregate prompt version would
+still allow reuse of the short per-request response. Bounded repair requests
+could target missing IDs. Exhaustion must also avoid the already-known cast
+foreign-key bug; simply marking this coverage result failed would expose it.
+Capturing provider finish reasons and correcting brace interpolation would
+support a focused comparison on this chapter. No attribution behavior has been
+changed in this investigation.
