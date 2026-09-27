@@ -4,6 +4,14 @@ The server's version tracks its own package; the server protocol remains `/v1`.
 Private-beta hosted service acceptance is separate from publication of the
 source code.
 
+## Unreleased
+
+TOC-based core chapters require a fresh upload when a stored inspection has a
+previous chapter layout. Inspection and preflight now return HTTP 409 with an
+explicit re-upload instruction rather than returning stale chapter selections.
+Existing inspection snapshots, completed jobs, and artifacts remain unchanged.
+Deploy matching API and worker core revisions together after draining jobs.
+
 ## 10.1.0
 
 Mid-chapter scene breaks get their own pause length. A job may now send
