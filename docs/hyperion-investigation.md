@@ -120,3 +120,37 @@ foreign-key bug; simply marking this coverage result failed would expose it.
 Capturing provider finish reasons and correcting brace interpolation would
 support a focused comparison on this chapter. No attribution behavior has been
 changed in this investigation.
+
+## Exact-prompt retry (2026-09-27, 19:36 UTC)
+
+A single fresh request reconstructed the affected chapter's prompt from the
+original source/spec and saved roster responses. Before calling the model,
+its response-cache key matched the original exactly:
+`4ce89119ecb63332fc4876cb69aa69eb40e35caa88877a9b77b81b5b578a61dc`.
+The 165,760-character prompt's SHA-256 was
+`e39ee89076c16d018c29b99134797eb09775e7d1696f7075f59ccf1f451eba9e`.
+The doubled braces were intentionally preserved. Roster reconstruction made
+no model requests, and the target response cache was bypassed for one call.
+
+The model remained `openrouter/deepseek/deepseek-v4-flash`, temperature 0,
+reasoning effort `none`, timeout 600 seconds, and usage reporting enabled.
+
+| Coverage | Earlier response | Fresh identical-prompt response |
+|---|---:|---:|
+| Expected quote IDs | 409 | 409 |
+| Resolved speaker | 8 | 368 |
+| Unknown speaker | 65 | 41 |
+| Omitted IDs | 336 | 0 |
+
+The request took 64.725 seconds and returned exactly 409 entries, with no
+missing IDs and finish reason `stop`. It reported 43,485 prompt tokens and
+7,544 completion tokens. This demonstrates that another identical request can
+recover coverage; it does not determine why the earlier response stopped early
+or guarantee future responses will be complete. Complete ID coverage also does
+not establish speaker-attribution accuracy.
+
+- App: <https://modal.com/apps/d1zzl3d0p/production/ap-hCspFVnV3fhxCR4uzXbQj4>
+- Run: `exact-0bacd2c4-43aa-4301-a456-c36d6db46661` in the same diagnostic volume.
+- The private run directory preserves prompt, raw response, and result metadata.
+- Local result: `/tmp/kenkui-hyperion-replay/exact-result.json`.
+- Original checkpoints and production job state were not modified.
