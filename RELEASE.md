@@ -4,6 +4,32 @@ The server's version tracks its own package; the server protocol remains `/v1`.
 Private-beta hosted service acceptance is separate from publication of the
 source code.
 
+## Unreleased
+
+## 10.2.0 (2026-09-29)
+
+Requires Kenkui >=10.2.0,<11. Publish the core release before installing this
+server from package metadata. The API protocol remains `/v1`.
+
+Completion email now follows a committed successful render, with reader
+preferences, signed unsubscribe links, and an at-most-once delivery claim.
+Hosted workers emit structured INFO diagnostics. PostgreSQL startup can wait
+for initial connectivity without replaying SQL. Worker database connections
+close even when releasing an execution lease fails.
+
+New job requests announce chapter titles by default. Set `tts.speakChapterTitles`
+to false to opt out. `chapterTitlePauseMs` defaults to 750; `chapterTitleOverrides`
+maps chapter IDs to spoken text or null to exclude. Preflight returns the resolved
+announcements and includes added characters in the quote. Persisted legacy jobs
+stay disabled. Deploy with the matching core chapter-title implementation before
+publishing Studio; capability `spokenChapterTitles` gates the client controls.
+
+TOC-based core chapters require a fresh upload when a stored inspection has a
+previous chapter layout. Inspection and preflight now return HTTP 409 with an
+explicit re-upload instruction rather than returning stale chapter selections.
+Existing inspection snapshots, completed jobs, and artifacts remain unchanged.
+Deploy matching API and worker core revisions together after draining jobs.
+
 ## 10.1.0
 
 Mid-chapter scene breaks get their own pause length. A job may now send

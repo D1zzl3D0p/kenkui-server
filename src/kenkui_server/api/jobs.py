@@ -10,9 +10,10 @@ import kenkui as kk
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 
-from kenkui_server.api.assets import _authorize_asset
+from kenkui_server.api.assets import STALE_INSPECTION_MESSAGE, _authorize_asset
 from kenkui_server.api.schemas import (
     CastingRequest,
+    ChapterAnnouncementResponse,
     EventResponse,
     JobListResponse,
     JobRequest,
@@ -112,6 +113,9 @@ def _spec(request: JobRequest, allowed_models: tuple[str, ...] = ()) -> JobSpec:
                 paragraph_pause_ms=request.tts.paragraph_pause_ms,
                 line_pause_ms=request.tts.line_pause_ms,
                 scene_pause_ms=request.tts.scene_pause_ms,
+                speak_chapter_titles=request.tts.speak_chapter_titles,
+                chapter_title_pause_ms=request.tts.chapter_title_pause_ms,
+                chapter_title_overrides=tuple(request.tts.chapter_title_overrides.items()),
             ),
             output=OutputSpec(
                 "artifact.m4b",
@@ -124,7 +128,9 @@ def _spec(request: JobRequest, allowed_models: tuple[str, ...] = ()) -> JobSpec:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
-def _preflight(request: Request, payload: JobRequest) -> tuple[JobSpec, int]:
+def _preflight(
+    request: Request, payload: JobRequest
+) -> tuple[JobSpec, int, tuple[kk.ChapterAnnouncement, ...]]:
     services = request.app.state.services
     spec = _spec(payload, request.app.state.model_allowlist)
     try:
@@ -150,22 +156,42 @@ def _preflight(request: Request, payload: JobRequest) -> tuple[JobSpec, int]:
             pipeline = pipeline_from_job(spec, source)
             inspected = pipeline.inspect()
     except kk.KenkuiError as error:
+        if error.code == kk.ErrorCode.CHAPTER_NOT_FOUND:
+            raise HTTPException(status_code=409, detail=STALE_INSPECTION_MESSAGE) from error
         raise HTTPException(status_code=422, detail=error.code.value) from error
+    if not set(dict(spec.tts.chapter_title_overrides)).issubset(spec.chapters):
+        raise HTTPException(422, "invalid_chapter_title_override")
+    announcements = kk.resolve_chapter_titles(
+        inspected,
+        enabled=spec.tts.speak_chapter_titles,
+        overrides=dict(spec.tts.chapter_title_overrides),
+    )
     characters = sum(chapter.speech_characters or 0 for chapter in inspected.chapters)
+    characters += sum(item.added_characters for item in announcements)
     if characters <= 0:
         raise HTTPException(422, "empty_speech")
     if characters > request.app.state.max_speech_characters:
         raise HTTPException(422, "job_size_limit")
-    return spec, characters
+    return spec, characters, announcements
 
 
 @router.post("/preflight", response_model=PreflightResponse)
 def preflight(payload: JobRequest, request: Request) -> PreflightResponse:
     """Validate executable local intent without creating a Job or reservation."""
-    spec, characters = _preflight(request, payload)
+    spec, characters, announcements = _preflight(request, payload)
+    preview = [
+        ChapterAnnouncementResponse(chapter_id=a.chapter_id, text=a.text, kind=a.kind)
+        for a in announcements
+    ]
+    added = sum(a.added_characters for a in announcements)
     services = request.app.state.hosted_services
     if services is None:
-        return PreflightResponse(source_id=spec.source_id, normalized_characters=characters)
+        return PreflightResponse(
+            source_id=spec.source_id,
+            normalized_characters=characters,
+            chapter_announcements=preview,
+            added_title_characters=added,
+        )
     from kenkui_server.billing.pricing import credits_for_characters
 
     identity = request.state.hosted_identity
@@ -180,6 +206,8 @@ def preflight(payload: JobRequest, request: Request) -> PreflightResponse:
     return PreflightResponse(
         source_id=spec.source_id,
         normalized_characters=characters,
+        chapter_announcements=preview,
+        added_title_characters=added,
         estimated_credits=estimated,
         available_credits=account.available_credits,
         valid=account.available_credits >= estimated,
@@ -193,7 +221,7 @@ def create_job(
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
 ) -> JobResponse:
     """Admit local work or hosted credit-backed work before starting its runner."""
-    spec, characters = _preflight(request, payload)
+    spec, characters, _ = _preflight(request, payload)
     hosted_services = request.app.state.hosted_services
     if hosted_services is None:
         try:

@@ -12,6 +12,11 @@ from kenkui_server.jobs.models import JobSpec, SingleVoiceCasting
 def pipeline_from_job(spec: JobSpec, source: str | os.PathLike[str]) -> kk.Pipeline:
     """Reconstruct a fresh public Kenkui pipeline from one immutable job spec."""
     pipeline = kk.book(source).select_chapters(*spec.chapters)
+    pipeline = pipeline.chapter_titles(
+        enabled=spec.tts.speak_chapter_titles,
+        pause_ms=spec.tts.chapter_title_pause_ms,
+        overrides=dict(spec.tts.chapter_title_overrides),
+    )
     # Normalization is intrinsic to Kenkui; legacy intent remains readable.
     pipeline = pipeline.metadata(
         title=spec.output.title,

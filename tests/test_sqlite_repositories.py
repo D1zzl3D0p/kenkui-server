@@ -77,7 +77,6 @@ def test_snapshot_update_rejects_stale_concurrent_write(tmp_path: Path) -> None:
         repositories.jobs.update(running, expected_version=0)
 
 
-
 def test_snapshot_update_rejects_changed_immutable_job_spec(tmp_path: Path) -> None:
     repositories = Repositories(Database(tmp_path / "server.sqlite3"))
     repositories.jobs.create(job())
@@ -99,6 +98,7 @@ def test_snapshot_update_rejects_changed_immutable_job_spec(tmp_path: Path) -> N
     with pytest.raises(ValueError, match="immutable_job_spec"):
         repositories.jobs.update(running, expected_version=0)
 
+
 def test_event_sequence_is_unique_per_job(tmp_path: Path) -> None:
     repositories = Repositories(Database(tmp_path / "server.sqlite3"))
     repositories.jobs.create(job())
@@ -109,7 +109,9 @@ def test_event_sequence_is_unique_per_job(tmp_path: Path) -> None:
         repositories.events.append(event)
 
 
-def test_atomic_idempotency_admission_returns_one_durable_job_under_concurrency(tmp_path: Path) -> None:
+def test_atomic_idempotency_admission_returns_one_durable_job_under_concurrency(
+    tmp_path: Path,
+) -> None:
     import threading
 
     repositories = Repositories(Database(tmp_path / "server.sqlite3"))
@@ -139,7 +141,6 @@ def test_atomic_idempotency_admission_returns_one_durable_job_under_concurrency(
     assert {item.id for item in admitted} in ({"job-0"}, {"job-1"})
 
 
-
 def test_snapshot_and_next_event_are_committed_together(tmp_path: Path) -> None:
     repositories = Repositories(Database(tmp_path / "server.sqlite3"))
     queued = job()
@@ -152,7 +153,9 @@ def test_snapshot_and_next_event_are_committed_together(tmp_path: Path) -> None:
         progress=Progress("running", 0, 0),
     )
 
-    repositories.update_job_and_append_event(running, expected_version=queued.version, event_type="running")
+    repositories.update_job_and_append_event(
+        running, expected_version=queued.version, event_type="running"
+    )
 
     assert repositories.jobs.get(queued.id) == running
     assert repositories.events.list_for_job(queued.id) == (

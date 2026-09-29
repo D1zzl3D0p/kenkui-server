@@ -94,9 +94,11 @@ class LocalJobRunner:
             stop.set()
             if heartbeat is not None:
                 heartbeat.join(timeout=10)
-            if self._lease is not None:
-                self._repositories(database).release_execution(*self._lease)
-            database.close()
+            try:
+                if self._lease is not None:
+                    self._repositories(database).release_execution(*self._lease)
+            finally:
+                database.close()
 
     def _update(
         self,

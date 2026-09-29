@@ -87,6 +87,11 @@ class TtsRequest(_Model):
     paragraph_pause_ms: StrictInt = Field(0, alias="paragraphPauseMs", ge=0, le=60_000)
     line_pause_ms: StrictInt = Field(0, alias="linePauseMs", ge=0, le=60_000)
     scene_pause_ms: StrictInt = Field(0, alias="scenePauseMs", ge=0, le=60_000)
+    speak_chapter_titles: StrictBool = Field(True, alias="speakChapterTitles")
+    chapter_title_pause_ms: StrictInt = Field(750, alias="chapterTitlePauseMs", ge=0, le=60_000)
+    chapter_title_overrides: dict[str, str | None] = Field(
+        default_factory=dict, alias="chapterTitleOverrides"
+    )
 
 
 class OutputRequest(_Model):
@@ -104,7 +109,17 @@ class JobRequest(_Model):
     output: OutputRequest = OutputRequest()
 
 
+class ChapterAnnouncementResponse(_Model):
+    chapter_id: str = Field(alias="chapterId")
+    text: str
+    kind: Literal["inserted", "existing", "omitted"]
+
+
 class PreflightResponse(_Model):
+    chapter_announcements: list[ChapterAnnouncementResponse] = Field(
+        default_factory=list, alias="chapterAnnouncements"
+    )
+    added_title_characters: int = Field(0, alias="addedTitleCharacters")
     source_id: str = Field(serialization_alias="sourceId")
     normalized_characters: int = Field(serialization_alias="normalizedCharacters")
     valid: bool = True

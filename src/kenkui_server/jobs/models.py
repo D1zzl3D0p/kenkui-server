@@ -82,19 +82,47 @@ class TtsSettings:
     paragraph_pause_ms: int = 0
     line_pause_ms: int = 0
     scene_pause_ms: int = 0
+    # Missing fields in durable legacy jobs retain the old narration.
+    speak_chapter_titles: bool = False
+    chapter_title_pause_ms: int = 750
+    chapter_title_overrides: tuple[tuple[str, str | None], ...] = ()
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "chapter_title_overrides",
+            tuple(sorted((key, value) for key, value in self.chapter_title_overrides)),
+        )
+        for key, value in self.chapter_title_overrides:
+            if (
+                not isinstance(key, str)
+                or not key.strip()
+                or (
+                    value is not None
+                    and (not isinstance(value, str) or not value.strip() or len(value) > 500)
+                )
+            ):
+                raise ValueError("invalid_chapter_title_override")
         # False defaults preserve jobs stored before speech settings existed.
         for name in (
-            "normalize_text", "chapter_pauses", "prepare_numbers",
-            "pronunciation_corrections", "stutter_handling",
+            "normalize_text",
+            "chapter_pauses",
+            "prepare_numbers",
+            "pronunciation_corrections",
+            "stutter_handling",
+            "speak_chapter_titles",
         ):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"invalid_{name}")
 
         for name in (
-            "chapter_pause_ms", "heading_before_pause_ms", "heading_after_pause_ms",
-            "paragraph_pause_ms", "line_pause_ms", "scene_pause_ms",
+            "chapter_pause_ms",
+            "heading_before_pause_ms",
+            "heading_after_pause_ms",
+            "paragraph_pause_ms",
+            "line_pause_ms",
+            "scene_pause_ms",
+            "chapter_title_pause_ms",
         ):
             value = getattr(self, name)
             if name == "chapter_pause_ms" and value is None:

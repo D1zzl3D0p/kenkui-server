@@ -215,7 +215,7 @@ def test_hosted_job_route_uses_single_atomic_durable_admission(
         TtsSettings(),
         OutputSpec("artifact.m4b"),
     )
-    monkeypatch.setattr(jobs, "_preflight", lambda request, payload: (spec, 1_001))
+    monkeypatch.setattr(jobs, "_preflight", lambda request, payload: (spec, 1_001, ()))
 
     with TestClient(app) as client:
         response = client.post(
@@ -266,7 +266,7 @@ def test_preflight_and_admission_agree_on_estimated_book_charge(
         from dataclasses import replace
 
         spec = replace(spec, casting=CharacterCasting("narrator", "narrator", (), "model", "model"))
-    monkeypatch.setattr(jobs, "_preflight", lambda request, payload: (spec, characters))
+    monkeypatch.setattr(jobs, "_preflight", lambda request, payload: (spec, characters, ()))
     fixture.repositories.billing.account = lambda _: SimpleNamespace(available_credits=10000)
     payload = {
         "sourceId": "source-1",
@@ -301,7 +301,7 @@ def test_insufficient_balance_rejects_cost_based_preflight(monkeypatch):
         TtsSettings(),
         OutputSpec("artifact.m4b"),
     )
-    monkeypatch.setattr(jobs, "_preflight", lambda request, payload: (spec, 1_189_736))
+    monkeypatch.setattr(jobs, "_preflight", lambda request, payload: (spec, 1_189_736, ()))
     fixture.repositories.billing.account = lambda _: SimpleNamespace(available_credits=299)
     with TestClient(app) as client:
         result = client.post(

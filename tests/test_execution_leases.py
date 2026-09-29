@@ -2,7 +2,6 @@ from contextlib import nullcontext
 from dataclasses import replace
 
 import kenkui as kk
-
 import pytest
 
 from kenkui_server.jobs.models import (
@@ -147,3 +146,21 @@ def test_legacy_done_dispatch_with_running_job_is_recovered(tmp_path):
     assert [d.id for d in repo.dispatches.list_incomplete()] == ["legacy"]
     assert repo.claim_execution("legacy", limit=1)
     assert repo.dispatches.get("legacy").status == "pending"
+
+
+def test_worker_closes_database_when_lease_release_fails(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+
+    from kenkui_server.worker import LocalJobRunner
+
+    database = Mock()
+    repositories = Mock()
+    repositories.release_execution.side_effect = RuntimeError("release failed")
+    runner = LocalJobRunner(tmp_path / "state.sqlite3", tmp_path / "assets", lease=("d", "t"))
+    monkeypatch.setattr(runner, "_database", Mock(side_effect=[database, Mock()]))
+    monkeypatch.setattr(runner, "_repositories", lambda _: repositories)
+    monkeypatch.setattr(runner, "_store", Mock())
+    monkeypatch.setattr(runner, "_run", Mock())
+    with pytest.raises(RuntimeError, match="release failed"):
+        runner.run("d")
+    database.close.assert_called_once_with()

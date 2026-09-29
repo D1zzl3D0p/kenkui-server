@@ -18,6 +18,11 @@ from kenkui_server.jobs.models import Asset, InspectedChapter, Inspection
 
 router = APIRouter(prefix="/v1/assets", tags=["assets"])
 
+STALE_INSPECTION_MESSAGE = (
+    "This book's chapter layout has changed since it was uploaded. "
+    "Upload the book again and choose chapters from the updated list."
+)
+
 
 def _authorize_asset(request: Request, asset_id: str) -> None:
     """Enforce hosted ownership for private source assets."""
@@ -91,7 +96,10 @@ async def inspect_book(asset_id: str, request: Request) -> BookResponse:
         services.repositories.inspections.put(inspection)
     except Exception:
         # Inspection is immutable for an uploaded source; return its authoritative snapshot.
-        inspection = services.repositories.inspections.get(asset.id)
+        stored = services.repositories.inspections.get(asset.id)
+        if stored.chapters != inspection.chapters:
+            raise HTTPException(status_code=409, detail=STALE_INSPECTION_MESSAGE) from None
+        inspection = stored
     speech_counts = {chapter.id: chapter.speech_characters for chapter in inspected.chapters}
     return BookResponse(
         source_id=inspection.source_id,

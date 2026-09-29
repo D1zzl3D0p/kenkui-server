@@ -145,7 +145,12 @@ def provision() -> None:
 
 
 @app.function(
-    image=image, secrets=secrets, schedule=modal.Period(minutes=1), timeout=120, proxy=proxy
+    image=image,
+    secrets=secrets,
+    schedule=modal.Period(minutes=1),
+    timeout=240,
+    max_containers=1,
+    proxy=proxy,
 )
 def recover_jobs() -> None:
     from kenkui_server.compute.modal import ModalProcessRunner
@@ -154,8 +159,11 @@ def recover_jobs() -> None:
     from kenkui_server.storage.postgres import PostgresHostedRepository
     from kenkui_server.storage.postgres_database import PostgresDatabase
 
-    database = PostgresDatabase(required("DATABASE_URL"))
+    database = PostgresDatabase(required("DATABASE_URL"), connect_timeout=10)
     try:
+        # Keep the pool alive through short network interruptions. Its background
+        # workers retry connections with backoff; do not replay recovery itself.
+        database.wait_until_ready(timeout=180)
         repositories = PostgresHostedRepository(database)
         HostedDispatcher(
             repositories, ModalProcessRunner(repositories, app_name=app_name)
