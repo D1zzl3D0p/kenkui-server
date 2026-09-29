@@ -13,6 +13,7 @@ from kenkui.checkpoints import checkpointing
 
 from kenkui_server.jobs.models import Job
 from kenkui_server.notifications.composition import notification_settings_from_environment
+from kenkui_server.observability import configure_logging
 from kenkui_server.storage.checkpoints import HostedCheckpointStore
 from kenkui_server.storage.postgres import (
     PostgresHostedRepository,
@@ -108,6 +109,7 @@ class HostedJobRunner(LocalJobRunner):
 def execute_hosted(
     database_url: str, objects: Any, dispatch_id: str, token: str, *, render_workers: int = 1
 ) -> None:
+    configure_logging()
     with TemporaryDirectory(prefix="kenkui-hosted-job-") as directory:
         HostedJobRunner(
             database_url,

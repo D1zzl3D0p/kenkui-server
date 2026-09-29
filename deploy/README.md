@@ -142,3 +142,17 @@ idempotent submission replays do not charge again.
 `KENKUI_MAX_SPEECH_CHARACTERS` defaults to 10,000,000 independently of pricing.
 The reported Dune reference is 1,189,736 speech characters. The 50 MiB upload
 limit, ownership, voice permissions, and concurrency checks continue to apply.
+
+## Recovery database startup
+
+The scheduled Modal `recover_jobs` task allows up to 180 seconds for its database
+pool to become ready, using psycopg's background connection retries and backoff.
+Each connection attempt has a 10-second connect timeout. The task has a 240-second
+execution timeout and at most one container, so successive minute ticks cannot
+start concurrent recovery containers during an outage.
+
+Only initial connection establishment is retried; recovery operations and SQL
+are not replayed. Psycopg logs individual connection failures, a startup taking
+at least 10 seconds logs `postgres_startup_recovered`, and an exhausted startup
+budget logs `postgres_startup_timeout` and still fails the scheduled call.
+Longer outages therefore remain visible instead of being silently suppressed.

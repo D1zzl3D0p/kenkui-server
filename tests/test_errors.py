@@ -25,7 +25,9 @@ def test_validation_failures_use_normalized_error_with_details() -> None:
     async def test_validated(count: int) -> dict[str, int]:
         return {"count": count}
 
-    response = TestClient(app).get("/v1/test-validated/not-a-number", headers={"X-Request-ID": "valid-123"})
+    response = TestClient(app).get(
+        "/v1/test-validated/not-a-number", headers={"X-Request-ID": "valid-123"}
+    )
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "validation_error"

@@ -927,6 +927,11 @@
             "title": "Scenepauses",
             "default": true
           },
+          "spokenChapterTitles": {
+            "type": "boolean",
+            "title": "Spokenchaptertitles",
+            "default": true
+          },
           "speechSettings": {
             "type": "boolean",
             "title": "Speechsettings",
@@ -1032,6 +1037,34 @@
         "type": "object",
         "title": "CastingRequest",
         "description": "Either a single narrator, or a character cast.\n\nvoiceId alone means single casting. Naming a model means character\ncasting, since attribution cannot run without one."
+      },
+      "ChapterAnnouncementResponse": {
+        "properties": {
+          "chapterId": {
+            "type": "string",
+            "title": "Chapterid"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "inserted",
+              "existing",
+              "omitted"
+            ],
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chapterId",
+          "text",
+          "kind"
+        ],
+        "title": "ChapterAnnouncementResponse"
       },
       "ChapterResponse": {
         "properties": {
@@ -1297,7 +1330,10 @@
               "headingAfterPauseMs": 0,
               "paragraphPauseMs": 0,
               "linePauseMs": 0,
-              "scenePauseMs": 0
+              "scenePauseMs": 0,
+              "speakChapterTitles": true,
+              "chapterTitlePauseMs": 750,
+              "chapterTitleOverrides": {}
             }
           },
           "output": {
@@ -1535,6 +1571,18 @@
       },
       "PreflightResponse": {
         "properties": {
+          "chapterAnnouncements": {
+            "items": {
+              "$ref": "#/components/schemas/ChapterAnnouncementResponse"
+            },
+            "type": "array",
+            "title": "Chapterannouncements"
+          },
+          "addedTitleCharacters": {
+            "type": "integer",
+            "title": "Addedtitlecharacters",
+            "default": 0
+          },
           "sourceId": {
             "type": "string",
             "title": "Sourceid"
@@ -1678,6 +1726,32 @@
             "minimum": 0.0,
             "title": "Scenepausems",
             "default": 0
+          },
+          "speakChapterTitles": {
+            "type": "boolean",
+            "title": "Speakchaptertitles",
+            "default": true
+          },
+          "chapterTitlePauseMs": {
+            "type": "integer",
+            "maximum": 60000.0,
+            "minimum": 0.0,
+            "title": "Chaptertitlepausems",
+            "default": 750
+          },
+          "chapterTitleOverrides": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Chaptertitleoverrides"
           }
         },
         "type": "object",

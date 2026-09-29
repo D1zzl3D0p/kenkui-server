@@ -141,7 +141,7 @@ def test_book_size_cap_is_independent_of_credit_price(tmp_path, monkeypatch, cha
             "pipeline_from_job",
             lambda *_: SimpleNamespace(
                 inspect=lambda: SimpleNamespace(
-                    chapters=[SimpleNamespace(speech_characters=characters)]
+                    chapters=[kk.ChapterInspection("fixture", 0, "Fixture", characters)]
                 )
             ),
         )

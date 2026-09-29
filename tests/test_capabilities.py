@@ -1,5 +1,4 @@
 from fastapi.testclient import TestClient
-
 from kenkui import limits
 
 
@@ -12,6 +11,7 @@ def test_local_capabilities_are_versioned(client: TestClient) -> None:
         "speechSettings": True,
         "pauseLengths": True,
         "scenePauses": True,
+        "spokenChapterTitles": True,
         "covers": {"read": True, "upload": True, "maxUploadBytes": 8 * 1024 * 1024},
         "maxUploadBytes": 50 * 1024 * 1024,
         "auth": {"mode": "none"},

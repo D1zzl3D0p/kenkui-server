@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -23,11 +25,15 @@ class BufferedCursor:
 
 
 class PostgresDatabase:
-    def __init__(self, url: str, *, schema: str | None = None) -> None:
+    def __init__(
+        self, url: str, *, schema: str | None = None, connect_timeout: int | None = None
+    ) -> None:
         from psycopg.rows import dict_row
         from psycopg_pool import ConnectionPool
 
         kwargs: dict[str, Any] = {"autocommit": True, "row_factory": dict_row}
+        if connect_timeout is not None:
+            kwargs["connect_timeout"] = connect_timeout
         if schema is not None:
             if not schema.replace("_", "").isalnum():
                 raise ValueError("invalid database schema")
@@ -36,6 +42,26 @@ class PostgresDatabase:
             url, kwargs=kwargs, min_size=1, max_size=8, timeout=10, open=True
         )
         self._state = local()
+
+    def wait_until_ready(self, *, timeout: float) -> None:
+        """Allow the pool's background connection retries before starting scheduled work.
+
+        This only waits for initial connectivity: it never retries SQL or replays
+        partially completed work. Psycopg logs individual connection failures;
+        an exhausted startup budget still fails the caller.
+        """
+        from psycopg_pool import PoolTimeout
+
+        logger = logging.getLogger(__name__)
+        started = time.monotonic()
+        try:
+            self._pool.wait(timeout=timeout)
+        except PoolTimeout:
+            logger.exception("postgres_startup_timeout budget_seconds=%s", timeout)
+            raise
+        elapsed = time.monotonic() - started
+        if elapsed >= 10:
+            logger.warning("postgres_startup_recovered elapsed_seconds=%.2f", elapsed)
 
     @contextmanager
     def connection(self) -> Iterator[Any]:
