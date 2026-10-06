@@ -141,6 +141,7 @@ def create_app(
     fixture_mode: bool = False,
     max_jobs: int = 2,
     render_workers: int = 1,
+    stop_workers_on_close: bool = False,
     web_build_path: str | Path | None = None,
     allowed_origins: list[str] | None = None,
     auth_backend: AuthBackend | None = None,
@@ -192,6 +193,7 @@ def create_app(
             fixture_mode=fixture_mode,
             max_jobs=max_jobs,
             render_workers=render_workers,
+            stop_workers_on_close=stop_workers_on_close,
         )
         app.state.local_runner = runner
         dispatcher: Any = Dispatcher(repositories, runner)

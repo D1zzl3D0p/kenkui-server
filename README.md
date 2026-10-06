@@ -20,6 +20,13 @@ acceptance requirements.
   `ServerConfig.web_build_path` to `create_uvicorn_config`) with an installed
   bundle containing `index.html` to serve its static assets and SPA fallback
   from the server origin. `/v1` requests always remain API requests.
+- Desktop hosts can opt into `create_app(stop_workers_on_close=True)`. Shutdown
+  requests cancellation for owned active attempts, then closes worker control
+  pipes after a three-second grace period. Separate worker supervisors stop the
+  render process trees on EOF, including when the API is forcibly terminated.
+  Unstarted jobs remain queued. Abrupt termination can leave cancellation or
+  lease recovery for the next launch. The standalone CLI keeps its existing
+  detached-worker behavior by default.
 
 ## Normative contracts
 
