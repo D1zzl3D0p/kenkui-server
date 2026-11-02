@@ -31,10 +31,11 @@ Confirm account costs before provisioning. Keep render workers near the database
 
 Configure the server repository's CI variables from README.md. The library ref
 must be a full commit SHA. Run **Build verified release image** in GitHub Actions.
-Its optional `core_ref` input pins both verification and image building for that
-release without changing repository variables. Leave it empty for the configured
-default. For the idle migration, pass
-`97cba6bdb663c15d2d90d6e4e017be23ecdb9c7c`, the deployed core revision.
+Its optional `core_ref` input pins both verification and image building, and
+`web_ref` selects the Studio revision used by verification, without changing
+repository variables. Leave them empty for configured defaults. For the idle
+migration, pass `core_ref=97cba6bdb663c15d2d90d6e4e017be23ecdb9c7c` and
+`web_ref=468e067d02837e3a3ad79f5235c8b8111afc8e37`, the deployed dependency pair.
 It runs the integration suite and publishes a Linux amd64 image to GHCR, recording
 the immutable `ghcr.io/OWNER/REPOSITORY@sha256:DIGEST` in its summary. The image has
 server and library revision labels. Configure Render's registry credentials for

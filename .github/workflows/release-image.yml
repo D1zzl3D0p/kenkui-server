@@ -6,6 +6,10 @@ on:
         description: Immutable core commit for this release (defaults to KENKUI_CORE_REF)
         type: string
         required: false
+      web_ref:
+        description: Immutable Studio commit to verify (defaults to KENKUI_WEB_REF)
+        type: string
+        required: false
 permissions:
   contents: read
 jobs:
@@ -13,6 +17,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       core_ref: ${{ inputs.core_ref || vars.KENKUI_CORE_REF }}
+      web_ref: ${{ inputs.web_ref || vars.KENKUI_WEB_REF }}
     secrets: inherit
   image:
     needs: verify

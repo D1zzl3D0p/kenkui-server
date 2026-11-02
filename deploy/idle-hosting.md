@@ -8,11 +8,14 @@ No paid upgrade or subscription is part of this procedure.
 
 ## Release and configuration
 
-Build from the tested server commit and deployed core
-`97cba6bdb663c15d2d90d6e4e017be23ecdb9c7c`. Dispatch **Build verified release
-image** with that SHA in `core_ref`; both its reusable verification workflow and
-image checkout/label use this override. Empty inputs use `KENKUI_CORE_REF` as
-before. Do not change shared repository variables to build this release. Record
+Build from the tested server commit and the deployed dependency pair. Dispatch
+**Build verified release image** with
+`core_ref=97cba6bdb663c15d2d90d6e4e017be23ecdb9c7c` and
+`web_ref=468e067d02837e3a3ad79f5235c8b8111afc8e37`. The reusable verification
+workflow checks out both overrides; image checkout/label uses the core override.
+The web override selects verification code only; it does not deploy Studio.
+Empty inputs use `KENKUI_CORE_REF` / `KENKUI_WEB_REF` as before. Do not change
+shared repository variables to build this release. Record
 the server/core/Studio SHAs, image digest, and matching Modal checkout in private
 cutover evidence. Use the same tested image digest in both environments.
 

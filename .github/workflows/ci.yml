@@ -10,6 +10,10 @@ on:
         description: Immutable core commit override for a calling release
         type: string
         required: false
+      web_ref:
+        description: Immutable Studio commit override for a calling release
+        type: string
+        required: false
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -34,7 +38,7 @@ jobs:
           CORE_REPOSITORY: ${{ vars.KENKUI_CORE_REPOSITORY }}
           CORE_REF: ${{ inputs.core_ref || vars.KENKUI_CORE_REF }}
           WEB_REPOSITORY: ${{ vars.KENKUI_WEB_REPOSITORY }}
-          WEB_REF: ${{ vars.KENKUI_WEB_REF }}
+          WEB_REF: ${{ inputs.web_ref || vars.KENKUI_WEB_REF }}
         run: |
           test -n "$CORE_REPOSITORY" && test -n "$CORE_REF"
           test -n "$WEB_REPOSITORY" && test -n "$WEB_REF"
@@ -49,7 +53,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ${{ vars.KENKUI_WEB_REPOSITORY }}
-          ref: ${{ vars.KENKUI_WEB_REF }}
+          ref: ${{ inputs.web_ref || vars.KENKUI_WEB_REF }}
           path: kenkui-studio
           token: ${{ secrets.KENKUI_REPO_READ_TOKEN || github.token }}
       - uses: astral-sh/setup-uv@v5
