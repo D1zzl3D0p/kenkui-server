@@ -25,8 +25,7 @@ class Image:
         return lambda *args, **kwargs: self
 
 
-@pytest.mark.parametrize("idle", [False, True])
-def test_deployment_keeps_two_schedules_and_uses_backup_image_only_for_daily(monkeypatch, idle):
+def register_deployment(monkeypatch, idle, deployment="staging"):
     registered = {}
 
     class App:
@@ -48,13 +47,21 @@ def test_deployment_keeps_two_schedules_and_uses_backup_image_only_for_daily(mon
             Image=Image,
             Period=lambda **kwargs: kwargs,
             Volume=SimpleNamespace(from_name=lambda *args, **kwargs: object()),
-            Secret=SimpleNamespace(from_name=lambda *args, **kwargs: object()),
+            Secret=SimpleNamespace(
+                from_name=lambda name, *, environment_name: (name, environment_name)
+            ),
         ),
     )
-    monkeypatch.setenv("KENKUI_DEPLOYMENT", "staging")
+    monkeypatch.setenv("KENKUI_DEPLOYMENT", deployment)
     monkeypatch.setenv("KENKUI_DATABASE_IDLE", "1" if idle else "0")
     monkeypatch.delenv("KENKUI_MODAL_PROXY", raising=False)
     runpy.run_path(str(Path(__file__).parents[1] / "deploy/modal_app.py"))
+    return registered
+
+
+@pytest.mark.parametrize("idle", [False, True])
+def test_deployment_keeps_two_schedules_and_uses_backup_image_only_for_daily(monkeypatch, idle):
+    registered = register_deployment(monkeypatch, idle)
     schedules = {
         name: options for name, (_, options) in registered.items() if "schedule" in options
     }
@@ -75,3 +82,46 @@ def test_deployment_keeps_two_schedules_and_uses_backup_image_only_for_daily(mon
     registered["recover_jobs"][0]()
     registered["retain_objects"][0]()
     assert called == ["recover", "maintenance"]
+
+
+@pytest.mark.parametrize(
+    ("deployment", "idle", "expected_secrets"),
+    [
+        (
+            "staging",
+            True,
+            [
+                ("kenkui-staging-worker", "staging"),
+                ("kenkui-staging-mail", "staging"),
+                ("kenkui-staging-database-idle", "staging"),
+            ],
+        ),
+        (
+            "production",
+            True,
+            [
+                ("kenkui-production-worker", "production"),
+                ("kenkui-production-mail", "production"),
+                ("kenkui-production-database-idle", "production"),
+            ],
+        ),
+        (
+            "staging",
+            False,
+            [("kenkui-staging-worker", "staging"), ("kenkui-staging-mail", "staging")],
+        ),
+        (
+            "production",
+            False,
+            [("kenkui-production-worker", "production"), ("kenkui-production-mail", "production")],
+        ),
+    ],
+)
+def test_deployment_secrets_preserve_existing_secrets_with_idle_database_overlay_last(
+    monkeypatch, deployment, idle, expected_secrets
+):
+    registered = register_deployment(monkeypatch, idle, deployment)
+
+    assert set(registered) == {"render_job", "provision", "recover_jobs", "retain_objects"}
+    for _, options in registered.values():
+        assert options["secrets"] == expected_secrets

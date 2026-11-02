@@ -110,6 +110,11 @@ secrets = [
     # rewritten to add it. An empty SMTP password leaves the deployment silent.
     modal.Secret.from_name(f"{app_name}-mail", environment_name=deployment),
 ]
+if idle_mode:
+    # Later secrets override duplicate keys without rewriting worker credentials.
+    secrets.append(
+        modal.Secret.from_name(f"{app_name}-database-idle", environment_name=deployment)
+    )
 
 
 def configure_model_manifest() -> None:

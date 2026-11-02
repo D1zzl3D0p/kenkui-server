@@ -36,8 +36,8 @@ through that option. Legacy invocations retain the paid service/database names.
 
 | Setting | Where it belongs |
 |---|---|
-| `DATABASE_URL` | API and ordinary Modal worker secret; external Neon URL, pooled or direct, verified TLS |
-| `DATABASE_URL_UNPOOLED` | Modal worker secret for daily backup; direct Neon host (no `-pooler`), verified TLS |
+| `DATABASE_URL` | API and new Modal `kenkui-{environment}-database-idle` overlay secret; external Neon URL, pooled or direct, verified TLS |
+| `DATABASE_URL_UNPOOLED` | Same database overlay for daily backup; direct Neon host (no `-pooler`), verified TLS |
 | `KENKUI_DATABASE_IDLE=1` | API and environment used when deploying Modal |
 | `KENKUI_DEPLOYMENT`, `MODAL_ENVIRONMENT`, `KENKUI_MODAL_APP` | Matching staging/production only |
 | `R2_BUCKET`, `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_KEY_SALT` | Existing matching API/worker values; retain bucket and salt |
@@ -50,7 +50,14 @@ through that option. Legacy invocations retain the paid service/database names.
 
 Use private files/secret stores, never URLs or credentials in logs, shell
 arguments, generated Blueprints, or Git. Do not replace existing Modal secrets
-with partial dictionaries. Confirm R2 credentials can list/put/delete
+with partial dictionaries or stale local copies: live values are write-only and
+may contain newer credentials. Create a separate
+`kenkui-{environment}-database-idle` secret in the matching Modal environment,
+containing only `DATABASE_URL` and `DATABASE_URL_UNPOOLED`, entered through a
+private secret-management interface. In idle mode this overlay is attached last
+to every function, after the unchanged worker and mail secrets;
+[later Modal secrets override duplicate keys](https://modal.com/docs/guide/secrets).
+Legacy mode does not attach the overlay. Confirm R2 credentials can list/put/delete
 `operations/recovery/{environment}/` and `operations/backups/{environment}/`.
 
 ## Database migration and free-service replacement
@@ -87,7 +94,9 @@ with partial dictionaries. Confirm R2 credentials can list/put/delete
    Validate the new service through its Render hostname before changing DNS.
 5. Point API and **all** worker consumers at the same verified Neon target and
    deploy the matching Modal checkout with both `KENKUI_DEPLOYMENT` and
-   `KENKUI_DATABASE_IDLE=1` set. Keep the existing worker/mail secrets and models.
+   `KENKUI_DATABASE_IDLE=1` set. Create and verify the matching database overlay
+   before deployment; never replace the existing worker/mail secrets from local
+   JSON files. Keep those secrets and models untouched.
    Run the staging checks below before production. For changes to an existing
    replacement use the [Update service API](https://api-docs.render.com/reference/update-service)
    and trigger a deploy explicitly; updates alone do not deploy.
@@ -169,3 +178,12 @@ never point consumers at an old snapshot: pause/drain writers, export and verify
 current Neon data, restore/sync it to the rollback database, and only then return
 all consumers together. Recheck credit/payment deduplication and a canary. Keep
 backward-compatible migrations; application rollback does not undo database data.
+
+For Modal rollback, redeploy the matching previous checkout with
+`KENKUI_DATABASE_IDLE` unset or `0` and the same `KENKUI_DEPLOYMENT`. This removes
+the database overlay from function configuration and restores the database URL
+in the preserved worker secret, along with the legacy schedules. Verify that URL
+targets the rollback database before resuming writers. The overlay can remain
+stored but unused; do not delete or rewrite worker/mail secrets. After Neon writes
+have resumed, complete the data synchronization described above before switching
+either API or workers back.
