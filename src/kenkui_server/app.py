@@ -47,6 +47,7 @@ from kenkui_server.jobs.dispatcher import Dispatcher, HostedDispatcher
 from kenkui_server.observability import log_event
 from kenkui_server.storage.assets import AssetStore
 from kenkui_server.storage.database import Database
+from kenkui_server.storage.recovery_signals import RecoverySignals
 from kenkui_server.storage.repositories import Repositories
 
 LOGGER = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ class HostedServices:
     account_id_for_identity: Callable[[UUID], str]
     # Owns the notifiable address and its preference. Absent on older compositions.
     identities: Any = None
+    recovery_signals: RecoverySignals | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,7 +217,11 @@ def create_app(
         )
         app.state.hosted_services = None
     else:
-        dispatcher = HostedDispatcher(hosted_services.repositories, hosted_services.runner)
+        dispatcher = HostedDispatcher(
+            hosted_services.repositories,
+            hosted_services.runner,
+            recovery_signals=hosted_services.recovery_signals,
+        )
         services = LocalServices(
             repositories=hosted_services.repositories,
             assets=hosted_services.assets,

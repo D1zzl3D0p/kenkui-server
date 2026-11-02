@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID, uuid4
 
 import kenkui as kk
@@ -16,6 +18,7 @@ from kenkui_server.notifications.composition import notification_settings_from_e
 from kenkui_server.storage.assets import R2AssetStore
 from kenkui_server.storage.postgres import PostgresHostedRepository, PostgresIdentityRepository
 from kenkui_server.storage.postgres_database import PostgresDatabase
+from kenkui_server.storage.recovery_signals import R2RecoverySignals
 from kenkui_server.voice_catalog import VCTK_VOICE_SET, select_hosted_voices
 
 
@@ -26,11 +29,11 @@ def required(name: str) -> str:
     return value
 
 
-def object_store() -> R2AssetStore:
+def r2_client() -> Any:
     import boto3
     from botocore.config import Config
 
-    client = boto3.client(
+    return boto3.client(
         "s3",
         endpoint_url=required("R2_ENDPOINT"),
         aws_access_key_id=required("R2_ACCESS_KEY_ID"),
@@ -38,7 +41,92 @@ def object_store() -> R2AssetStore:
         region_name="auto",
         config=Config(connect_timeout=10, read_timeout=60, retries={"max_attempts": 3}),
     )
-    return R2AssetStore(client, bucket=required("R2_BUCKET"), key_salt=required("R2_KEY_SALT"))
+
+
+def object_store() -> R2AssetStore:
+    return R2AssetStore(r2_client(), bucket=required("R2_BUCKET"), key_salt=required("R2_KEY_SALT"))
+
+
+def recovery_signals() -> R2RecoverySignals:
+    return R2RecoverySignals(
+        r2_client(), bucket=required("R2_BUCKET"), environment=required("KENKUI_DEPLOYMENT")
+    )
+
+
+def _recovery_database() -> PostgresDatabase:
+    database = PostgresDatabase(
+        required("DATABASE_URL"),
+        idle=os.environ.get("KENKUI_DATABASE_IDLE") == "1",
+        connect_timeout=15,
+    )
+    try:
+        database.wait_until_ready(timeout=90)
+    except BaseException:
+        database.close()
+        raise
+    return database
+
+
+def _run_recovery(database: PostgresDatabase) -> None:
+    from kenkui_server.jobs.dispatcher import HostedDispatcher
+
+    repo = PostgresHostedRepository(database)
+    HostedDispatcher(
+        repo,
+        ModalProcessRunner(
+            repo,
+            app_name=os.environ.get("KENKUI_MODAL_APP", "kenkui-beta"),
+            max_jobs=int(os.environ.get("KENKUI_MAX_JOBS", "2")),
+        ),
+    ).recover()
+
+
+def recover_jobs() -> None:
+    from kenkui_server.maintenance import recover_with_signals
+
+    if os.environ.get("KENKUI_DATABASE_IDLE") == "1":
+        recover_with_signals(recovery_signals(), _recovery_database, _run_recovery)
+    else:
+        database = _recovery_database()
+        try:
+            _run_recovery(database)
+        finally:
+            database.close()
+
+
+def retain_objects() -> None:
+    from kenkui_server.maintenance import daily_maintenance, write_logical_backup
+    from kenkui_server.storage.retention import PostgresRetention
+
+    database = _recovery_database()
+    try:
+        retention = PostgresRetention(database, object_store())
+
+        def run_retention() -> None:
+            retention.run()
+
+        if os.environ.get("KENKUI_DATABASE_IDLE") == "1":
+            now = datetime.now(UTC)
+            # Validate the required unpooled URL before starting daily work.
+            backup_url = required("DATABASE_URL_UNPOOLED")
+            daily_maintenance(
+                recovery_signals(),
+                database,
+                _run_recovery,
+                run_retention,
+                lambda: write_logical_backup(
+                    r2_client(),
+                    bucket=required("R2_BUCKET"),
+                    environment=required("KENKUI_DEPLOYMENT"),
+                    database_url=backup_url,
+                    now=now,
+                ),
+                now=now,
+            )
+        else:
+            retention.run()
+    finally:
+        database.close()
 
 
 def create_hosted_app() -> FastAPI:
@@ -104,6 +192,9 @@ def create_hosted_app() -> FastAPI:
         auth,
         account_for_identity,
         identities,
+        recovery_signals=recovery_signals()
+        if os.environ.get("KENKUI_DATABASE_IDLE") == "1"
+        else None,
     )
     config = HostedConfig(
         database_url=required("DATABASE_URL"),
@@ -152,21 +243,7 @@ def main() -> None:
         finally:
             database.close()
     elif command == "recover":
-        from kenkui_server.jobs.dispatcher import HostedDispatcher
-
-        database = PostgresDatabase(
-            required("DATABASE_URL"), idle=os.environ.get("KENKUI_DATABASE_IDLE") == "1"
-        )
-        try:
-            repo = PostgresHostedRepository(database)
-            HostedDispatcher(
-                repo,
-                ModalProcessRunner(
-                    repo, app_name=os.environ.get("KENKUI_MODAL_APP", "kenkui-beta")
-                ),
-            ).recover()
-        finally:
-            database.close()
+        recover_jobs()
     else:
         import uvicorn
 

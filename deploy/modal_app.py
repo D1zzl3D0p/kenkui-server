@@ -11,81 +11,95 @@ deployment = os.environ.get("KENKUI_DEPLOYMENT", "staging")
 if deployment not in {"staging", "production"}:
     raise ValueError("KENKUI_DEPLOYMENT must be staging or production")
 app_name = f"kenkui-{deployment}"
+idle_mode = os.environ.get("KENKUI_DATABASE_IDLE") == "1"
 app = modal.App(app_name)
 proxy_name = os.environ.get("KENKUI_MODAL_PROXY")
 proxy = modal.Proxy.from_name(proxy_name, environment_name=deployment) if proxy_name else None
-image = (
-    modal.Image.debian_slim(python_version="3.12")
-    .apt_install("ffmpeg")
-    .pip_install("uv==0.12.10")
-    .add_local_dir(
-        str(CORE),
-        "/app/kenkui",
-        copy=True,
-        ignore=[
-            ".git",
-            ".venv",
-            ".worktrees",
-            ".claude",
-            "evals",
-            "spikes",
-            "tests",
-            "docs",
-            ".env*",
-            ".dev.vars*",
-            ".serena",
-            ".superpowers",
-            "__pycache__",
-            "*.pyc",
-            ".pytest_cache",
-            ".ruff_cache",
-            ".mypy_cache",
-            ".coverage*",
-            "htmlcov",
-            "dist",
-            "build",
-        ],
+
+
+def code_image(base: modal.Image) -> modal.Image:
+    return (
+        base.apt_install("ffmpeg")
+        .pip_install("uv==0.12.10")
+        .add_local_dir(
+            str(CORE),
+            "/app/kenkui",
+            copy=True,
+            ignore=[
+                ".git",
+                ".venv",
+                ".worktrees",
+                ".claude",
+                "evals",
+                "spikes",
+                "tests",
+                "docs",
+                ".env*",
+                ".dev.vars*",
+                ".serena",
+                ".superpowers",
+                "__pycache__",
+                "*.pyc",
+                ".pytest_cache",
+                ".ruff_cache",
+                ".mypy_cache",
+                ".coverage*",
+                "htmlcov",
+                "dist",
+                "build",
+            ],
+        )
+        .add_local_dir(
+            str(ROOT),
+            "/app/kenkui-server",
+            copy=True,
+            ignore=[
+                ".git",
+                ".venv",
+                ".worktrees",
+                ".claude",
+                "tests",
+                "task-8-report.md",
+                ".env*",
+                ".dev.vars*",
+                ".serena",
+                ".superpowers",
+                "__pycache__",
+                "*.pyc",
+                ".pytest_cache",
+                ".ruff_cache",
+                ".mypy_cache",
+                ".coverage*",
+                "htmlcov",
+                "dist",
+                "build",
+            ],
+        )
+        .workdir("/app/kenkui-server")
+        .run_commands(
+            "uv export --frozen --extra hosted --no-dev --no-hashes "
+            "--output-file /tmp/requirements.txt",
+            "uv pip install --system -r /tmp/requirements.txt",
+        )
+        .env(
+            {
+                "KENKUI_DEPLOYMENT": deployment,
+                "KENKUI_POCKET_MANIFEST": "/models/runtime/manifest.json",
+                "KENKUI_MODAL_APP": app_name,
+                "MODAL_ENVIRONMENT": deployment,
+                "KENKUI_DATABASE_IDLE": "1" if idle_mode else "0",
+            }
+        )
     )
-    .add_local_dir(
-        str(ROOT),
-        "/app/kenkui-server",
-        copy=True,
-        ignore=[
-            ".git",
-            ".venv",
-            ".worktrees",
-            ".claude",
-            "tests",
-            "task-8-report.md",
-            ".env*",
-            ".dev.vars*",
-            ".serena",
-            ".superpowers",
-            "__pycache__",
-            "*.pyc",
-            ".pytest_cache",
-            ".ruff_cache",
-            ".mypy_cache",
-            ".coverage*",
-            "htmlcov",
-            "dist",
-            "build",
-        ],
-    )
-    .workdir("/app/kenkui-server")
-    .run_commands(
-        "uv export --frozen --extra hosted --no-dev --no-hashes "
-        "--output-file /tmp/requirements.txt",
-        "uv pip install --system -r /tmp/requirements.txt",
-    )
-    .env(
-        {
-            "KENKUI_DEPLOYMENT": deployment,
-            "KENKUI_POCKET_MANIFEST": "/models/runtime/manifest.json",
-            "KENKUI_MODAL_APP": app_name,
-            "MODAL_ENVIRONMENT": deployment,
-        }
-    )
+
+
+image = code_image(modal.Image.debian_slim(python_version="3.12"))
+# Backup tools stay out of the API/render image. The official PostgreSQL image
+# includes pg_dump 17 and Debian's system CA bundle for verified Neon TLS.
+maintenance_image = (
+    code_image(modal.Image.from_registry("postgres:17-bookworm", add_python="3.12"))
+    if idle_mode
+    else image
 )
 models = modal.Volume.from_name(
     f"{app_name}-models", environment_name=deployment, create_if_missing=True
@@ -145,35 +159,28 @@ def provision() -> None:
 
 
 @app.function(
-    image=image, secrets=secrets, schedule=modal.Period(minutes=1), timeout=120, proxy=proxy
+    image=image,
+    secrets=secrets,
+    schedule=modal.Period(minutes=1),
+    timeout=240,
+    max_containers=1,
+    proxy=proxy,
 )
 def recover_jobs() -> None:
-    from kenkui_server.compute.modal import ModalProcessRunner
-    from kenkui_server.hosted import required
-    from kenkui_server.jobs.dispatcher import HostedDispatcher
-    from kenkui_server.storage.postgres import PostgresHostedRepository
-    from kenkui_server.storage.postgres_database import PostgresDatabase
+    from kenkui_server.hosted import recover_jobs as recover
 
-    database = PostgresDatabase(required("DATABASE_URL"))
-    try:
-        repositories = PostgresHostedRepository(database)
-        HostedDispatcher(
-            repositories, ModalProcessRunner(repositories, app_name=app_name)
-        ).recover()
-    finally:
-        database.close()
+    recover()
 
 
 @app.function(
-    image=image, secrets=secrets, schedule=modal.Period(hours=1), timeout=300, proxy=proxy
+    image=maintenance_image,
+    secrets=secrets,
+    schedule=modal.Period(hours=24 if idle_mode else 1),
+    timeout=1800 if idle_mode else 300,
+    max_containers=1,
+    proxy=proxy,
 )
 def retain_objects() -> None:
-    from kenkui_server.hosted import object_store, required
-    from kenkui_server.storage.postgres_database import PostgresDatabase
-    from kenkui_server.storage.retention import PostgresRetention
+    from kenkui_server.hosted import retain_objects as maintain
 
-    database = PostgresDatabase(required("DATABASE_URL"))
-    try:
-        PostgresRetention(database, object_store()).run()
-    finally:
-        database.close()
+    maintain()

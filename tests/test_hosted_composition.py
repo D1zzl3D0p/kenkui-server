@@ -249,6 +249,61 @@ def test_hosted_job_route_uses_single_atomic_durable_admission(
     assert fixture.runner.started == [admitted_dispatch.id]
 
 
+def test_hosted_services_pass_recovery_signal_to_admission(monkeypatch):
+    repositories, runner = AtomicHostedRepositories(), Runner()
+    armed = []
+
+    class Signals:
+        def arm(self, job_id):
+            armed.append(job_id)
+
+        def list_job_ids(self):
+            return tuple(armed)
+
+        def clear(self, job_id):
+            armed.remove(job_id)
+
+    app = create_app(
+        hosted_config=_config(),
+        hosted_services=HostedServices(
+            repositories,
+            object(),
+            (),
+            runner,
+            Auth(),
+            lambda _: "account-1",
+            recovery_signals=Signals(),
+        ),
+    )
+    monkeypatch.setattr(
+        jobs,
+        "_preflight",
+        lambda request, payload: (
+            JobSpec(
+                "source-1",
+                ("chapter-1",),
+                SingleVoiceCasting("narrator"),
+                TtsSettings(),
+                OutputSpec("artifact.m4b"),
+            ),
+            1,
+        ),
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/jobs",
+            headers={"Authorization": "Bearer owner"},
+            json={
+                "sourceId": "source-1",
+                "chapters": ["chapter-1"],
+                "casting": {"voiceId": "narrator"},
+                "output": {"format": "m4b"},
+            },
+        )
+    assert response.status_code == 202
+    assert armed == [response.json()["id"]]
+
+
 @pytest.mark.parametrize("multivoice", [False, True])
 @pytest.mark.parametrize("characters", [1, 1_189_736, 3_238_498, 10_000_000])
 def test_preflight_and_admission_agree_on_estimated_book_charge(

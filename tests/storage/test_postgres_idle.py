@@ -213,6 +213,9 @@ def test_hosted_idle_requires_explicit_environment_setting(
     )
     monkeypatch.setattr(hosted, "PostgresDatabase", database_factory)
     monkeypatch.setattr(hosted, "object_store", object)
+    monkeypatch.setattr(
+        hosted, "recovery_signals", lambda: SimpleNamespace(list_job_ids=lambda: ())
+    )
     monkeypatch.setattr(hosted.kk, "list_voices", lambda: ())
     monkeypatch.setattr(hosted, "select_hosted_voices", lambda *args: ())
     monkeypatch.setattr(workos, "WorkOSClient", lambda **kwargs: object())
@@ -226,8 +229,11 @@ def test_hosted_idle_requires_explicit_environment_setting(
         else:
             monkeypatch.setattr(sys, "argv", ["kenkui-hosted", entrypoint])
             hosted.main()
-        assert len(databases) == 1
-        assert databases[0]._pool.min_size == (0 if setting == "1" else 1)
+        if entrypoint == "recover" and setting == "1":
+            assert databases == []
+        else:
+            assert len(databases) == 1
+            assert databases[0]._pool.min_size == (0 if setting == "1" else 1)
     finally:
         for database in databases:
             database.close()

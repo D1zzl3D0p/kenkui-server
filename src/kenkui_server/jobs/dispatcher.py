@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 from kenkui_server.billing.pricing import credits_for_characters
 from kenkui_server.compute.base import ProcessRunner
 from kenkui_server.jobs.models import CharacterCasting, Dispatch, Job, JobSpec
+from kenkui_server.storage.recovery_signals import RecoverySignals
 from kenkui_server.storage.repositories import Repositories
 
 
@@ -42,9 +43,16 @@ class Dispatcher:
 class HostedDispatcher:
     """Admit credit-backed hosted work through one durable transaction."""
 
-    def __init__(self, repositories: Any, runner: ProcessRunner) -> None:
+    def __init__(
+        self,
+        repositories: Any,
+        runner: ProcessRunner,
+        *,
+        recovery_signals: RecoverySignals | None = None,
+    ) -> None:
         self._repositories: Any = repositories
         self._runner = runner
+        self._recovery_signals = recovery_signals
 
     def submit(
         self,
@@ -62,6 +70,10 @@ class HostedDispatcher:
             raise ValueError("empty_speech")
         job = Job(str(uuid4()), spec)
         dispatch = Dispatch(str(uuid4()), job.id, "pending")
+        if self._recovery_signals is not None:
+            # Fail closed before credit reservation. Never clear on an ambiguous
+            # database error: the admission may have committed successfully.
+            self._recovery_signals.arm(job.id)
         admitted: Job = self._repositories.admit(
             job,
             dispatch,
@@ -74,6 +86,9 @@ class HostedDispatcher:
         )
         if admitted.id == job.id:
             self._runner.start(dispatch.id)
+        elif self._recovery_signals is not None:
+            self._recovery_signals.arm(admitted.id)
+            self._recovery_signals.clear(job.id)
         return admitted
 
     def recover(self) -> None:

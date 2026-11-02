@@ -194,3 +194,104 @@ def test_postgres_identity_mapping_is_durable_and_returns_a_stable_uuid() -> Non
 
     assert identity_id == UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
     assert "ON CONFLICT (workos_subject)" in connection.statements[-1][0]
+
+
+class Signals:
+    def __init__(self):
+        self.ids = set()
+        self.events = []
+
+    def arm(self, job_id):
+        self.events.append(("arm", job_id))
+        self.ids.add(job_id)
+
+    def clear(self, job_id):
+        self.events.append(("clear", job_id))
+        self.ids.discard(job_id)
+
+    def list_job_ids(self):
+        return tuple(self.ids)
+
+
+class Runner:
+    def __init__(self):
+        self.started = []
+
+    def start(self, dispatch_id):
+        self.started.append(dispatch_id)
+
+
+def submit(dispatcher):
+    return dispatcher.submit(
+        _job().spec,
+        owner_id=UUID(int=1),
+        account_id="account-1",
+        normalized_speech_characters=1,
+        idempotency_key="request",
+    )
+
+
+def test_signal_storage_failure_prevents_credit_reservation():
+    from kenkui_server.jobs.dispatcher import HostedDispatcher
+
+    class BrokenSignals(Signals):
+        def arm(self, job_id):
+            raise RuntimeError("storage unavailable")
+
+    connection = RecordingConnection()
+    runner = Runner()
+    with pytest.raises(RuntimeError, match="storage unavailable"):
+        submit(
+            HostedDispatcher(
+                PostgresHostedRepository(connection), runner, recovery_signals=BrokenSignals()
+            )
+        )
+    assert connection.transactions == 0
+    assert connection.statements == []
+    assert runner.started == []
+
+
+def test_commit_then_response_failure_preserves_marker_for_committed_job():
+    from kenkui_server.jobs.dispatcher import HostedDispatcher
+
+    connection = RecordingConnection()
+    signals, runner = Signals(), Runner()
+
+    class AmbiguousRepository(PostgresHostedRepository):
+        def admit(self, job, dispatch, **kwargs):
+            assert job.id in signals.ids
+            super().admit(job, dispatch, **kwargs)
+            raise ConnectionError("response lost after commit")
+
+    with pytest.raises(ConnectionError):
+        submit(HostedDispatcher(AmbiguousRepository(connection), runner, recovery_signals=signals))
+    (job_id,) = signals.ids
+    assert any(
+        "INSERT INTO jobs" in sql and params[0] == job_id for sql, params in connection.statements
+    )
+    assert runner.started == []
+
+
+def test_replayed_admission_arms_original_before_clearing_new_marker():
+    from kenkui_server.jobs.dispatcher import HostedDispatcher
+
+    signals, runner = Signals(), Runner()
+    connection = RecordingConnection()
+
+    class ReplayRepository(PostgresHostedRepository):
+        original = None
+
+        def admit(self, job, dispatch, **kwargs):
+            if self.original is None:
+                self.original = super().admit(job, dispatch, **kwargs)
+            return self.original
+
+    dispatcher = HostedDispatcher(ReplayRepository(connection), runner, recovery_signals=signals)
+    first = submit(dispatcher)
+    signals.clear(first.id)  # even a lost original marker must be repaired by replay
+    assert submit(dispatcher).id == first.id
+    assert signals.ids == {first.id}
+    assert signals.events[-2] == ("arm", first.id)
+    assert signals.events[-1][0] == "clear"
+    assert sum("INSERT INTO credit_authorizations" in sql for sql, _ in connection.statements) == 1
+    assert len(runner.started) == 1

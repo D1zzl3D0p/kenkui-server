@@ -395,3 +395,120 @@ def test_migration_keeps_historical_balances_and_pending_allocations(database):
     lots = repo.billing.credit_lots(account)
     assert lots[0].consumed == 90
     assert lots[1].usage_status == "unused"
+
+
+class RecoverySignals:
+    def __init__(self):
+        self.records = {}
+
+    def arm(self, job_id):
+        from datetime import UTC, datetime
+
+        from kenkui_server.storage.recovery_signals import RecoverySignal
+
+        self.records[job_id] = RecoverySignal(job_id, datetime.now(UTC))
+
+    def clear(self, job_id):
+        self.records.pop(job_id, None)
+
+    def list_job_ids(self):
+        return tuple(self.records)
+
+    def list_records(self):
+        return tuple(self.records.values())
+
+
+def test_concurrent_signal_admission_replay_reserves_once(database):
+    from kenkui_server.jobs.dispatcher import HostedDispatcher
+
+    account, owner, repo = lot_account(database)
+    repo.billing.grant(account, 10, reference="signal-grant")
+    signals = RecoverySignals()
+    started = []
+
+    class Runner:
+        def start(self, dispatch_id):
+            started.append(dispatch_id)
+
+    dispatcher = HostedDispatcher(repo, Runner(), recovery_signals=signals)
+    spec = JobSpec(
+        "source", ("chapter",), SingleVoiceCasting("narrator"), TtsSettings(), OutputSpec("out.m4b")
+    )
+
+    def submit(_):
+        return dispatcher.submit(
+            spec,
+            owner_id=owner,
+            account_id=account,
+            normalized_speech_characters=1,
+            idempotency_key="same",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first, second = pool.map(submit, range(2))
+    assert first.id == second.id
+    assert signals.list_job_ids() == (first.id,)
+    assert repo.billing.account(account).available_credits == 9
+    assert len(started) == 1
+    authorization = repo.billing.authorization_for_job(first.id)
+    assert [entry.kind for entry in repo.billing.ledger_for_authorization(authorization.id)] == [
+        "reservation"
+    ]
+
+
+def test_daily_signal_reconciliation_preserves_leases_and_cannot_finalize_credits_twice(database):
+    from datetime import UTC, datetime
+
+    from kenkui_server.jobs.dispatcher import HostedDispatcher
+    from kenkui_server.maintenance import daily_maintenance, recover_with_signals
+
+    account, owner, repo = lot_account(database)
+    repo.billing.grant(account, 10, reference="signal-grant")
+    first = reserve_lot_job(database, repo, account, owner, 1)
+    second = reserve_lot_job(database, repo, account, owner, 1)
+    signals = RecoverySignals()
+    signals.arm(first)  # second has lost its external signal
+    repo.request_cancellation(first)
+    assert repo.billing.account(account).available_credits == 9
+    leases = []
+
+    class Runner:
+        def start(self, dispatch_id):
+            token = repo.claim_execution(dispatch_id, limit=1)
+            if token:
+                leases.append((dispatch_id, token))
+
+    def recover(db):
+        assert second in signals.list_job_ids()
+        HostedDispatcher(repo, Runner()).recover()
+
+    for _ in range(2):
+        daily_maintenance(
+            signals, database, recover, lambda: None, lambda: None, now=datetime.now(UTC)
+        )
+    assert signals.list_job_ids() == (second,)
+    assert len(leases) == 1  # repeated recovery cannot exceed the live database lease
+    assert repo.billing.account(account).available_credits == 9
+    repo.release_execution(*leases[0])
+    repo.request_cancellation(second)
+
+    class BorrowedDatabase:
+        def execute(self, *args):
+            return database.execute(*args)
+
+        def close(self):
+            pass
+
+    recover_with_signals(
+        signals, BorrowedDatabase, lambda db: HostedDispatcher(repo, Runner()).recover()
+    )
+    recover_with_signals(
+        signals, lambda: pytest.fail("terminal marker was not cleared"), lambda db: None
+    )
+    assert signals.list_job_ids() == ()
+    assert repo.billing.account(account).available_credits == 10
+    for job_id in (first, second):
+        authorization = repo.billing.authorization_for_job(job_id)
+        assert sorted(
+            entry.kind for entry in repo.billing.ledger_for_authorization(authorization.id)
+        ) == ["release", "reservation"]
