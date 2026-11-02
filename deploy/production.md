@@ -1,11 +1,14 @@
 # Render / Cloudflare / Modal deployment
 
-This is the deployment path for private beta and subsequent production releases.
-The Cloud specification now selects Render for the API and managed PostgreSQL.
+For sleeping Render Free APIs and external Neon PostgreSQL, follow
+[idle-hosting.md](idle-hosting.md). That runbook is the idle migration path;
+the paid Render API/database configuration below remains available for legacy
+deployments and rollback. Do not sync its generated database definitions after
+retiring the paid databases: doing so can recreate billable resources.
 Beta uses granted allowances. For card payments and cost-based pricing, follow
 [payments.md](payments.md); test/live Stripe settings belong on the API service.
 
-## Environment inventory
+## Legacy environment inventory
 
 | Resource | Staging | Production (private beta initially) |
 |---|---|---|
@@ -28,6 +31,10 @@ Confirm account costs before provisioning. Keep render workers near the database
 
 Configure the server repository's CI variables from README.md. The library ref
 must be a full commit SHA. Run **Build verified release image** in GitHub Actions.
+Its optional `core_ref` input pins both verification and image building for that
+release without changing repository variables. Leave it empty for the configured
+default. For the idle migration, pass
+`97cba6bdb663c15d2d90d6e4e017be23ecdb9c7c`, the deployed core revision.
 It runs the integration suite and publishes a Linux amd64 image to GHCR, recording
 the immutable `ghcr.io/OWNER/REPOSITORY@sha256:DIGEST` in its summary. The image has
 server and library revision labels. Configure Render's registry credentials for
@@ -51,7 +58,7 @@ Optionally configure `KENKUI_MODAL_PROXY` and pass its static IPs with
 Team/Enterprise. Do not configure an allowlist of static IPs without also routing
 all database-accessing worker functions through the matching proxy.
 
-## 3. Generate and sync the Render Blueprint
+## 3. Generate and sync the legacy paid Render Blueprint
 
 From the server checkout, using the real image digest :
 
@@ -69,6 +76,8 @@ The generated document contains secret prompts, never secret values.
 Render injects the database's internal connection string into the API. Its
 pre-deploy command applies ordered migrations before switching the service.
 Migrations must remain backward compatible with the previous release.
+This pre-deploy command is absent in idle mode. There, run the locked migrations
+explicitly against the direct Neon connection before starting API or workers.
 
 Supply the prompted R2, WorkOS, Modal, and invitation settings from
 `beta.env.example`. The session secret is generated separately per API service.

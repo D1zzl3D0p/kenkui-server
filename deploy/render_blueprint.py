@@ -6,11 +6,13 @@ import json
 import re
 
 
-def blueprint(environment, image, worker_cidrs=()):
+def blueprint(environment, image, worker_cidrs=(), *, idle_hosting=False):
     if environment not in {"staging", "production"}:
         raise ValueError("invalid deployment environment")
     if not re.fullmatch(r"[a-zA-Z0-9./_-]+@sha256:[a-f0-9]{64}", image):
         raise ValueError("image must be pinned to a registry sha256 digest")
+    if idle_hosting and worker_cidrs:
+        raise ValueError("worker CIDRs cannot restrict the external database in idle hosting mode")
     cidrs = [str(ipaddress.ip_network(value, strict=True)) for value in worker_cidrs]
     # Ordinary Modal workers use dynamic outbound IPs; TLS and database
     # credentials authenticate them. Fixed-IP restriction is an optional upgrade.
@@ -34,13 +36,19 @@ def blueprint(environment, image, worker_cidrs=()):
         "KENKUI_ESTIMATED_COST_CENTS_PER_MILLION": "126",
         "KENKUI_STRIPE_TAX_CODE": "txcd_10105001",
     }
+    if idle_hosting:
+        variables["KENKUI_DATABASE_IDLE"] = "1"
     env = [{"key": key, "value": value} for key, value in variables.items()]
-    env += [
-        {
-            "key": "DATABASE_URL",
-            "fromDatabase": {"name": name + "-db", "property": "connectionString"},
-        }
-    ]
+    env += (
+        [{"key": "DATABASE_URL", "sync": False}]
+        if idle_hosting
+        else [
+            {
+                "key": "DATABASE_URL",
+                "fromDatabase": {"name": name + "-db", "property": "connectionString"},
+            }
+        ]
+    )
     env += [{"key": "KENKUI_SESSION_SECRET", "sync": False}]
     env += [
         {"key": key, "sync": False}
@@ -59,14 +67,15 @@ def blueprint(environment, image, worker_cidrs=()):
             "STRIPE_WEBHOOK_SECRET",
         )
     ]
-    return {
+    document = {
         "services": [
             {
                 "type": "web",
-                "name": name + "-api",
+                # Render rejects paid-to-free updates; use a replacement service.
+                "name": name + ("-api-idle" if idle_hosting else "-api"),
                 "runtime": "image",
                 "image": {"url": image},
-                "plan": "1c-2g",
+                "plan": "free" if idle_hosting else "1c-2g",
                 "region": "virginia",
                 "numInstances": 1,
                 "domains": [api],
@@ -91,6 +100,10 @@ def blueprint(environment, image, worker_cidrs=()):
             }
         ],
     }
+    if idle_hosting:
+        del document["databases"]
+        del document["services"][0]["preDeployCommand"]
+    return document
 
 
 if __name__ == "__main__":
@@ -98,5 +111,13 @@ if __name__ == "__main__":
     parser.add_argument("--environment", required=True, choices=["staging", "production"])
     parser.add_argument("--image", required=True)
     parser.add_argument("--worker-cidr", action="append", default=[])
+    parser.add_argument("--idle-hosting", action="store_true")
     args = parser.parse_args()
-    print(json.dumps(blueprint(args.environment, args.image, args.worker_cidr), indent=2))
+    print(
+        json.dumps(
+            blueprint(
+                args.environment, args.image, args.worker_cidr, idle_hosting=args.idle_hosting
+            ),
+            indent=2,
+        )
+    )
