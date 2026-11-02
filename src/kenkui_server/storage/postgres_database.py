@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -23,19 +25,60 @@ class BufferedCursor:
 
 
 class PostgresDatabase:
-    def __init__(self, url: str, *, schema: str | None = None) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        schema: str | None = None,
+        connect_timeout: int | None = None,
+        idle: bool = False,
+    ) -> None:
         from psycopg.rows import dict_row
         from psycopg_pool import ConnectionPool
 
         kwargs: dict[str, Any] = {"autocommit": True, "row_factory": dict_row}
+        if connect_timeout is not None:
+            kwargs["connect_timeout"] = connect_timeout
         if schema is not None:
             if not schema.replace("_", "").isalnum():
                 raise ValueError("invalid database schema")
             kwargs["options"] = f"-c search_path={schema}"
+        pool_options: dict[str, Any] = {}
+        if idle:
+            pool_options.update(max_idle=60, check=ConnectionPool.check_connection)
         self._pool = ConnectionPool(
-            url, kwargs=kwargs, min_size=1, max_size=8, timeout=10, open=True
+            url,
+            kwargs=kwargs,
+            min_size=0 if idle else 1,
+            max_size=8,
+            timeout=10,
+            open=True,
+            **pool_options,
         )
+        self._idle = idle
         self._state = local()
+
+    def wait_until_ready(self, *, timeout: float) -> None:
+        """Wait for initial connectivity without replaying SQL or transactions."""
+        from psycopg_pool import PoolTimeout
+
+        logger = logging.getLogger(__name__)
+        started = time.monotonic()
+        try:
+            if self._idle:
+                # wait() is already satisfied at min_size=0. Checkout also runs
+                # the validation callback before returning a usable connection.
+                with self._pool.connection(timeout=timeout):
+                    pass
+            else:
+                self._pool.wait(timeout=timeout)
+        except PoolTimeout:
+            self._pool.close()
+            logger.exception("postgres_startup_timeout budget_seconds=%s", timeout)
+            raise
+        elapsed = time.monotonic() - started
+        if elapsed >= 10:
+            logger.warning("postgres_startup_recovered elapsed_seconds=%.2f", elapsed)
 
     @contextmanager
     def connection(self) -> Iterator[Any]:

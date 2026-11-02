@@ -60,7 +60,9 @@ def create_hosted_app() -> FastAPI:
     voices = select_hosted_voices(
         os.environ.get("KENKUI_VOICE_SET", VCTK_VOICE_SET), kk.list_voices()
     )
-    database = PostgresDatabase(required("DATABASE_URL"))
+    database = PostgresDatabase(
+        required("DATABASE_URL"), idle=os.environ.get("KENKUI_DATABASE_IDLE") == "1"
+    )
     repositories = PostgresHostedRepository(database)
     identities = PostgresIdentityRepository(database)
     auth = BrowserAuthBackend(
@@ -142,7 +144,9 @@ def main() -> None:
     parser.add_argument("command", choices=["migrate", "serve", "recover"])
     command = parser.parse_args().command
     if command == "migrate":
-        database = PostgresDatabase(required("DATABASE_URL"))
+        database = PostgresDatabase(
+            required("DATABASE_URL"), idle=os.environ.get("KENKUI_DATABASE_IDLE") == "1"
+        )
         try:
             database.migrate()
         finally:
@@ -150,7 +154,9 @@ def main() -> None:
     elif command == "recover":
         from kenkui_server.jobs.dispatcher import HostedDispatcher
 
-        database = PostgresDatabase(required("DATABASE_URL"))
+        database = PostgresDatabase(
+            required("DATABASE_URL"), idle=os.environ.get("KENKUI_DATABASE_IDLE") == "1"
+        )
         try:
             repo = PostgresHostedRepository(database)
             HostedDispatcher(

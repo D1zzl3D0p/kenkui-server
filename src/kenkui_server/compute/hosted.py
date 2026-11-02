@@ -56,7 +56,9 @@ class HostedJobRunner(LocalJobRunner):
         self.objects = objects
 
     def _database(self) -> PostgresDatabase:
-        return PostgresDatabase(self.database_url)
+        return PostgresDatabase(
+            self.database_url, idle=os.environ.get("KENKUI_DATABASE_IDLE") == "1"
+        )
 
     def _repositories(self, database: Any) -> PostgresHostedRepository:
         return PostgresHostedRepository(database)
