@@ -14,16 +14,16 @@ async function token(claims:Record<string,unknown>={},native=false,signingKey?:C
   return new SignJWT({sub:'neon-user',iss:native?issuer:origin,aud:native?config.resource:origin,exp:Math.floor(Date.now()/1000)+300,iat:Math.floor(Date.now()/1000),...(native?{client_id:'desktop'}:{role:'authenticated'}),...claims}).setProtectedHeader({alg:'EdDSA',kid:'one'}).sign(signingKey??keys.privateKey);
 }
 const req=(token:string)=>new Request('https://api.example.invalid/v1/auth/session',{headers:{Authorization:`Bearer ${token}`}});
-function setup(onboarding?:()=>Promise<'confirmed-new'|'recovery-required'>) {
+function setup() {
  const identities={resolveIdentity:vi.fn(async()=> '00000000-0000-0000-0000-000000000001' as string|null),createNewIdentity:vi.fn(async()=> 'new-owner')};
- return {identities,auth:createNeonAuth(config,identities,{keySet,...(onboarding?{onboarding}:{})})};
+ return {identities,auth:createNeonAuth(config,identities,{keySet})};
 }
 describe('Neon authentication boundary',()=>{
  it('loads JWKS only on demand, shares cache and never refreshes on an idle timer',async()=>{
    const fetcher=vi.fn(async()=>Response.json({keys:[{...await exportJWK(keys.publicKey),kid:'one'}]}));
    vi.stubGlobal('fetch',fetcher);vi.useFakeTimers();
    try {
-     const auth=createNeonAuth(config,{resolveIdentity:async()=> 'owner',createNewIdentity:async()=> 'unused'});
+     const auth=createNeonAuth(config,{resolveIdentity:async()=> 'owner'});
      expect(fetcher).not.toHaveBeenCalled();
      const jwt=await token();await Promise.all([auth.verify(req(jwt)),auth.verify(req(jwt))]);expect(fetcher).toHaveBeenCalledOnce();
      await vi.advanceTimersByTimeAsync(3_600_000);expect(fetcher).toHaveBeenCalledOnce();
@@ -57,11 +57,10 @@ describe('Neon authentication boundary',()=>{
    await expect(auth.verify(req(await token({email:'old@example.invalid',emailVerified:true,userId:'chosen','legacyAccountCheck':'confirmed-new'})))).rejects.toMatchObject({code:'recovery_required'});
    expect(identities.createNewIdentity).not.toHaveBeenCalled();
  });
- it('allows only a server-owned authoritative onboarding decision to create a new account',async()=>{
-   const decision=vi.fn(async()=> 'confirmed-new' as const); const {auth,identities}=setup(decision); identities.resolveIdentity.mockResolvedValue(null);
-   expect((await auth.verify(req(await token())))?.userId).toBe('new-owner');
-   expect(decision).toHaveBeenCalledWith({issuer,subject:'neon-user'});
-   expect(identities.createNewIdentity).toHaveBeenCalledWith({issuer,subject:'neon-user',legacyAccountCheck:'confirmed-new'});
+ it('keeps ordinary requests resolve-only after repeated misses',async()=>{
+   const {auth,identities}=setup(); identities.resolveIdentity.mockResolvedValue(null);
+   for(let i=0;i<2;i++) await expect(auth.verify(req(await token()))).rejects.toMatchObject({status:409});
+   expect(identities.createNewIdentity).not.toHaveBeenCalled();
  });
  it('bad credentials never reach a protected handler; browser mutations reject foreign Origin',async()=>{
    const {auth}=setup(); const getPool=vi.fn(()=>{throw new Error('DB forbidden');});

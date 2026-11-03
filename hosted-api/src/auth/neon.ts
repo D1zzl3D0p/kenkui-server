@@ -7,8 +7,6 @@ export interface NeonAuthConfig {
 }
 export interface ProviderIdentity { issuer:string; subject:string }
 export interface VerifiedToken extends ProviderIdentity { expiresAt:number; kind:'browser'|'native' }
-/** Must use authenticated source reconciliation, never HTTP assertions or email matching. */
-export type OnboardingDecision = (identity:ProviderIdentity)=>Promise<'confirmed-new'|'recovery-required'>;
 export interface NeonAuth extends AuthVerifier {
   authenticate(token:string):Promise<VerifiedToken|null>;
   authenticateRequest(request:Request):Promise<VerifiedToken|null>;
@@ -21,7 +19,7 @@ export function httpsUrl(value:string):URL {
 }
 
 /** One instance per API isolate. JWKS refresh is request-driven; no startup fetch/timer. */
-export function createNeonAuth(config:NeonAuthConfig, identities:Pick<IdentityStore,'resolveIdentity'|'createNewIdentity'>, options:{keySet?:JWTVerifyGetKey;onboarding?:OnboardingDecision}={}):NeonAuth {
+export function createNeonAuth(config:NeonAuthConfig, identities:Pick<IdentityStore,'resolveIdentity'>, options:{keySet?:JWTVerifyGetKey}={}):NeonAuth {
   const origin=httpsUrl(config.issuer).origin;
   if(config.issuer.endsWith('/')||config.issuer===origin||!config.nativeClientId) throw new Error('Invalid auth configuration');
   httpsUrl(config.resource); httpsUrl(config.jwksUrl);
@@ -61,11 +59,8 @@ export function createNeonAuth(config:NeonAuthConfig, identities:Pick<IdentitySt
   return {authenticate,authenticateRequest,async verify(request):Promise<Principal|null> {
     const verified=await authenticateRequest(request);if(!verified) return null;
     const identity={issuer:verified.issuer,subject:verified.subject};
-    let userId=await identities.resolveIdentity(identity.issuer,identity.subject);
-    if(!userId) {
-      if(await options.onboarding?.(identity)!=='confirmed-new') throw new ApiError(409,'recovery_required','Verify your existing account before continuing.');
-      userId=await identities.createNewIdentity({...identity,legacyAccountCheck:'confirmed-new'});
-    }
+    const userId=await identities.resolveIdentity(identity.issuer,identity.subject);
+    if(!userId) throw new ApiError(409,'recovery_required','Verify your existing account before continuing.');
     return {...identity,userId};
   }};
 }

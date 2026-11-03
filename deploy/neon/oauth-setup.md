@@ -77,13 +77,33 @@ Task 13 must authenticate/reconcile the export against the restored old database
 
 `POST /v1/auth/migration/link` requires the **new** Neon Bearer token plus a JSON body containing exactly `{legacyAccessToken}`. It rejects extra `userId`, `issuer`, `email`, `confirmed-new`, or verification-method assertions. Both tokens must verify before any proof is written. Legacy JWT verification pins RS256, configured issuer, the exact private-beta client, user subject, session ID, issued-at and expiry; impersonation/agent-like tokens and sealed values fail. Obtain the actual source issuer privately and set `KENKUI_LEGACY_TOKEN_ISSUER`; there is deliberately no guessed default. JWKS is the public WorkOS `/sso/jwks/<exact-client>` endpoint. [WorkOS session-token contract](https://workos.com/docs/reference/authkit/session-tokens).
 
-The server derives the old owner from the reconciled canonical legacy binding, mints a random five-minute proof bound to the verified new identity, and calls the transactional Task 4 linker. No HTTP caller supplies a proof ID or owner UUID. This proof allows separate Google and GitHub Neon subjects to bind to one old UUID only after independent old-owner verification. A proof-writing/consumption interruption leaves an unconsumed bounded proof, not an authorized new binding. Link conflicts return sanitized recovery errors.
+### Public recovery and admission
 
-**Legacy proof acquisition is still a release gate:** the existing desktop credential is sealed, so it cannot be pasted into this endpoint. Task 10/13 must supply an owner-authenticated legacy login/proof acquisition path or complete verified-email migration recovery. This implementation exposes only the verified-access-token consumer; it does not unpack sealed sessions or invent an unverified claim of ownership.
+Both legacy clients hold sealed sessions. Explicit recovery uses a new signed Neon Bearer on the three POSTs below. All JSON bodies are strict, limited to 2 KiB and protected by the mutation Origin check. Ordinary session and resource requests return 409 `recovery_required` on a mapping miss. Studio should offer recovery first and explain that deliberate creation with a different mailbox makes a separate account.
 
-`createNeonAuth` accepts an optional server-only `OnboardingDecision({issuer,subject})`. Only an authoritative `confirmed-new` decision permits `IdentityStore.createNewIdentity`. The production entrypoint deliberately binds no decision yet; unknown users receive **409 `recovery_required`**. Task 13 must bind a reconciled admission/onboarding policy before new signups are accepted. User confirmation, provider email equality and a lookup miss are never sufficient evidence.
+| Path under /v1/auth | JSON input | Successful result |
+|---|---|---|
+| /migration/challenge | `{"legacyEmail":"..."}` | 202 `{challengeId}`. Display “If this address is eligible, check your inbox.” |
+| /migration/verify | `{challengeId,code}` | 200 `{userId}`. After an interrupted response, check the normal session. |
+| /onboarding | `{}` | 200 `{userId}`. |
 
-No email challenge endpoint is enabled. `team@kenkui.fm` is only a candidate sender. Before adding recovery challenge delivery, verify ownership and authorized SMTP settings, use the server-known verified legacy address, expire/rate-limit/consume one-use challenges, bind the verified result to the new identity, then mint the same proof. This is migration-only verification, never general email-code login. Root owns SMTP changes. Reuse an authorized app-specific credential if valid; request a fresh app-specific credential only when necessary. Never use a primary Apple password or send unsolicited test email.
+The same-branch projection reads `neon_auth."user"` by verified subject UUID. Admission checks the verified Neon address against the active directory and deployed invitation policy. Returning owners can recover with a different or private current address. A disabled or missing current profile cannot recover. The JWT-only legacy link and migration-code verification share transaction guards. Proof creation, provider binding and proof consumption commit together, preserving the original internal UUID. No challenge supplies an auth session.
+
+The protected Modal preflight `POST /migration-email/ready {environment}` checks the existing environment-specific SMTP configuration before mailbox lookup. Delivery uses `POST /migration-email {environment,challengeId,code}`, with the recipient resolved and claimed by Python. One HTTP attempt has a 1,500 ms deadline. Real and decoy 202s each wait at least 2,000 ms. A timeout can follow successful delivery. Only explicit resend after cooldown requests another code. Confirm authorized sending and receipt with an owner in Task 13.
+
+### Offline directory release
+
+Use the database owner as a distinct release role. Apply migrations and the exact WorkOS provider backfill before activating. Both legacy API environments independently used the private-beta environment and client above. Keep each target's private source, restored database, policy and release credentials isolated. For the selected target set `KENKUI_ENV` and the corresponding `KENKUI_STAGING_RELEASE_DATABASE_URL` or `KENKUI_PRODUCTION_RELEASE_DATABASE_URL` in a private environment. Use this command first with `--dry-run`, then with `--activate` after reconciliation.
+
+```
+python scripts/neon/import-legacy-directory.py --environment staging --source-file PRIVATE_EXPORT --attestation-file PRIVATE_ATTESTATION --dry-run
+```
+
+The export has top-level `capturedAt` (offset ISO timestamp), `authority:{environmentId,clientId}`, `source` and `result.userlandUsers` with `listMetadata:{before:null,after:null}` and a complete `data` array. Each row has string `id`, safe `email`, nullable offset timestamp `emailVerifiedAt` and boolean `banned`. Extra profile fields are ignored. Existing identities.email values record lookup-only evidence. Never use a preference address for delivery.
+
+Privately attest `environment`, `sourceEnvironmentId`, `sourceClientId`, identical `capturedAt`, `complete:true`, independently verified integer `expectedSourceCount`, `sourceDigest` (lowercase SHA-256 hex of exact file bytes), `watermark`, `mode`, and `invitedEmails`. Verify the deployed `KENKUI_INVITED_EMAILS` with its owner. Explicit `[]` means confirmed open to verified users. A nonempty list restricts admission. Unknown policy blocks activation. A provisional run expires 24 hours after capture. For final mode additionally attest `admissionsFrozen:true`, `writesFrozen:true`, `finalWatermark` and `finalDigest` matching the frozen export. The final snapshot stays active until replaced. A pointer swap invalidates earlier challenges.
+
+Apply the scoped role grants in `migration-runtime-grants.sql` with the actual non-owner Function and worker roles. Neither role may inherit release ownership, PUBLIC schema CREATE, or default directory DML. Check effective privileges and deployed Function access to the managed profile table before enabling this path. A database owner used at runtime defeats role separation. The release CLI prints aggregate counts and digest only. Task 11 calls `prune_migration_recovery(connection, *, batch_size=100)` from existing daily maintenance, bounded to at most 1,000 rows per call.
 
 ## Mandatory live gates
 

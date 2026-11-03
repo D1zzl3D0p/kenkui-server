@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -19,9 +20,14 @@ from kenkui_server.storage.postgres_database import PostgresDatabase
 
 URL = "postgresql://postgres@127.0.0.1:55438/postgres"
 assert os.environ["KENKUI_TEST_DATABASE_URL"] == URL
-schema, operation = sys.argv[1:]
+schema, operation, *isolated = sys.argv[1:]
 assert schema.startswith("identity_test_") and schema.replace("_", "").isalnum()
-db = PostgresDatabase(URL, schema=schema)
+if isolated:
+    (name,) = isolated
+    assert re.fullmatch("migration_test_[a-f0-9]{32}", name)
+    db = PostgresDatabase(URL.removesuffix("postgres") + name, schema="public")
+else:
+    db = PostgresDatabase(URL, schema=schema)
 owner = "11111111-1111-4111-8111-111111111111"
 account = "33333333-3333-4333-8333-333333333333"
 try:

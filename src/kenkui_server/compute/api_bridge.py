@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import os
 import secrets
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -35,6 +36,14 @@ from kenkui_server.api.schemas import (
 )
 from kenkui_server.config import DEFAULT_CHARACTER_MODEL
 from kenkui_server.jobs.models import Asset
+from kenkui_server.notifications.mailer import (
+    Mailer,
+    Message,
+    SmtpMailer,
+    smtp_config_from_environment,
+)
+from kenkui_server.storage.migration_challenges import claim_address
+from kenkui_server.storage.migration_directory import mailbox
 from kenkui_server.storage.source_uploads import SourceUploadConflict
 
 Identifier = Annotated[
@@ -52,6 +61,21 @@ class WireModel(BaseModel):
 
 class OperationRequest(WireModel):
     environment: Literal["staging", "production"]
+
+
+class MigrationEmailRequest(OperationRequest):
+    challenge_id: Identifier = Field(alias="challengeId")
+    code: Annotated[str, StringConstraints(pattern=r"^[0-9A-HJKMNP-TV-Z]{16}$")]
+
+
+def configured_migration_mailer() -> Mailer:
+    config = smtp_config_from_environment(os.environ)
+    if config is None or not 0 < config.port <= 65535:
+        raise ValueError("sender unavailable")
+    mailbox(config.sender)
+    if any(ord(c) < 32 for c in config.sender_name + config.host):
+        raise ValueError("sender unavailable")
+    return SmtpMailer(config)
 
 
 class SourceRequest(OperationRequest):
@@ -119,6 +143,7 @@ class BridgeServices:
     voices: tuple[kk.Voice, ...]
     runner: Any
     close: Callable[[], None]
+    database: Any = None
 
 
 def _source(services: Any, source_id: str, owner_id: str) -> Asset:
@@ -201,6 +226,7 @@ def create_bridge_app(
     max_speech_characters: int = 10000000,
     request_timeout_seconds: float = 120,
     max_operations: int = 2,
+    migration_mailer: Callable[[], Mailer] = configured_migration_mailer,
     model_allowlist: tuple[str, ...] = (DEFAULT_CHARACTER_MODEL,),
 ) -> FastAPI:
     """Modal proxy auth is mandatory too; this secret protects the inner app."""
@@ -289,9 +315,10 @@ def create_bridge_app(
         if not secrets.compare_digest(supplied.encode(), secret.encode()):
             return JSONResponse({"detail": "unauthenticated"}, status_code=401)
         # Authenticate before parsing/DB access; bound actual streamed bytes.
+        limit = 2048 if request.url.path.startswith("/migration-email") else MAX_REQUEST_BYTES
         body = bytearray()
         async for chunk in request.stream():
-            if len(body) + len(chunk) > MAX_REQUEST_BYTES:
+            if len(body) + len(chunk) > limit:
                 return JSONResponse({"detail": "request too large"}, status_code=413)
             body.extend(chunk)
         request._body = bytes(body)
@@ -306,6 +333,54 @@ def create_bridge_app(
             services = services_factory()
             app.state.services = services
         return services
+
+    @app.post("/migration-email/ready")
+    async def migration_ready(request: Request) -> dict[str, bool]:
+        try:
+            payload = OperationRequest.model_validate_json(await request.body())
+        except ValueError:
+            raise HTTPException(422, "invalid request") from None
+        if payload.environment != environment:
+            raise HTTPException(403, "environment mismatch")
+        try:
+            migration_mailer()
+        except Exception:
+            raise HTTPException(503, "sender unavailable") from None
+        return {"ready": True}
+
+    @app.post("/migration-email")
+    async def migration_email(request: Request) -> dict[str, bool]:
+        try:
+            payload = MigrationEmailRequest.model_validate_json(await request.body())
+        except ValueError:
+            raise HTTPException(422, "invalid request") from None
+        if payload.environment != environment:
+            raise HTTPException(403, "environment mismatch")
+        try:
+            mailer = migration_mailer()
+            database = dependencies(payload).database
+        except Exception:
+            raise HTTPException(503, "sender unavailable") from None
+
+        def send() -> bool:
+            try:
+                address = claim_address(database, environment, payload.challenge_id, payload.code)
+                if address is None:
+                    return False
+                mailer.send(
+                    Message(
+                        address,
+                        "Recover your Kenkui account",
+                        f"Your Kenkui migration code is {payload.code}. It expires in 10 minutes.",
+                    )
+                )
+                return True
+            except Exception:
+                raise HTTPException(503, "delivery unavailable") from None
+
+        if not await bounded(send):
+            raise HTTPException(409, "challenge unavailable")
+        return {"accepted": True}
 
     @app.post("/inspect", response_model=BookResponse)
     async def inspect(payload: SourceRequest, request: Request) -> BookResponse:
@@ -406,6 +481,7 @@ def bridge_from_environment() -> FastAPI:
                     max_jobs=int(os.environ.get("KENKUI_MAX_JOBS", "2")),
                 ),
                 database.close,
+                database,
             )
         except BaseException:
             database.close()

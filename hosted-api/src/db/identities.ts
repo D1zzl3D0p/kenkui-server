@@ -27,6 +27,21 @@ export async function findIdentity(client: Pool | PoolClient, issuer: string, su
   return result.rows[0]?.identity_id ?? null;
 }
 
+export async function lockIdentity(client:PoolClient,issuer:string,subject:string):Promise<void> {
+  await client.query('SELECT pg_advisory_xact_lock(915002,hashtext($1))',[JSON.stringify([issuer,subject])]);
+}
+
+export async function createIdentity(client:PoolClient,issuer:string,subject:string,email:string|null):Promise<string> {
+  validateProviderIdentity(issuer,subject);
+  await lockIdentity(client,issuer,subject);
+  const existing=await findIdentity(client,issuer,subject);
+  if(existing) return existing;
+  const owner=randomUUID();
+  await client.query('INSERT INTO identities (id,email) VALUES ($1,$2)',[owner,email]);
+  await bindIdentity(client,issuer,subject,owner);
+  return owner;
+}
+
 /** Insert-only: a provider identity can never be reassigned to another owner. */
 async function bindIdentity(client: PoolClient, issuer: string, subject: string, owner: string): Promise<void> {
   await client.query(`INSERT INTO provider_identities (issuer,subject,identity_id) VALUES ($1,$2,$3)
@@ -70,23 +85,7 @@ export class IdentityStore {
     const client = await this.getPool().connect();
     try {
       await client.query('BEGIN');
-      const existing = await findIdentity(client, input.issuer, input.subject);
-      if (existing) {
-        await client.query('COMMIT');
-        return existing;
-      }
-      const owner = randomUUID();
-      await client.query('INSERT INTO identities (id) VALUES ($1)', [owner]);
-      const inserted = await client.query(`INSERT INTO provider_identities (issuer,subject,identity_id)
-        VALUES ($1,$2,$3) ON CONFLICT (issuer,subject) DO NOTHING RETURNING identity_id`,
-      [input.issuer, input.subject, owner]);
-      if (!inserted.rowCount) {
-        // A concurrent call won. Discard this entire identity, not just its binding.
-        await client.query('ROLLBACK');
-        const winner = await findIdentity(client, input.issuer, input.subject);
-        if (!winner) throw new IdentityError('identity_conflict');
-        return winner;
-      }
+      const owner=await createIdentity(client,input.issuer,input.subject,null);
       await client.query('COMMIT');
       return owner;
     } catch (error) {

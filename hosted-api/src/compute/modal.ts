@@ -33,10 +33,10 @@ export class ModalBridge {
     this.timeout=config.timeoutMs??120_000;
     if(!Number.isSafeInteger(this.timeout)||this.timeout<=0||this.timeout>120_000) throw new Error('Invalid Modal deadline');
   }
-  private async call(path:string,payload:Record<string,unknown>,limit=12_000_000):Promise<unknown> {
+  private async call(path:string,payload:Record<string,unknown>,limit=12_000_000,timeout=this.timeout):Promise<unknown> {
     const controller=new AbortController();
     let timer:ReturnType<typeof setTimeout>|undefined;
-    const deadline=new Promise<never>((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(unavailable());},this.timeout);});
+    const deadline=new Promise<never>((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(unavailable());},timeout);});
     const operation=async()=>{
       let response:Response;
       try {
@@ -78,6 +78,16 @@ export class ModalBridge {
       finally{reader.releaseLock();}
     };
     try{return await Promise.race([operation(),deadline]);}finally{if(timer)clearTimeout(timer);}
+  }
+  async ready():Promise<void> {
+    const result=await this.call('/migration-email/ready',{},1024,Math.min(1500,this.timeout));
+    if(!record(result)||result.ready!==true||Object.keys(result).length!==1) throw invalid();
+  }
+  async deliver(challengeId:string,code:string):Promise<void> {
+    requireUuid(challengeId);
+    if(!/^[0-9A-HJKMNP-TV-Z]{16}$/.test(code)) throw invalid();
+    const result=await this.call('/migration-email',{challengeId,code},1024,Math.min(1500,this.timeout));
+    if(!record(result)||result.accepted!==true||Object.keys(result).length!==1) throw invalid();
   }
   async inspect(ownerId:string,sourceId:string):Promise<BookResponse> {
     requireUuid(ownerId);requireUuid(sourceId);

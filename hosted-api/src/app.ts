@@ -32,6 +32,7 @@ export function createApi(deps: ApiDeps): Hono<ApiEnv> {
     return c.get('requestId');
   };
   app.onError((error,c) => {
+    if(c.req.path.startsWith('/v1/auth/')) c.header('Cache-Control','no-store');
     const known = error instanceof ApiError;
     const safe = known ? error : new ApiError(500,'internal_server_error','Internal server error');
     const requestId = id(c);

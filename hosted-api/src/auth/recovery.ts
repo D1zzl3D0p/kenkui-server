@@ -1,9 +1,8 @@
-import { randomUUID } from 'node:crypto';
 import { createRemoteJWKSet,jwtVerify,type JWTVerifyGetKey } from 'jose';
 import type { Pool } from 'pg';
 import { ApiError } from '../types.js';
-import { IdentityError,type IdentityStore } from '../db/identities.js';
-import type { IdentityLinker } from './linking.js';
+import { blocked,guarded,type Environment } from '../db/migration.js';
+import { mintAndLink } from './migration-challenge.js';
 import { httpsUrl,type NeonAuth } from './neon.js';
 
 export const LEGACY_SOURCE={environmentId:'environment_01M0Y347Z9N6FYNTGVY3725X1Y',clientId:'client_01M0Y37EQMGD270AW5W7NZC1E0'} as const;
@@ -23,25 +22,21 @@ export function createLegacyVerifier(issuer:string,keySet:JWTVerifyGetKey=create
 
 /** Only this authenticated boundary mints production proofs. No email/UUID body input. */
 export class LegacyRecovery {
-  constructor(private auth:NeonAuth,private verifyLegacy:(token:string)=>Promise<string|null>,private identities:Pick<IdentityStore,'resolveIdentity'>,private linker:Pick<IdentityLinker,'linkIdentity'>,private getPool:()=>Pool) {}
+  constructor(private auth:NeonAuth,private verifyLegacy:(token:string)=>Promise<string|null>,
+    private pool:()=>Pool,private environment:Environment,private issuer:string) {}
   async link(request:Request,legacyAccessToken:string):Promise<{userId:string}> {
-    const current=await this.auth.authenticateRequest(request);
-    if(!current) throw new ApiError(401,'unauthenticated','Sign in to continue.');
+    const who=await this.auth.authenticateRequest(request);
+    if(!who) throw new ApiError(401,'unauthenticated','Sign in to continue.');
     const oldSubject=await this.verifyLegacy(legacyAccessToken);
-    if(!oldSubject) throw new ApiError(409,'recovery_required','Verify your existing account before continuing.');
-    const internalUserId=await this.identities.resolveIdentity(legacyAuthority,oldSubject);
-    if(!internalUserId) throw new ApiError(409,'recovery_required','Your existing account needs migration verification.');
-    const proofId=randomUUID();
-    await this.getPool().query(`INSERT INTO identity_link_proofs
-      (id,identity_id,issuer,subject,verification_method,expires_at)
-      VALUES ($1,$2,$3,$4,'legacy_session',clock_timestamp()+interval '5 minutes')`,
-      [proofId,internalUserId,current.issuer,current.subject]);
-    try {
-      const userId=await this.linker.linkIdentity({proofId,internalUserId,issuer:current.issuer,subject:current.subject});
-      return {userId};
-    } catch(error) {
-      if(error instanceof IdentityError) throw new ApiError(409,'recovery_required','Your existing account needs migration verification.');
-      throw error;
-    }
+    if(!oldSubject) throw blocked();
+    return guarded(this.pool,this.environment,this.issuer,who,async(client,run)=>{
+      if(run.issuer!==legacyAuthority) throw blocked();
+      const result=await client.query<{owner_id:string}>(`SELECT r.owner_id FROM migration_directory_rows r
+        JOIN provider_identities p ON p.issuer=$3 AND p.subject=r.subject AND p.identity_id=r.owner_id
+        WHERE r.run_id=$1 AND r.subject=$2 AND NOT r.banned`,[run.id,oldSubject,legacyAuthority]);
+      const owner=result.rows[0]?.owner_id;
+      if(!owner) throw blocked();
+      return {userId:await mintAndLink(client,who,owner,'legacy_session')};
+    });
   }
 }
