@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: 4017e16ae8c4ce2d104f1534fdab7dd79830d740
+          ref: 63e92dbab743497ee6f448ceb3ee64bf2484281f
           path: kenkui-server
       - uses: actions/checkout@v4
         with:
