@@ -1,0 +1,5700 @@
+{
+  "artifacts": {
+    "migrations": {
+      "0000_core.sql": "fc24a4f77a380c27f33314694b1248fe02a4b17c8bd0fd0d05e66d47d16fb485",
+      "0001_hosted.sql": "c285e4b576ef08ac82a43a41b69ca35a531e78ae9a72dbc949fa5b74f8c93425",
+      "0002_beta.sql": "128eac1369b54fd400d8918d008d450e8da698ad8eda9fa1839fe96d7ec3ec6d",
+      "0002_notifications.sql": "225c61d6627a4b6277f7cd282030fb9c88a011fa346b4795469dec54810594a5",
+      "0003_retention.sql": "cbbeb5427c68dbd756c3668b73ca99d8566659fed7896dc3efc47171ebced600",
+      "0004_credit_lots.sql": "04d74015cede407d217c0f5572a72ce147b11a76652fea6fc04972308f7939c6",
+      "0005_checkpoints.sql": "9c88449d2af5759f6cba7b3476aa07893fe41e09c56fe4c9cd243557b8841759"
+    },
+    "openapi/v1.json": "b0b597a0538fe5301d22c599a303d7d51c58ef54f902504234921963bcf378f9",
+    "studio/package-lock.json": "47e86f5be31247d308732ab92cb0aff3a34b90f0f5fa9bf79ed4514668439be3",
+    "uv.lock": "0465b0d2fb1df33c627e8508151499756ef0e1d2917812f784635933efddb2fe"
+  },
+  "authInventory": {
+    "evidenceSource": "read-only live native-config/authorization and WorkOS connector inventory supplied by root; no individual profiles exported",
+    "existingMethods": [
+      "password",
+      "Google",
+      "GitHub",
+      "Apple",
+      "Microsoft",
+      "SSO"
+    ],
+    "nativeRedirectUri": "http://127.0.0.1:43827/callback",
+    "ownershipRule": "Keep internal IDs. Link through verified provider-qualified proof; never merge by unverified email or GitHub username.",
+    "targetMethods": [
+      "Google",
+      "GitHub"
+    ],
+    "unusedProductionDefaultUserCount": 0,
+    "userCount": 4,
+    "workosAppId": "app_01M0Y37EQNP7Y35R8NA5DE5J12",
+    "workosClientId": "client_01M0Y37EQMGD270AW5W7NZC1E0",
+    "workosEnvironment": "sandbox/Staging (private beta)",
+    "workosEnvironmentId": "environment_01M0Y347Z9N6FYNTGVY3725X1Y"
+  },
+  "baselineId": "python-hosted-2026-11-02",
+  "contract": {
+    "clock": "2026-11-02T18:00:00Z",
+    "database": {
+      "paymentCreditsAfterReplay": 500
+    },
+    "hostedSchema": {
+      "components": {
+        "schemas": {
+          "AssetResponse": {
+            "properties": {
+              "format": {
+                "title": "Format",
+                "type": "string"
+              },
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "sha256": {
+                "title": "Sha256",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "format",
+              "sha256"
+            ],
+            "title": "AssetResponse",
+            "type": "object"
+          },
+          "AuthCapabilities": {
+            "description": "Authentication modes supported by this server.",
+            "properties": {
+              "mode": {
+                "default": "none",
+                "enum": [
+                  "none",
+                  "session",
+                  "bearer"
+                ],
+                "title": "Mode",
+                "type": "string"
+              }
+            },
+            "title": "AuthCapabilities",
+            "type": "object"
+          },
+          "BillingCapabilities": {
+            "description": "Billing modes supported by this server.",
+            "properties": {
+              "mode": {
+                "default": "unmetered",
+                "enum": [
+                  "unmetered",
+                  "credits"
+                ],
+                "title": "Mode",
+                "type": "string"
+              }
+            },
+            "title": "BillingCapabilities",
+            "type": "object"
+          },
+          "BillingResponse": {
+            "properties": {
+              "availableCredits": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Availablecredits"
+              },
+              "checkoutEnabled": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Checkoutenabled"
+              },
+              "creditHistoryAvailable": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Credithistoryavailable"
+              },
+              "mode": {
+                "title": "Mode",
+                "type": "string"
+              },
+              "packs": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "$ref": "#/components/schemas/CreditPackResponse"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Packs"
+              }
+            },
+            "required": [
+              "mode"
+            ],
+            "title": "BillingResponse",
+            "type": "object"
+          },
+          "BookResponse": {
+            "properties": {
+              "author": {
+                "title": "Author",
+                "type": "string"
+              },
+              "chapters": {
+                "items": {
+                  "$ref": "#/components/schemas/ChapterResponse"
+                },
+                "title": "Chapters",
+                "type": "array"
+              },
+              "sourceId": {
+                "title": "Sourceid",
+                "type": "string"
+              },
+              "title": {
+                "title": "Title",
+                "type": "string"
+              }
+            },
+            "required": [
+              "sourceId",
+              "title",
+              "author",
+              "chapters"
+            ],
+            "title": "BookResponse",
+            "type": "object"
+          },
+          "Capabilities": {
+            "description": "Public, versioned declaration of local server features.",
+            "properties": {
+              "apiVersion": {
+                "const": "1",
+                "default": "1",
+                "title": "Apiversion",
+                "type": "string"
+              },
+              "auth": {
+                "$ref": "#/components/schemas/AuthCapabilities",
+                "default": {
+                  "mode": "none"
+                }
+              },
+              "billing": {
+                "$ref": "#/components/schemas/BillingCapabilities",
+                "default": {
+                  "mode": "unmetered"
+                }
+              },
+              "casting": {
+                "$ref": "#/components/schemas/CastingCapabilities",
+                "default": {
+                  "models": [],
+                  "modes": [
+                    "single"
+                  ]
+                }
+              },
+              "covers": {
+                "$ref": "#/components/schemas/CoverCapabilities",
+                "default": {
+                  "maxUploadBytes": 8388608,
+                  "read": true,
+                  "upload": true
+                }
+              },
+              "maxUploadBytes": {
+                "default": 52428800,
+                "title": "Maxuploadbytes",
+                "type": "integer"
+              },
+              "narration": {
+                "$ref": "#/components/schemas/NarrationCapabilities",
+                "default": {
+                  "charactersPerSecond": 13,
+                  "longChapterHours": 6.0
+                }
+              },
+              "notifications": {
+                "$ref": "#/components/schemas/NotificationCapabilities",
+                "default": {
+                  "email": false
+                }
+              },
+              "outputFormats": {
+                "default": [
+                  "m4b"
+                ],
+                "items": {
+                  "const": "m4b",
+                  "type": "string"
+                },
+                "title": "Outputformats",
+                "type": "array"
+              },
+              "pauseLengths": {
+                "default": true,
+                "title": "Pauselengths",
+                "type": "boolean"
+              },
+              "scenePauses": {
+                "default": true,
+                "title": "Scenepauses",
+                "type": "boolean"
+              },
+              "sourceFormats": {
+                "default": [
+                  "epub"
+                ],
+                "items": {
+                  "const": "epub",
+                  "type": "string"
+                },
+                "title": "Sourceformats",
+                "type": "array"
+              },
+              "speechSettings": {
+                "default": true,
+                "title": "Speechsettings",
+                "type": "boolean"
+              }
+            },
+            "title": "Capabilities",
+            "type": "object"
+          },
+          "CastingCapabilities": {
+            "description": "Casting modes supported by this server.\n\nA list rather than one value: character casting is advertised only where a\ndeployment has configured an LLM allowlist, so a browser can tell the two\napart without trying and failing.",
+            "properties": {
+              "models": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Models",
+                "type": "array"
+              },
+              "modes": {
+                "default": [
+                  "single"
+                ],
+                "items": {
+                  "enum": [
+                    "single",
+                    "characters"
+                  ],
+                  "type": "string"
+                },
+                "title": "Modes",
+                "type": "array"
+              }
+            },
+            "title": "CastingCapabilities",
+            "type": "object"
+          },
+          "CastingRequest": {
+            "description": "Either a single narrator, or a character cast.\n\nvoiceId alone means single casting. Naming a model means character\ncasting, since attribution cannot run without one.",
+            "properties": {
+              "cast": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "title": "Cast",
+                "type": "object"
+              },
+              "method": {
+                "default": "gendered",
+                "title": "Method",
+                "type": "string"
+              },
+              "modelId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Modelid"
+              },
+              "narratorVoiceId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Narratorvoiceid"
+              },
+              "unknownVoiceId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Unknownvoiceid"
+              },
+              "voiceId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Voiceid"
+              }
+            },
+            "title": "CastingRequest",
+            "type": "object"
+          },
+          "ChapterResponse": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "speechCharacters": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Speechcharacters"
+              },
+              "title": {
+                "title": "Title",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title"
+            ],
+            "title": "ChapterResponse",
+            "type": "object"
+          },
+          "CheckoutRequest": {
+            "additionalProperties": false,
+            "description": "Only a pack size comes from the browser; account and price are server-owned.",
+            "properties": {
+              "credits": {
+                "title": "Credits",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "credits"
+            ],
+            "title": "CheckoutRequest",
+            "type": "object"
+          },
+          "CoverCapabilities": {
+            "properties": {
+              "maxUploadBytes": {
+                "default": 8388608,
+                "title": "Maxuploadbytes",
+                "type": "integer"
+              },
+              "read": {
+                "default": true,
+                "title": "Read",
+                "type": "boolean"
+              },
+              "upload": {
+                "default": true,
+                "title": "Upload",
+                "type": "boolean"
+              }
+            },
+            "title": "CoverCapabilities",
+            "type": "object"
+          },
+          "CreditHistoryResponse": {
+            "properties": {
+              "items": {
+                "items": {
+                  "$ref": "#/components/schemas/CreditLotResponse"
+                },
+                "title": "Items",
+                "type": "array"
+              }
+            },
+            "required": [
+              "items"
+            ],
+            "title": "CreditHistoryResponse",
+            "type": "object"
+          },
+          "CreditLotResponse": {
+            "properties": {
+              "available": {
+                "title": "Available",
+                "type": "integer"
+              },
+              "consumed": {
+                "title": "Consumed",
+                "type": "integer"
+              },
+              "credited": {
+                "title": "Credited",
+                "type": "integer"
+              },
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "recordedAt": {
+                "format": "date-time",
+                "title": "Recordedat",
+                "type": "string"
+              },
+              "reference": {
+                "title": "Reference",
+                "type": "string"
+              },
+              "reserved": {
+                "title": "Reserved",
+                "type": "integer"
+              },
+              "source": {
+                "enum": [
+                  "purchase",
+                  "grant",
+                  "legacy"
+                ],
+                "title": "Source",
+                "type": "string"
+              },
+              "usageStatus": {
+                "enum": [
+                  "unused",
+                  "reserved",
+                  "used",
+                  "manual_review",
+                  "not_purchased"
+                ],
+                "title": "Usagestatus",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "source",
+              "reference",
+              "credited",
+              "available",
+              "reserved",
+              "consumed",
+              "recordedAt",
+              "usageStatus"
+            ],
+            "title": "CreditLotResponse",
+            "type": "object"
+          },
+          "CreditPackResponse": {
+            "properties": {
+              "credits": {
+                "title": "Credits",
+                "type": "integer"
+              },
+              "priceUsdCents": {
+                "title": "Priceusdcents",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "credits",
+              "priceUsdCents"
+            ],
+            "title": "CreditPackResponse",
+            "type": "object"
+          },
+          "ErrorDetail": {
+            "description": "Stable client-facing description of a failed request.",
+            "properties": {
+              "code": {
+                "title": "Code",
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "title": "Details",
+                "type": "object"
+              },
+              "message": {
+                "title": "Message",
+                "type": "string"
+              },
+              "requestId": {
+                "title": "Requestid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "requestId"
+            ],
+            "title": "ErrorDetail",
+            "type": "object"
+          },
+          "ErrorResponse": {
+            "description": "The sole error envelope exposed by the versioned API.",
+            "properties": {
+              "error": {
+                "$ref": "#/components/schemas/ErrorDetail"
+              }
+            },
+            "required": [
+              "error"
+            ],
+            "title": "ErrorResponse",
+            "type": "object"
+          },
+          "EventResponse": {
+            "properties": {
+              "progress": {
+                "$ref": "#/components/schemas/ProgressResponse"
+              },
+              "sequence": {
+                "title": "Sequence",
+                "type": "integer"
+              },
+              "type": {
+                "title": "Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "sequence",
+              "type",
+              "progress"
+            ],
+            "title": "EventResponse",
+            "type": "object"
+          },
+          "HTTPValidationError": {
+            "properties": {
+              "detail": {
+                "items": {
+                  "$ref": "#/components/schemas/ValidationError"
+                },
+                "title": "Detail",
+                "type": "array"
+              }
+            },
+            "title": "HTTPValidationError",
+            "type": "object"
+          },
+          "JobListResponse": {
+            "properties": {
+              "items": {
+                "items": {
+                  "$ref": "#/components/schemas/JobResponse"
+                },
+                "title": "Items",
+                "type": "array"
+              }
+            },
+            "required": [
+              "items"
+            ],
+            "title": "JobListResponse",
+            "type": "object"
+          },
+          "JobRequest": {
+            "properties": {
+              "casting": {
+                "$ref": "#/components/schemas/CastingRequest"
+              },
+              "chapters": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Chapters",
+                "type": "array"
+              },
+              "output": {
+                "$ref": "#/components/schemas/OutputRequest",
+                "default": {
+                  "format": "m4b",
+                  "sourceCover": true
+                }
+              },
+              "sourceId": {
+                "title": "Sourceid",
+                "type": "string"
+              },
+              "tts": {
+                "$ref": "#/components/schemas/TtsRequest",
+                "default": {
+                  "chapterPauses": false,
+                  "headingAfterPauseMs": 0,
+                  "headingBeforePauseMs": 0,
+                  "linePauseMs": 0,
+                  "normalizeText": true,
+                  "paragraphPauseMs": 0,
+                  "prepareNumbers": false,
+                  "pronunciationCorrections": false,
+                  "scenePauseMs": 0,
+                  "stutterHandling": false
+                }
+              }
+            },
+            "required": [
+              "sourceId",
+              "chapters",
+              "casting"
+            ],
+            "title": "JobRequest",
+            "type": "object"
+          },
+          "JobResponse": {
+            "properties": {
+              "author": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Author"
+              },
+              "castingMode": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Castingmode"
+              },
+              "failure": {
+                "anyOf": [
+                  {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Failure"
+              },
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "narratorVoiceId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Narratorvoiceid"
+              },
+              "progress": {
+                "$ref": "#/components/schemas/ProgressResponse"
+              },
+              "sourceCover": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Sourcecover"
+              },
+              "sourceId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Sourceid"
+              },
+              "status": {
+                "enum": [
+                  "queued",
+                  "running",
+                  "cancel_requested",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ],
+                "title": "Status",
+                "type": "string"
+              },
+              "title": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Title"
+              }
+            },
+            "required": [
+              "id",
+              "status",
+              "progress"
+            ],
+            "title": "JobResponse",
+            "type": "object"
+          },
+          "NarrationCapabilities": {
+            "description": "How this server's renderer turns text into time.\n\nPublished so a browser can show what a chapter will cost before anyone\nsubmits it, using the same numbers the renderer reports against rather than\na copy that can drift from them.",
+            "properties": {
+              "charactersPerSecond": {
+                "default": 13,
+                "title": "Characterspersecond",
+                "type": "integer"
+              },
+              "longChapterHours": {
+                "default": 6.0,
+                "title": "Longchapterhours",
+                "type": "number"
+              }
+            },
+            "title": "NarrationCapabilities",
+            "type": "object"
+          },
+          "NotificationCapabilities": {
+            "description": "How this server can tell a reader their book finished.\n\nAdvertised so a client offers an email preference only where mail is\nactually configured, rather than a switch that silently does nothing.",
+            "properties": {
+              "email": {
+                "default": false,
+                "title": "Email",
+                "type": "boolean"
+              }
+            },
+            "title": "NotificationCapabilities",
+            "type": "object"
+          },
+          "NotificationPreferenceRequest": {
+            "properties": {
+              "emailOnCompletion": {
+                "title": "Emailoncompletion",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "emailOnCompletion"
+            ],
+            "title": "NotificationPreferenceRequest",
+            "type": "object"
+          },
+          "NotificationPreferenceResponse": {
+            "description": "What completion mail would do for the signed-in reader right now.",
+            "properties": {
+              "email": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Email"
+              },
+              "emailOnCompletion": {
+                "default": false,
+                "title": "Emailoncompletion",
+                "type": "boolean"
+              }
+            },
+            "title": "NotificationPreferenceResponse",
+            "type": "object"
+          },
+          "OutputRequest": {
+            "properties": {
+              "author": {
+                "anyOf": [
+                  {
+                    "maxLength": 500,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Author"
+              },
+              "format": {
+                "default": "m4b",
+                "title": "Format",
+                "type": "string"
+              },
+              "sourceCover": {
+                "default": true,
+                "title": "Sourcecover",
+                "type": "boolean"
+              },
+              "title": {
+                "anyOf": [
+                  {
+                    "maxLength": 500,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Title"
+              }
+            },
+            "title": "OutputRequest",
+            "type": "object"
+          },
+          "PreflightResponse": {
+            "properties": {
+              "availableCredits": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Availablecredits"
+              },
+              "estimatedCredits": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Estimatedcredits"
+              },
+              "normalizedCharacters": {
+                "title": "Normalizedcharacters",
+                "type": "integer"
+              },
+              "sourceId": {
+                "title": "Sourceid",
+                "type": "string"
+              },
+              "valid": {
+                "default": true,
+                "title": "Valid",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "sourceId",
+              "normalizedCharacters"
+            ],
+            "title": "PreflightResponse",
+            "type": "object"
+          },
+          "ProgressResponse": {
+            "properties": {
+              "completed": {
+                "title": "Completed",
+                "type": "integer"
+              },
+              "stage": {
+                "title": "Stage",
+                "type": "string"
+              },
+              "total": {
+                "title": "Total",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "stage",
+              "completed",
+              "total"
+            ],
+            "title": "ProgressResponse",
+            "type": "object"
+          },
+          "TtsRequest": {
+            "properties": {
+              "chapterPauseMs": {
+                "anyOf": [
+                  {
+                    "maximum": 60000.0,
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Chapterpausems"
+              },
+              "chapterPauses": {
+                "default": false,
+                "deprecated": true,
+                "title": "Chapterpauses",
+                "type": "boolean"
+              },
+              "headingAfterPauseMs": {
+                "default": 0,
+                "maximum": 60000.0,
+                "minimum": 0.0,
+                "title": "Headingafterpausems",
+                "type": "integer"
+              },
+              "headingBeforePauseMs": {
+                "default": 0,
+                "maximum": 60000.0,
+                "minimum": 0.0,
+                "title": "Headingbeforepausems",
+                "type": "integer"
+              },
+              "linePauseMs": {
+                "default": 0,
+                "maximum": 60000.0,
+                "minimum": 0.0,
+                "title": "Linepausems",
+                "type": "integer"
+              },
+              "normalizeText": {
+                "default": true,
+                "deprecated": true,
+                "description": "Legacy field. Kenkui always normalizes source text.",
+                "title": "Normalizetext",
+                "type": "boolean"
+              },
+              "paragraphPauseMs": {
+                "default": 0,
+                "maximum": 60000.0,
+                "minimum": 0.0,
+                "title": "Paragraphpausems",
+                "type": "integer"
+              },
+              "prepareNumbers": {
+                "default": false,
+                "title": "Preparenumbers",
+                "type": "boolean"
+              },
+              "pronunciationCorrections": {
+                "default": false,
+                "title": "Pronunciationcorrections",
+                "type": "boolean"
+              },
+              "scenePauseMs": {
+                "default": 0,
+                "maximum": 60000.0,
+                "minimum": 0.0,
+                "title": "Scenepausems",
+                "type": "integer"
+              },
+              "stutterHandling": {
+                "default": false,
+                "title": "Stutterhandling",
+                "type": "boolean"
+              }
+            },
+            "title": "TtsRequest",
+            "type": "object"
+          },
+          "ValidationError": {
+            "properties": {
+              "ctx": {
+                "title": "Context",
+                "type": "object"
+              },
+              "input": {
+                "title": "Input"
+              },
+              "loc": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "integer"
+                    }
+                  ]
+                },
+                "title": "Location",
+                "type": "array"
+              },
+              "msg": {
+                "title": "Message",
+                "type": "string"
+              },
+              "type": {
+                "title": "Error Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "loc",
+              "msg",
+              "type"
+            ],
+            "title": "ValidationError",
+            "type": "object"
+          },
+          "VoiceListResponse": {
+            "properties": {
+              "items": {
+                "items": {
+                  "$ref": "#/components/schemas/VoiceResponse"
+                },
+                "title": "Items",
+                "type": "array"
+              }
+            },
+            "required": [
+              "items"
+            ],
+            "title": "VoiceListResponse",
+            "type": "object"
+          },
+          "VoiceResponse": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "language": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Language"
+              },
+              "licenseId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Licenseid"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "voiceRights": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Voicerights"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "language"
+            ],
+            "title": "VoiceResponse",
+            "type": "object"
+          }
+        }
+      },
+      "info": {
+        "title": "Kenkui Server API",
+        "version": "1.0.0"
+      },
+      "openapi": "3.1.0",
+      "paths": {
+        "/v1/assets": {
+          "post": {
+            "description": "Accept one EPUB body and retain it behind a server-assigned private path.",
+            "operationId": "upload_asset_v1_assets_post",
+            "responses": {
+              "201": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/AssetResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "Upload Asset",
+            "tags": [
+              "assets"
+            ]
+          }
+        },
+        "/v1/assets/{asset_id}/book": {
+          "get": {
+            "description": "Inspect an owned local EPUB through Kenkui's public Pipeline API.",
+            "operationId": "inspect_book_v1_assets__asset_id__book_get",
+            "parameters": [
+              {
+                "in": "path",
+                "name": "asset_id",
+                "required": true,
+                "schema": {
+                  "title": "Asset Id",
+                  "type": "string"
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/BookResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Inspect Book",
+            "tags": [
+              "assets"
+            ]
+          }
+        },
+        "/v1/assets/{asset_id}/cover": {
+          "get": {
+            "operationId": "get_cover_v1_assets__asset_id__cover_get",
+            "parameters": [
+              {
+                "in": "path",
+                "name": "asset_id",
+                "required": true,
+                "schema": {
+                  "title": "Asset Id",
+                  "type": "string"
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {}
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Get Cover",
+            "tags": [
+              "assets"
+            ]
+          },
+          "post": {
+            "description": "Create a new owned EPUB; never mutate a source used by another draft/job.",
+            "operationId": "upload_cover_v1_assets__asset_id__cover_post",
+            "parameters": [
+              {
+                "in": "path",
+                "name": "asset_id",
+                "required": true,
+                "schema": {
+                  "title": "Asset Id",
+                  "type": "string"
+                }
+              }
+            ],
+            "responses": {
+              "201": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/AssetResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Upload Cover",
+            "tags": [
+              "assets"
+            ]
+          }
+        },
+        "/v1/auth/session": {
+          "get": {
+            "operationId": "current_bearer_identity_v1_auth_session_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "title": "Response Current Bearer Identity V1 Auth Session Get",
+                      "type": "object"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "Current Bearer Identity"
+          }
+        },
+        "/v1/billing": {
+          "get": {
+            "description": "Local execution has no credits, provider, or reservation workflow.",
+            "operationId": "billing_v1_billing_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/BillingResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "Billing",
+            "tags": [
+              "billing"
+            ]
+          }
+        },
+        "/v1/billing/checkout": {
+          "post": {
+            "operationId": "checkout_v1_billing_checkout_post",
+            "requestBody": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CheckoutRequest"
+                  }
+                }
+              },
+              "required": true
+            },
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "title": "Response Checkout V1 Billing Checkout Post",
+                      "type": "object"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Checkout",
+            "tags": [
+              "billing"
+            ]
+          }
+        },
+        "/v1/billing/history": {
+          "get": {
+            "operationId": "credit_history_v1_billing_history_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/CreditHistoryResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "Credit History",
+            "tags": [
+              "billing"
+            ]
+          }
+        },
+        "/v1/billing/webhooks/stripe": {
+          "post": {
+            "operationId": "stripe_webhook_v1_billing_webhooks_stripe_post",
+            "responses": {
+              "204": {
+                "description": "Successful Response"
+              }
+            },
+            "summary": "Stripe Webhook",
+            "tags": [
+              "billing"
+            ]
+          }
+        },
+        "/v1/capabilities": {
+          "get": {
+            "operationId": "capabilities_v1_capabilities_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/Capabilities"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "500": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    }
+                  }
+                },
+                "description": "Normalized internal server error"
+              }
+            },
+            "summary": "Capabilities"
+          }
+        },
+        "/v1/health": {
+          "get": {
+            "operationId": "health_v1_health_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "title": "Response Health V1 Health Get",
+                      "type": "object"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "500": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    }
+                  }
+                },
+                "description": "Normalized internal server error"
+              }
+            },
+            "summary": "Health"
+          }
+        },
+        "/v1/jobs": {
+          "get": {
+            "description": "Return local jobs, or only the caller's owned jobs in hosted mode.",
+            "operationId": "list_jobs_v1_jobs_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/JobListResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "List Jobs",
+            "tags": [
+              "jobs"
+            ]
+          },
+          "post": {
+            "description": "Admit local work or hosted credit-backed work before starting its runner.",
+            "operationId": "create_job_v1_jobs_post",
+            "parameters": [
+              {
+                "in": "header",
+                "name": "Idempotency-Key",
+                "required": false,
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Idempotency-Key"
+                }
+              }
+            ],
+            "requestBody": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/JobRequest"
+                  }
+                }
+              },
+              "required": true
+            },
+            "responses": {
+              "202": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/JobResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Create Job",
+            "tags": [
+              "jobs"
+            ]
+          }
+        },
+        "/v1/jobs/preflight": {
+          "post": {
+            "description": "Validate executable local intent without creating a Job or reservation.",
+            "operationId": "preflight_v1_jobs_preflight_post",
+            "requestBody": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/JobRequest"
+                  }
+                }
+              },
+              "required": true
+            },
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/PreflightResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Preflight",
+            "tags": [
+              "jobs"
+            ]
+          }
+        },
+        "/v1/jobs/{job_id}": {
+          "get": {
+            "description": "Return the authoritative durable snapshot used for SSE reconnect recovery.",
+            "operationId": "get_job_v1_jobs__job_id__get",
+            "parameters": [
+              {
+                "in": "path",
+                "name": "job_id",
+                "required": true,
+                "schema": {
+                  "title": "Job Id",
+                  "type": "string"
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/JobResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Get Job",
+            "tags": [
+              "jobs"
+            ]
+          }
+        },
+        "/v1/jobs/{job_id}/artifact": {
+          "get": {
+            "description": "Authorize artifact retrieval from an owned completed local job only.",
+            "operationId": "get_artifact_v1_jobs__job_id__artifact_get",
+            "parameters": [
+              {
+                "in": "path",
+                "name": "job_id",
+                "required": true,
+                "schema": {
+                  "title": "Job Id",
+                  "type": "string"
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {}
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Get Artifact",
+            "tags": [
+              "jobs"
+            ]
+          }
+        },
+        "/v1/jobs/{job_id}/cancel": {
+          "post": {
+            "description": "Durably request cancellation once; repeated calls return the same snapshot.",
+            "operationId": "cancel_job_v1_jobs__job_id__cancel_post",
+            "parameters": [
+              {
+                "in": "path",
+                "name": "job_id",
+                "required": true,
+                "schema": {
+                  "title": "Job Id",
+                  "type": "string"
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/JobResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Cancel Job",
+            "tags": [
+              "jobs"
+            ]
+          }
+        },
+        "/v1/jobs/{job_id}/events": {
+          "get": {
+            "description": "Stream append-only events; callers re-fetch the snapshot after reconnecting.",
+            "operationId": "stream_events_v1_jobs__job_id__events_get",
+            "parameters": [
+              {
+                "in": "path",
+                "name": "job_id",
+                "required": true,
+                "schema": {
+                  "title": "Job Id",
+                  "type": "string"
+                }
+              },
+              {
+                "in": "header",
+                "name": "Last-Event-ID",
+                "required": false,
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Last-Event-Id"
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {}
+                  },
+                  "text/event-stream": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "x-event-schema": {
+                      "$ref": "#/components/schemas/EventResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Stream Events",
+            "tags": [
+              "jobs"
+            ]
+          }
+        },
+        "/v1/notifications": {
+          "get": {
+            "operationId": "preference_v1_notifications_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/NotificationPreferenceResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "Preference",
+            "tags": [
+              "notifications"
+            ]
+          },
+          "patch": {
+            "operationId": "set_preference_v1_notifications_patch",
+            "requestBody": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/NotificationPreferenceRequest"
+                  }
+                }
+              },
+              "required": true
+            },
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/NotificationPreferenceResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Set Preference",
+            "tags": [
+              "notifications"
+            ]
+          }
+        },
+        "/v1/voices": {
+          "get": {
+            "description": "Return only enabled entries in the server's explicit local registry.",
+            "operationId": "list_voices_v1_voices_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/VoiceListResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "List Voices",
+            "tags": [
+              "voices"
+            ]
+          }
+        }
+      }
+    },
+    "http": [
+      {
+        "body": {
+          "format": "epub",
+          "id": "00000000-0000-0000-0000-000000000003",
+          "sha256": "249d7ea4b9a4cabb3017c85215167b7c98cae20ef57a1022e6166c5f986a7b92"
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "POST",
+        "name": "upload-epub",
+        "request": {
+          "bodyBase64": "UEsDBBQAAAAAAAAAIVBvYassFAAAABQAAAAIAAAAbWltZXR5cGVhcHBsaWNhdGlvbi9lcHViK3ppcFBLAwQUAAAAAAAAACFQA1bDqooAAACKAAAAFgAAAE1FVEEtSU5GL2NvbnRhaW5lci54bWw8Y29udGFpbmVyIHhtbG5zPSJ1cm46b2FzaXM6bmFtZXM6dGM6b3BlbmRvY3VtZW50OnhtbG5zOmNvbnRhaW5lciI+PHJvb3RmaWxlcz48cm9vdGZpbGUgZnVsbC1wYXRoPSJPUFMvYm9vay5vcGYiLz48L3Jvb3RmaWxlcz48L2NvbnRhaW5lcj5QSwMEFAAAAAAAAAAhUHlJih06AQAAOgEAAAwAAABPUFMvYm9vay5vcGY8cGFja2FnZSB4bWxucz0iaHR0cDovL3d3dy5pZHBmLm9yZy8yMDA3L29wZiIgdmVyc2lvbj0iMy4wIj48bWV0YWRhdGEgeG1sbnM6ZGM9Imh0dHA6Ly9wdXJsLm9yZy9kYy9lbGVtZW50cy8xLjEvIj48ZGM6dGl0bGU+VGlueTwvZGM6dGl0bGU+PGRjOmNyZWF0b3I+QWRhPC9kYzpjcmVhdG9yPjwvbWV0YWRhdGE+PG1hbmlmZXN0PjxpdGVtIGlkPSJvbmUiIGhyZWY9Im9uZS54aHRtbCIgbWVkaWEtdHlwZT0iYXBwbGljYXRpb24veGh0bWwreG1sIi8+PC9tYW5pZmVzdD48c3BpbmU+PGl0ZW1yZWYgaWRyZWY9Im9uZSIvPjwvc3BpbmU+PC9wYWNrYWdlPlBLAwQUAAAAAAAAACFQQEti5FUAAABVAAAADQAAAE9QUy9vbmUueGh0bWw8aHRtbCB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94aHRtbCI+PGJvZHk+PHA+SGVsbG8gbmFycmF0b3IuPC9wPjwvYm9keT48L2h0bWw+UEsBAhQDFAAAAAAAAAAhUG9hqywUAAAAFAAAAAgAAAAAAAAAAAAAAIABAAAAAG1pbWV0eXBlUEsBAhQDFAAAAAAAAAAhUANWw6qKAAAAigAAABYAAAAAAAAAAAAAAIABOgAAAE1FVEEtSU5GL2NvbnRhaW5lci54bWxQSwECFAMUAAAAAAAAACFQeUmKHToBAAA6AQAADAAAAAAAAAAAAAAAgAH4AAAAT1BTL2Jvb2sub3BmUEsBAhQDFAAAAAAAAAAhUEBLYuRVAAAAVQAAAA0AAAAAAAAAAAAAAIABXAIAAE9QUy9vbmUueGh0bWxQSwUGAAAAAAQABADvAAAA3AIAAAAA",
+          "headers": {
+            "content-type": "application/epub+zip",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/assets"
+        },
+        "route": "/v1/assets",
+        "status": 201
+      },
+      {
+        "body": {
+          "error": {
+            "code": "http_error",
+            "details": {},
+            "message": "expected application/epub+zip",
+            "requestId": "contract-request"
+          }
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "POST",
+        "name": "upload-pdf-unsupported",
+        "request": {
+          "bodyBase64": "JVBERi0xLjQ=",
+          "headers": {
+            "content-type": "application/pdf",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/assets"
+        },
+        "route": "/v1/assets",
+        "status": 415
+      },
+      {
+        "body": {
+          "error": {
+            "code": "http_error",
+            "details": {},
+            "message": "empty asset",
+            "requestId": "contract-request"
+          }
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "POST",
+        "name": "upload-empty",
+        "request": {
+          "bodyBase64": "",
+          "headers": {
+            "content-type": "application/epub+zip",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/assets"
+        },
+        "route": "/v1/assets",
+        "status": 422
+      },
+      {
+        "body": {
+          "author": "Ada",
+          "chapters": [
+            {
+              "id": "ch-v1-934baefe2020b10222a27857",
+              "speechCharacters": 15,
+              "title": "Untitled section 1"
+            }
+          ],
+          "sourceId": "00000000-0000-0000-0000-000000000003",
+          "title": "Tiny"
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "inspect-book",
+        "request": {
+          "headers": {
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/assets/00000000-0000-0000-0000-000000000003/book"
+        },
+        "route": "/v1/assets/{asset_id}/book",
+        "status": 200
+      },
+      {
+        "body": {
+          "error": {
+            "code": "not_found",
+            "details": {},
+            "message": "Not found",
+            "requestId": "contract-request"
+          }
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "cover-missing",
+        "request": {
+          "headers": {
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/assets/00000000-0000-0000-0000-000000000003/cover"
+        },
+        "route": "/v1/assets/{asset_id}/cover",
+        "status": 404
+      },
+      {
+        "body": {
+          "error": {
+            "code": "http_error",
+            "details": {},
+            "message": "The cover or EPUB is invalid.",
+            "requestId": "contract-request"
+          }
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "POST",
+        "name": "cover-invalid",
+        "request": {
+          "bodyBase64": "YmFk",
+          "headers": {
+            "content-type": "image/png",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/assets/00000000-0000-0000-0000-000000000003/cover"
+        },
+        "route": "/v1/assets/{asset_id}/cover",
+        "status": 422
+      },
+      {
+        "body": {
+          "availableCredits": null,
+          "estimatedCredits": null,
+          "normalizedCharacters": 15,
+          "sourceId": "00000000-0000-0000-0000-000000000003",
+          "valid": true
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "POST",
+        "name": "preflight",
+        "request": {
+          "headers": {
+            "content-type": "application/json",
+            "x-request-id": "contract-request"
+          },
+          "json": {
+            "casting": {
+              "voiceId": "narrator"
+            },
+            "chapters": [
+              "ch-v1-934baefe2020b10222a27857"
+            ],
+            "sourceId": "00000000-0000-0000-0000-000000000003"
+          },
+          "path": "/v1/jobs/preflight"
+        },
+        "route": "/v1/jobs/preflight",
+        "status": 200
+      },
+      {
+        "body": {
+          "error": {
+            "code": "validation_error",
+            "details": {
+              "errors": [
+                {
+                  "input": {},
+                  "loc": [
+                    "body",
+                    "sourceId"
+                  ],
+                  "msg": "Field required",
+                  "type": "missing"
+                },
+                {
+                  "input": {},
+                  "loc": [
+                    "body",
+                    "chapters"
+                  ],
+                  "msg": "Field required",
+                  "type": "missing"
+                },
+                {
+                  "input": {},
+                  "loc": [
+                    "body",
+                    "casting"
+                  ],
+                  "msg": "Field required",
+                  "type": "missing"
+                }
+              ]
+            },
+            "message": "Request validation failed",
+            "requestId": "contract-request"
+          }
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "POST",
+        "name": "job-invalid",
+        "request": {
+          "headers": {
+            "content-type": "application/json",
+            "x-request-id": "contract-request"
+          },
+          "json": {},
+          "path": "/v1/jobs"
+        },
+        "route": "/v1/jobs",
+        "status": 422
+      },
+      {
+        "body": {
+          "status": "ok"
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "health",
+        "request": {
+          "headers": {
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/health"
+        },
+        "route": "/v1/health",
+        "status": 200
+      },
+      {
+        "body": {
+          "apiVersion": "1",
+          "auth": {
+            "mode": "session"
+          },
+          "billing": {
+            "mode": "unmetered"
+          },
+          "casting": {
+            "models": [],
+            "modes": [
+              "single"
+            ]
+          },
+          "covers": {
+            "maxUploadBytes": 8388608,
+            "read": true,
+            "upload": true
+          },
+          "maxUploadBytes": 52428800,
+          "narration": {
+            "charactersPerSecond": 13,
+            "longChapterHours": 6.0
+          },
+          "notifications": {
+            "email": false
+          },
+          "outputFormats": [
+            "m4b"
+          ],
+          "pauseLengths": true,
+          "scenePauses": true,
+          "sourceFormats": [
+            "epub"
+          ],
+          "speechSettings": true
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "capabilities",
+        "request": {
+          "headers": {
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/capabilities"
+        },
+        "route": "/v1/capabilities",
+        "status": 200
+      },
+      {
+        "body": {
+          "items": [
+            {
+              "id": "narrator",
+              "language": null,
+              "licenseId": "test",
+              "name": "Narrator",
+              "voiceRights": null
+            }
+          ]
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "voices",
+        "request": {
+          "headers": {
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/voices"
+        },
+        "route": "/v1/voices",
+        "status": 200
+      },
+      {
+        "body": {
+          "sha256": "4a2f7d7f03caa38a32f57ef984c7c244939da8875a94ce4bb51298156a741610"
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "openapi.json",
+        "request": {
+          "headers": {
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/openapi.json"
+        },
+        "route": "/v1/openapi.json",
+        "status": 200
+      },
+      {
+        "body": {
+          "sha256": "143ea81910fda77645ac5fb56004bf5b9ddf1772785fcb87754f88f8b9f83c76"
+        },
+        "headers": {
+          "content-type": "text/html; charset=utf-8",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "docs",
+        "request": {
+          "headers": {
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/docs"
+        },
+        "route": "/v1/docs",
+        "status": 200
+      },
+      {
+        "body": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "HEAD",
+        "name": "head-openapi.json",
+        "request": {
+          "headers": {
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/openapi.json"
+        },
+        "route": "/v1/openapi.json",
+        "status": 200
+      },
+      {
+        "body": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "headers": {
+          "content-type": "text/html; charset=utf-8",
+          "x-request-id": "contract-request"
+        },
+        "method": "HEAD",
+        "name": "head-docs",
+        "request": {
+          "headers": {
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/docs"
+        },
+        "route": "/v1/docs",
+        "status": 200
+      },
+      {
+        "body": {
+          "error": {
+            "code": "unauthenticated",
+            "details": {},
+            "message": "Sign in to continue.",
+            "requestId": "00000000-0000-0000-0000-000000000005"
+          }
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "00000000-0000-0000-0000-000000000005"
+        },
+        "method": "GET",
+        "name": "missing-auth",
+        "request": {
+          "headers": {
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/jobs"
+        },
+        "route": "/v1/jobs",
+        "status": 401
+      },
+      {
+        "body": {
+          "error": {
+            "code": "unauthenticated",
+            "details": {},
+            "message": "Sign in with an invited account to continue.",
+            "requestId": "00000000-0000-0000-0000-000000000005"
+          }
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "00000000-0000-0000-0000-000000000005"
+        },
+        "method": "GET",
+        "name": "invalid-auth",
+        "request": {
+          "headers": {
+            "authorization": "Bearer invalid",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/jobs"
+        },
+        "route": "/v1/jobs",
+        "status": 401
+      },
+      {
+        "body": "OK",
+        "headers": {
+          "access-control-allow-credentials": "true",
+          "access-control-allow-headers": "Accept, Accept-Language, Authorization, Content-Language, Content-Type, Idempotency-Key",
+          "access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
+          "access-control-allow-origin": "https://studio.example.invalid",
+          "content-type": "text/plain; charset=utf-8",
+          "vary": "Origin"
+        },
+        "method": "OPTIONS",
+        "name": "cors-options",
+        "request": {
+          "headers": {
+            "access-control-request-headers": "Authorization,Content-Type",
+            "access-control-request-method": "POST",
+            "origin": "https://studio.example.invalid",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/jobs"
+        },
+        "route": "/v1/jobs",
+        "status": 200
+      },
+      {
+        "body": {
+          "error": {
+            "code": "unauthenticated",
+            "details": {},
+            "message": "Sign in to continue.",
+            "requestId": "00000000-0000-0000-0000-000000000005"
+          }
+        },
+        "headers": {
+          "access-control-allow-credentials": "true",
+          "access-control-allow-origin": "https://studio.example.invalid",
+          "content-type": "application/json",
+          "vary": "Origin",
+          "x-request-id": "00000000-0000-0000-0000-000000000005"
+        },
+        "method": "GET",
+        "name": "cors-missing-auth",
+        "request": {
+          "headers": {
+            "origin": "https://studio.example.invalid",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/jobs"
+        },
+        "route": "/v1/jobs",
+        "status": 401
+      },
+      {
+        "body": {
+          "error": {
+            "code": "http_error",
+            "details": {},
+            "message": "resource is not owned by this user",
+            "requestId": "contract-request"
+          }
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "foreign-asset",
+        "request": {
+          "headers": {
+            "authorization": "Bearer synthetic-stranger",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/assets/00000000-0000-0000-0000-000000000003/book"
+        },
+        "route": "/v1/assets/{asset_id}/book",
+        "status": 403
+      },
+      {
+        "body": {
+          "items": [
+            {
+              "castingMode": "single",
+              "id": "contract-job",
+              "narratorVoiceId": "narrator",
+              "progress": {
+                "completed": 1,
+                "stage": "complete",
+                "total": 1
+              },
+              "sourceCover": true,
+              "sourceId": "00000000-0000-0000-0000-000000000003",
+              "status": "succeeded"
+            }
+          ]
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "jobs",
+        "request": {
+          "headers": {
+            "authorization": "Bearer synthetic-sealed",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/jobs"
+        },
+        "route": "/v1/jobs",
+        "status": 200
+      },
+      {
+        "body": {
+          "castingMode": "single",
+          "id": "contract-job",
+          "narratorVoiceId": "narrator",
+          "progress": {
+            "completed": 1,
+            "stage": "complete",
+            "total": 1
+          },
+          "sourceCover": true,
+          "sourceId": "00000000-0000-0000-0000-000000000003",
+          "status": "succeeded"
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "job",
+        "request": {
+          "headers": {
+            "authorization": "Bearer synthetic-sealed",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/jobs/contract-job"
+        },
+        "route": "/v1/jobs/{job_id}",
+        "status": 200
+      },
+      {
+        "body": {
+          "error": {
+            "code": "http_error",
+            "details": {},
+            "message": "resource is not owned by this user",
+            "requestId": "contract-request"
+          }
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "foreign-job",
+        "request": {
+          "headers": {
+            "authorization": "Bearer synthetic-stranger",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/jobs/contract-job"
+        },
+        "route": "/v1/jobs/{job_id}",
+        "status": 403
+      },
+      {
+        "body": {
+          "castingMode": "single",
+          "id": "contract-job",
+          "narratorVoiceId": "narrator",
+          "progress": {
+            "completed": 1,
+            "stage": "complete",
+            "total": 1
+          },
+          "sourceCover": true,
+          "sourceId": "00000000-0000-0000-0000-000000000003",
+          "status": "succeeded"
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "POST",
+        "name": "cancel-terminal",
+        "request": {
+          "headers": {
+            "authorization": "Bearer synthetic-sealed",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/jobs/contract-job/cancel"
+        },
+        "route": "/v1/jobs/{job_id}/cancel",
+        "status": 200
+      },
+      {
+        "body": "id: 2\nevent: succeeded\ndata: {\"sequence\":2,\"type\":\"succeeded\",\"progress\":{\"stage\":\"complete\",\"completed\":1,\"total\":1}}\n\n",
+        "headers": {
+          "content-type": "text/event-stream; charset=utf-8",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "sse-resume",
+        "request": {
+          "headers": {
+            "authorization": "Bearer synthetic-sealed",
+            "last-event-id": "1",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/jobs/contract-job/events"
+        },
+        "route": "/v1/jobs/{job_id}/events",
+        "status": 200
+      },
+      {
+        "body": {
+          "error": {
+            "code": "not_found",
+            "details": {},
+            "message": "Not found",
+            "requestId": "contract-request"
+          }
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "artifact-missing",
+        "request": {
+          "headers": {
+            "authorization": "Bearer synthetic-sealed",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/jobs/contract-job/artifact"
+        },
+        "route": "/v1/jobs/{job_id}/artifact",
+        "status": 404
+      },
+      {
+        "body": {
+          "error": {
+            "code": "http_error",
+            "details": {},
+            "message": "invalid_unsubscribe_link",
+            "requestId": "contract-request"
+          }
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "unsubscribe-invalid",
+        "request": {
+          "headers": {
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/notifications/unsubscribe?identity=00000000-0000-0000-0000-000000000001&token=invalid"
+        },
+        "route": "/v1/notifications/unsubscribe",
+        "status": 400
+      },
+      {
+        "body": {
+          "error": {
+            "code": "not_found",
+            "details": {},
+            "message": "Not found",
+            "requestId": "contract-request"
+          }
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "notification-get",
+        "request": {
+          "headers": {
+            "authorization": "Bearer synthetic-sealed",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/notifications"
+        },
+        "route": "/v1/notifications",
+        "status": 404
+      },
+      {
+        "body": {
+          "error": {
+            "code": "not_found",
+            "details": {},
+            "message": "Not found",
+            "requestId": "contract-request"
+          }
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "PATCH",
+        "name": "notification-patch",
+        "request": {
+          "headers": {
+            "authorization": "Bearer synthetic-sealed",
+            "content-type": "application/json",
+            "x-request-id": "contract-request"
+          },
+          "json": {
+            "emailOnCompletion": true
+          },
+          "path": "/v1/notifications"
+        },
+        "route": "/v1/notifications",
+        "status": 404
+      },
+      {
+        "body": "",
+        "headers": {
+          "location": "https://auth.example.invalid/authorize",
+          "set-cookie": "__Host-kenkui-login-state=sssssssssssssssssssssssssssssssssssssssssss; HttpOnly; Max-Age=600; Path=/; SameSite=lax; Secure, __Host-kenkui-login-verifier=ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss; HttpOnly; Max-Age=600; Path=/; SameSite=lax; Secure",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "browser-login",
+        "request": {
+          "headers": {
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/auth/login"
+        },
+        "route": "/v1/auth/login",
+        "status": 303
+      },
+      {
+        "body": {
+          "error": {
+            "code": "http_error",
+            "details": {},
+            "message": "invalid_login_state",
+            "requestId": "contract-request"
+          }
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "browser-callback-invalid",
+        "request": {
+          "headers": {
+            "cookie": "__Host-kenkui-login-state=sssssssssssssssssssssssssssssssssssssssssss; __Host-kenkui-login-verifier=ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/auth/callback?code=synthetic&state=bad"
+        },
+        "route": "/v1/auth/callback",
+        "status": 400
+      },
+      {
+        "body": "",
+        "headers": {
+          "location": "https://studio.example.invalid/jobs",
+          "set-cookie": "__Host-kenkui-login-state=\"\"; expires=<clock>; HttpOnly; Max-Age=0; Path=/; SameSite=lax; Secure, __Host-kenkui-login-verifier=\"\"; expires=<clock>; HttpOnly; Max-Age=0; Path=/; SameSite=lax; Secure, __Host-kenkui-session=synthetic-sealed; HttpOnly; Max-Age=604800; Path=/; SameSite=lax; Secure",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "browser-callback",
+        "request": {
+          "headers": {
+            "cookie": "__Host-kenkui-login-state=sssssssssssssssssssssssssssssssssssssssssss; __Host-kenkui-login-verifier=ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/auth/callback?code=synthetic&state=sssssssssssssssssssssssssssssssssssssssssss"
+        },
+        "route": "/v1/auth/callback",
+        "status": 303
+      },
+      {
+        "body": {
+          "userId": "00000000-0000-0000-0000-000000000001"
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "browser-session",
+        "request": {
+          "headers": {
+            "cookie": "__Host-kenkui-session=synthetic-sealed",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/auth/session"
+        },
+        "route": "/v1/auth/session",
+        "status": 200
+      },
+      {
+        "body": {
+          "error": {
+            "code": "invalid_origin",
+            "details": {},
+            "message": "Request origin is not allowed.",
+            "requestId": "00000000-0000-0000-0000-000000000005"
+          }
+        },
+        "headers": {
+          "access-control-allow-credentials": "true",
+          "content-type": "application/json",
+          "x-request-id": "00000000-0000-0000-0000-000000000005"
+        },
+        "method": "POST",
+        "name": "browser-csrf",
+        "request": {
+          "headers": {
+            "cookie": "__Host-kenkui-session=synthetic-sealed",
+            "origin": "https://evil.invalid",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/auth/logout"
+        },
+        "route": "/v1/auth/logout",
+        "status": 403
+      },
+      {
+        "body": "",
+        "headers": {
+          "access-control-allow-credentials": "true",
+          "access-control-allow-origin": "https://studio.example.invalid",
+          "location": "https://auth.example.invalid/logout",
+          "set-cookie": "__Host-kenkui-session=\"\"; expires=<clock>; HttpOnly; Max-Age=0; Path=/; SameSite=lax; Secure",
+          "vary": "Origin",
+          "x-request-id": "contract-request"
+        },
+        "method": "POST",
+        "name": "browser-logout",
+        "request": {
+          "headers": {
+            "cookie": "__Host-kenkui-session=synthetic-sealed",
+            "origin": "https://studio.example.invalid",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/auth/logout"
+        },
+        "route": "/v1/auth/logout",
+        "status": 303
+      },
+      {
+        "body": {
+          "redirectUri": "http://127.0.0.1:43827/callback"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-type": "application/json",
+          "pragma": "no-cache",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "native-config",
+        "request": {
+          "headers": {
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/auth/native/config"
+        },
+        "route": "/v1/auth/native/config",
+        "status": 200
+      },
+      {
+        "body": "",
+        "headers": {
+          "cache-control": "no-store",
+          "location": "https://auth.example.invalid/authorize",
+          "pragma": "no-cache",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "native-authorize",
+        "request": {
+          "headers": {
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/auth/native/authorize?state=sssssssssssssssssssssssssssssssssssssssssss&code_challenge=ccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "route": "/v1/auth/native/authorize",
+        "status": 303
+      },
+      {
+        "body": {
+          "accessToken": "synthetic-sealed",
+          "expiresIn": 300,
+          "refreshToken": "synthetic-refresh",
+          "userId": "00000000-0000-0000-0000-000000000001"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-type": "application/json",
+          "pragma": "no-cache",
+          "x-request-id": "contract-request"
+        },
+        "method": "POST",
+        "name": "native-exchange",
+        "request": {
+          "headers": {
+            "content-type": "application/json",
+            "x-request-id": "contract-request"
+          },
+          "json": {
+            "code": "synthetic-code",
+            "codeVerifier": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+          },
+          "path": "/v1/auth/native/exchange"
+        },
+        "route": "/v1/auth/native/exchange",
+        "status": 200
+      },
+      {
+        "body": {
+          "error": {
+            "code": "validation_error",
+            "details": {},
+            "message": "Request validation failed",
+            "requestId": "contract-request"
+          }
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-type": "application/json",
+          "pragma": "no-cache",
+          "x-request-id": "contract-request"
+        },
+        "method": "POST",
+        "name": "native-invalid",
+        "request": {
+          "headers": {
+            "content-type": "application/json",
+            "x-request-id": "contract-request"
+          },
+          "json": {
+            "code": "synthetic-code",
+            "codeVerifier": "short"
+          },
+          "path": "/v1/auth/native/exchange"
+        },
+        "route": "/v1/auth/native/exchange",
+        "status": 422
+      },
+      {
+        "body": {
+          "accessToken": "synthetic-sealed",
+          "expiresIn": 300,
+          "refreshToken": "synthetic-refresh",
+          "userId": "00000000-0000-0000-0000-000000000001"
+        },
+        "headers": {
+          "cache-control": "no-store",
+          "content-type": "application/json",
+          "pragma": "no-cache",
+          "x-request-id": "contract-request"
+        },
+        "method": "POST",
+        "name": "native-refresh",
+        "request": {
+          "headers": {
+            "content-type": "application/json",
+            "x-request-id": "contract-request"
+          },
+          "json": {
+            "refreshToken": "synthetic-refresh"
+          },
+          "path": "/v1/auth/native/refresh"
+        },
+        "route": "/v1/auth/native/refresh",
+        "status": 200
+      },
+      {
+        "body": "",
+        "headers": {
+          "cache-control": "no-store",
+          "pragma": "no-cache",
+          "x-request-id": "contract-request"
+        },
+        "method": "POST",
+        "name": "native-logout",
+        "request": {
+          "headers": {
+            "authorization": "Bearer synthetic-sealed",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/auth/native/logout"
+        },
+        "route": "/v1/auth/native/logout",
+        "status": 204
+      },
+      {
+        "body": "",
+        "headers": {
+          "x-request-id": "contract-request"
+        },
+        "method": "POST",
+        "name": "stripe-invalid-signature",
+        "request": {
+          "bodyBase64": "eyJpZCI6ImV2dF9jb250cmFjdCIsInR5cGUiOiJjaGVja291dC5zZXNzaW9uLmNvbXBsZXRlZCIsImRhdGEiOnsib2JqZWN0Ijp7ImlkIjoiY3NfY29udHJhY3QiLCJtb2RlIjoicGF5bWVudCIsImNsaWVudF9yZWZlcmVuY2VfaWQiOiJhY2NvdW50LTEiLCJwYXltZW50X3N0YXR1cyI6InBhaWQiLCJhbW91bnRfdG90YWwiOjUwMCwiYW1vdW50X3N1YnRvdGFsIjo1MDAsImN1cnJlbmN5IjoidXNkIiwidG90YWxfZGV0YWlscyI6eyJhbW91bnRfdGF4IjowLCJhbW91bnRfZGlzY291bnQiOjAsImFtb3VudF9zaGlwcGluZyI6MH0sIm1ldGFkYXRhIjp7InB1cnBvc2UiOiJrZW5rdWlfY3JlZGl0c192MSIsImFjY291bnRfaWQiOiJhY2NvdW50LTEiLCJjcmVkaXRzIjoiNTAwIn19fX0=",
+          "headers": {
+            "stripe-signature": "bad",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/billing/webhooks/stripe"
+        },
+        "route": "/v1/billing/webhooks/stripe",
+        "status": 400
+      },
+      {
+        "body": "",
+        "headers": {
+          "x-request-id": "contract-request"
+        },
+        "method": "POST",
+        "name": "stripe-paid",
+        "request": {
+          "bodyBase64": "eyJpZCI6ImV2dF9jb250cmFjdCIsInR5cGUiOiJjaGVja291dC5zZXNzaW9uLmNvbXBsZXRlZCIsImRhdGEiOnsib2JqZWN0Ijp7ImlkIjoiY3NfY29udHJhY3QiLCJtb2RlIjoicGF5bWVudCIsImNsaWVudF9yZWZlcmVuY2VfaWQiOiJhY2NvdW50LTEiLCJwYXltZW50X3N0YXR1cyI6InBhaWQiLCJhbW91bnRfdG90YWwiOjUwMCwiYW1vdW50X3N1YnRvdGFsIjo1MDAsImN1cnJlbmN5IjoidXNkIiwidG90YWxfZGV0YWlscyI6eyJhbW91bnRfdGF4IjowLCJhbW91bnRfZGlzY291bnQiOjAsImFtb3VudF9zaGlwcGluZyI6MH0sIm1ldGFkYXRhIjp7InB1cnBvc2UiOiJrZW5rdWlfY3JlZGl0c192MSIsImFjY291bnRfaWQiOiJhY2NvdW50LTEiLCJjcmVkaXRzIjoiNTAwIn19fX0=",
+          "headers": {
+            "stripe-signature": "t=1793642400,v1=c84558eee415b65d13c020b5ba14fc308b30ae0c6a7f247c2bb0d9ed910bfbdd",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/billing/webhooks/stripe"
+        },
+        "route": "/v1/billing/webhooks/stripe",
+        "status": 204
+      },
+      {
+        "body": "",
+        "headers": {
+          "x-request-id": "contract-request"
+        },
+        "method": "POST",
+        "name": "stripe-replay",
+        "request": {
+          "bodyBase64": "eyJpZCI6ImV2dF9jb250cmFjdCIsInR5cGUiOiJjaGVja291dC5zZXNzaW9uLmNvbXBsZXRlZCIsImRhdGEiOnsib2JqZWN0Ijp7ImlkIjoiY3NfY29udHJhY3QiLCJtb2RlIjoicGF5bWVudCIsImNsaWVudF9yZWZlcmVuY2VfaWQiOiJhY2NvdW50LTEiLCJwYXltZW50X3N0YXR1cyI6InBhaWQiLCJhbW91bnRfdG90YWwiOjUwMCwiYW1vdW50X3N1YnRvdGFsIjo1MDAsImN1cnJlbmN5IjoidXNkIiwidG90YWxfZGV0YWlscyI6eyJhbW91bnRfdGF4IjowLCJhbW91bnRfZGlzY291bnQiOjAsImFtb3VudF9zaGlwcGluZyI6MH0sIm1ldGFkYXRhIjp7InB1cnBvc2UiOiJrZW5rdWlfY3JlZGl0c192MSIsImFjY291bnRfaWQiOiJhY2NvdW50LTEiLCJjcmVkaXRzIjoiNTAwIn19fX0=",
+          "headers": {
+            "stripe-signature": "t=1793642400,v1=c84558eee415b65d13c020b5ba14fc308b30ae0c6a7f247c2bb0d9ed910bfbdd",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/billing/webhooks/stripe"
+        },
+        "route": "/v1/billing/webhooks/stripe",
+        "status": 204
+      },
+      {
+        "body": {
+          "availableCredits": "500",
+          "checkoutEnabled": "false",
+          "creditHistoryAvailable": true,
+          "mode": "credits",
+          "packs": [
+            {
+              "credits": 500,
+              "priceUsdCents": 500
+            },
+            {
+              "credits": 1100,
+              "priceUsdCents": 1000
+            },
+            {
+              "credits": 2400,
+              "priceUsdCents": 2000
+            }
+          ]
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "billing",
+        "request": {
+          "headers": {
+            "authorization": "Bearer owner",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/billing"
+        },
+        "route": "/v1/billing",
+        "status": 200
+      },
+      {
+        "body": {
+          "items": [
+            {
+              "available": 500,
+              "consumed": 0,
+              "credited": 500,
+              "id": "00000000-0000-0000-0000-000000000004",
+              "recordedAt": "2026-11-02T18:00:00Z",
+              "reference": "stripe:cs_contract",
+              "reserved": 0,
+              "source": "purchase",
+              "usageStatus": "unused"
+            }
+          ]
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "credit-history",
+        "request": {
+          "headers": {
+            "authorization": "Bearer owner",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/billing/history"
+        },
+        "route": "/v1/billing/history",
+        "status": 200
+      },
+      {
+        "body": {
+          "items": []
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "GET",
+        "name": "foreign-credit-history",
+        "request": {
+          "headers": {
+            "authorization": "Bearer stranger",
+            "x-request-id": "contract-request"
+          },
+          "path": "/v1/billing/history"
+        },
+        "route": "/v1/billing/history",
+        "status": 200
+      },
+      {
+        "body": {
+          "error": {
+            "code": "http_error",
+            "details": {},
+            "message": "Card payments are not configured yet.",
+            "requestId": "contract-request"
+          }
+        },
+        "headers": {
+          "content-type": "application/json",
+          "x-request-id": "contract-request"
+        },
+        "method": "POST",
+        "name": "checkout-unavailable",
+        "request": {
+          "headers": {
+            "authorization": "Bearer owner",
+            "content-type": "application/json",
+            "x-request-id": "contract-request"
+          },
+          "json": {
+            "credits": 250
+          },
+          "path": "/v1/billing/checkout"
+        },
+        "route": "/v1/billing/checkout",
+        "status": 503
+      }
+    ],
+    "routes": [
+      {
+        "method": "GET",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/assets/{asset_id}/book"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/assets/{asset_id}/cover"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "browser-native"
+        ],
+        "path": "/v1/auth/callback"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "browser-native"
+        ],
+        "path": "/v1/auth/login"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "browser-native"
+        ],
+        "path": "/v1/auth/native/authorize"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "browser-native"
+        ],
+        "path": "/v1/auth/native/config"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/auth/session"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/billing"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/billing/history"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/capabilities"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/docs"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/health"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/jobs"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/jobs/{job_id}"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/jobs/{job_id}/artifact"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/jobs/{job_id}/events"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/notifications"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/notifications/unsubscribe"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/openapi.json"
+      },
+      {
+        "method": "GET",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/voices"
+      },
+      {
+        "method": "HEAD",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/docs"
+      },
+      {
+        "method": "HEAD",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/openapi.json"
+      },
+      {
+        "method": "PATCH",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/notifications"
+      },
+      {
+        "method": "POST",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/assets"
+      },
+      {
+        "method": "POST",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/assets/{asset_id}/cover"
+      },
+      {
+        "method": "POST",
+        "modes": [
+          "browser-native"
+        ],
+        "path": "/v1/auth/logout"
+      },
+      {
+        "method": "POST",
+        "modes": [
+          "browser-native"
+        ],
+        "path": "/v1/auth/native/exchange"
+      },
+      {
+        "method": "POST",
+        "modes": [
+          "browser-native"
+        ],
+        "path": "/v1/auth/native/logout"
+      },
+      {
+        "method": "POST",
+        "modes": [
+          "browser-native"
+        ],
+        "path": "/v1/auth/native/refresh"
+      },
+      {
+        "method": "POST",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/billing/checkout"
+      },
+      {
+        "method": "POST",
+        "modes": [
+          "hosted"
+        ],
+        "path": "/v1/billing/webhooks/stripe"
+      },
+      {
+        "method": "POST",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/jobs"
+      },
+      {
+        "method": "POST",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/jobs/preflight"
+      },
+      {
+        "method": "POST",
+        "modes": [
+          "local",
+          "browser-native",
+          "hosted"
+        ],
+        "path": "/v1/jobs/{job_id}/cancel"
+      }
+    ],
+    "schema": {
+      "components": {
+        "schemas": {
+          "AssetResponse": {
+            "properties": {
+              "format": {
+                "title": "Format",
+                "type": "string"
+              },
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "sha256": {
+                "title": "Sha256",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "format",
+              "sha256"
+            ],
+            "title": "AssetResponse",
+            "type": "object"
+          },
+          "AuthCapabilities": {
+            "description": "Authentication modes supported by this server.",
+            "properties": {
+              "mode": {
+                "default": "none",
+                "enum": [
+                  "none",
+                  "session",
+                  "bearer"
+                ],
+                "title": "Mode",
+                "type": "string"
+              }
+            },
+            "title": "AuthCapabilities",
+            "type": "object"
+          },
+          "BillingCapabilities": {
+            "description": "Billing modes supported by this server.",
+            "properties": {
+              "mode": {
+                "default": "unmetered",
+                "enum": [
+                  "unmetered",
+                  "credits"
+                ],
+                "title": "Mode",
+                "type": "string"
+              }
+            },
+            "title": "BillingCapabilities",
+            "type": "object"
+          },
+          "BillingResponse": {
+            "properties": {
+              "availableCredits": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Availablecredits"
+              },
+              "checkoutEnabled": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Checkoutenabled"
+              },
+              "creditHistoryAvailable": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Credithistoryavailable"
+              },
+              "mode": {
+                "title": "Mode",
+                "type": "string"
+              },
+              "packs": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "$ref": "#/components/schemas/CreditPackResponse"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Packs"
+              }
+            },
+            "required": [
+              "mode"
+            ],
+            "title": "BillingResponse",
+            "type": "object"
+          },
+          "BookResponse": {
+            "properties": {
+              "author": {
+                "title": "Author",
+                "type": "string"
+              },
+              "chapters": {
+                "items": {
+                  "$ref": "#/components/schemas/ChapterResponse"
+                },
+                "title": "Chapters",
+                "type": "array"
+              },
+              "sourceId": {
+                "title": "Sourceid",
+                "type": "string"
+              },
+              "title": {
+                "title": "Title",
+                "type": "string"
+              }
+            },
+            "required": [
+              "sourceId",
+              "title",
+              "author",
+              "chapters"
+            ],
+            "title": "BookResponse",
+            "type": "object"
+          },
+          "Capabilities": {
+            "description": "Public, versioned declaration of local server features.",
+            "properties": {
+              "apiVersion": {
+                "const": "1",
+                "default": "1",
+                "title": "Apiversion",
+                "type": "string"
+              },
+              "auth": {
+                "$ref": "#/components/schemas/AuthCapabilities",
+                "default": {
+                  "mode": "none"
+                }
+              },
+              "billing": {
+                "$ref": "#/components/schemas/BillingCapabilities",
+                "default": {
+                  "mode": "unmetered"
+                }
+              },
+              "casting": {
+                "$ref": "#/components/schemas/CastingCapabilities",
+                "default": {
+                  "models": [],
+                  "modes": [
+                    "single"
+                  ]
+                }
+              },
+              "covers": {
+                "$ref": "#/components/schemas/CoverCapabilities",
+                "default": {
+                  "maxUploadBytes": 8388608,
+                  "read": true,
+                  "upload": true
+                }
+              },
+              "maxUploadBytes": {
+                "default": 52428800,
+                "title": "Maxuploadbytes",
+                "type": "integer"
+              },
+              "narration": {
+                "$ref": "#/components/schemas/NarrationCapabilities",
+                "default": {
+                  "charactersPerSecond": 13,
+                  "longChapterHours": 6.0
+                }
+              },
+              "notifications": {
+                "$ref": "#/components/schemas/NotificationCapabilities",
+                "default": {
+                  "email": false
+                }
+              },
+              "outputFormats": {
+                "default": [
+                  "m4b"
+                ],
+                "items": {
+                  "const": "m4b",
+                  "type": "string"
+                },
+                "title": "Outputformats",
+                "type": "array"
+              },
+              "pauseLengths": {
+                "default": true,
+                "title": "Pauselengths",
+                "type": "boolean"
+              },
+              "scenePauses": {
+                "default": true,
+                "title": "Scenepauses",
+                "type": "boolean"
+              },
+              "sourceFormats": {
+                "default": [
+                  "epub"
+                ],
+                "items": {
+                  "const": "epub",
+                  "type": "string"
+                },
+                "title": "Sourceformats",
+                "type": "array"
+              },
+              "speechSettings": {
+                "default": true,
+                "title": "Speechsettings",
+                "type": "boolean"
+              }
+            },
+            "title": "Capabilities",
+            "type": "object"
+          },
+          "CastingCapabilities": {
+            "description": "Casting modes supported by this server.\n\nA list rather than one value: character casting is advertised only where a\ndeployment has configured an LLM allowlist, so a browser can tell the two\napart without trying and failing.",
+            "properties": {
+              "models": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Models",
+                "type": "array"
+              },
+              "modes": {
+                "default": [
+                  "single"
+                ],
+                "items": {
+                  "enum": [
+                    "single",
+                    "characters"
+                  ],
+                  "type": "string"
+                },
+                "title": "Modes",
+                "type": "array"
+              }
+            },
+            "title": "CastingCapabilities",
+            "type": "object"
+          },
+          "CastingRequest": {
+            "description": "Either a single narrator, or a character cast.\n\nvoiceId alone means single casting. Naming a model means character\ncasting, since attribution cannot run without one.",
+            "properties": {
+              "cast": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "title": "Cast",
+                "type": "object"
+              },
+              "method": {
+                "default": "gendered",
+                "title": "Method",
+                "type": "string"
+              },
+              "modelId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Modelid"
+              },
+              "narratorVoiceId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Narratorvoiceid"
+              },
+              "unknownVoiceId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Unknownvoiceid"
+              },
+              "voiceId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Voiceid"
+              }
+            },
+            "title": "CastingRequest",
+            "type": "object"
+          },
+          "ChapterResponse": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "speechCharacters": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Speechcharacters"
+              },
+              "title": {
+                "title": "Title",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title"
+            ],
+            "title": "ChapterResponse",
+            "type": "object"
+          },
+          "CheckoutRequest": {
+            "additionalProperties": false,
+            "description": "Only a pack size comes from the browser; account and price are server-owned.",
+            "properties": {
+              "credits": {
+                "title": "Credits",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "credits"
+            ],
+            "title": "CheckoutRequest",
+            "type": "object"
+          },
+          "CodeExchange": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "title": "Code",
+                "type": "string"
+              },
+              "codeVerifier": {
+                "pattern": "^[A-Za-z0-9._~-]{43,128}$",
+                "title": "Codeverifier",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "codeVerifier"
+            ],
+            "title": "CodeExchange",
+            "type": "object"
+          },
+          "CoverCapabilities": {
+            "properties": {
+              "maxUploadBytes": {
+                "default": 8388608,
+                "title": "Maxuploadbytes",
+                "type": "integer"
+              },
+              "read": {
+                "default": true,
+                "title": "Read",
+                "type": "boolean"
+              },
+              "upload": {
+                "default": true,
+                "title": "Upload",
+                "type": "boolean"
+              }
+            },
+            "title": "CoverCapabilities",
+            "type": "object"
+          },
+          "CreditHistoryResponse": {
+            "properties": {
+              "items": {
+                "items": {
+                  "$ref": "#/components/schemas/CreditLotResponse"
+                },
+                "title": "Items",
+                "type": "array"
+              }
+            },
+            "required": [
+              "items"
+            ],
+            "title": "CreditHistoryResponse",
+            "type": "object"
+          },
+          "CreditLotResponse": {
+            "properties": {
+              "available": {
+                "title": "Available",
+                "type": "integer"
+              },
+              "consumed": {
+                "title": "Consumed",
+                "type": "integer"
+              },
+              "credited": {
+                "title": "Credited",
+                "type": "integer"
+              },
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "recordedAt": {
+                "format": "date-time",
+                "title": "Recordedat",
+                "type": "string"
+              },
+              "reference": {
+                "title": "Reference",
+                "type": "string"
+              },
+              "reserved": {
+                "title": "Reserved",
+                "type": "integer"
+              },
+              "source": {
+                "enum": [
+                  "purchase",
+                  "grant",
+                  "legacy"
+                ],
+                "title": "Source",
+                "type": "string"
+              },
+              "usageStatus": {
+                "enum": [
+                  "unused",
+                  "reserved",
+                  "used",
+                  "manual_review",
+                  "not_purchased"
+                ],
+                "title": "Usagestatus",
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "source",
+              "reference",
+              "credited",
+              "available",
+              "reserved",
+              "consumed",
+              "recordedAt",
+              "usageStatus"
+            ],
+            "title": "CreditLotResponse",
+            "type": "object"
+          },
+          "CreditPackResponse": {
+            "properties": {
+              "credits": {
+                "title": "Credits",
+                "type": "integer"
+              },
+              "priceUsdCents": {
+                "title": "Priceusdcents",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "credits",
+              "priceUsdCents"
+            ],
+            "title": "CreditPackResponse",
+            "type": "object"
+          },
+          "ErrorDetail": {
+            "description": "Stable client-facing description of a failed request.",
+            "properties": {
+              "code": {
+                "title": "Code",
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "title": "Details",
+                "type": "object"
+              },
+              "message": {
+                "title": "Message",
+                "type": "string"
+              },
+              "requestId": {
+                "title": "Requestid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "requestId"
+            ],
+            "title": "ErrorDetail",
+            "type": "object"
+          },
+          "ErrorResponse": {
+            "description": "The sole error envelope exposed by the versioned API.",
+            "properties": {
+              "error": {
+                "$ref": "#/components/schemas/ErrorDetail"
+              }
+            },
+            "required": [
+              "error"
+            ],
+            "title": "ErrorResponse",
+            "type": "object"
+          },
+          "EventResponse": {
+            "properties": {
+              "progress": {
+                "$ref": "#/components/schemas/ProgressResponse"
+              },
+              "sequence": {
+                "title": "Sequence",
+                "type": "integer"
+              },
+              "type": {
+                "title": "Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "sequence",
+              "type",
+              "progress"
+            ],
+            "title": "EventResponse",
+            "type": "object"
+          },
+          "HTTPValidationError": {
+            "properties": {
+              "detail": {
+                "items": {
+                  "$ref": "#/components/schemas/ValidationError"
+                },
+                "title": "Detail",
+                "type": "array"
+              }
+            },
+            "title": "HTTPValidationError",
+            "type": "object"
+          },
+          "JobListResponse": {
+            "properties": {
+              "items": {
+                "items": {
+                  "$ref": "#/components/schemas/JobResponse"
+                },
+                "title": "Items",
+                "type": "array"
+              }
+            },
+            "required": [
+              "items"
+            ],
+            "title": "JobListResponse",
+            "type": "object"
+          },
+          "JobRequest": {
+            "properties": {
+              "casting": {
+                "$ref": "#/components/schemas/CastingRequest"
+              },
+              "chapters": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Chapters",
+                "type": "array"
+              },
+              "output": {
+                "$ref": "#/components/schemas/OutputRequest",
+                "default": {
+                  "format": "m4b",
+                  "sourceCover": true
+                }
+              },
+              "sourceId": {
+                "title": "Sourceid",
+                "type": "string"
+              },
+              "tts": {
+                "$ref": "#/components/schemas/TtsRequest",
+                "default": {
+                  "chapterPauses": false,
+                  "headingAfterPauseMs": 0,
+                  "headingBeforePauseMs": 0,
+                  "linePauseMs": 0,
+                  "normalizeText": true,
+                  "paragraphPauseMs": 0,
+                  "prepareNumbers": false,
+                  "pronunciationCorrections": false,
+                  "scenePauseMs": 0,
+                  "stutterHandling": false
+                }
+              }
+            },
+            "required": [
+              "sourceId",
+              "chapters",
+              "casting"
+            ],
+            "title": "JobRequest",
+            "type": "object"
+          },
+          "JobResponse": {
+            "properties": {
+              "author": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Author"
+              },
+              "castingMode": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Castingmode"
+              },
+              "failure": {
+                "anyOf": [
+                  {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Failure"
+              },
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "narratorVoiceId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Narratorvoiceid"
+              },
+              "progress": {
+                "$ref": "#/components/schemas/ProgressResponse"
+              },
+              "sourceCover": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Sourcecover"
+              },
+              "sourceId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Sourceid"
+              },
+              "status": {
+                "enum": [
+                  "queued",
+                  "running",
+                  "cancel_requested",
+                  "succeeded",
+                  "failed",
+                  "cancelled"
+                ],
+                "title": "Status",
+                "type": "string"
+              },
+              "title": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Title"
+              }
+            },
+            "required": [
+              "id",
+              "status",
+              "progress"
+            ],
+            "title": "JobResponse",
+            "type": "object"
+          },
+          "NarrationCapabilities": {
+            "description": "How this server's renderer turns text into time.\n\nPublished so a browser can show what a chapter will cost before anyone\nsubmits it, using the same numbers the renderer reports against rather than\na copy that can drift from them.",
+            "properties": {
+              "charactersPerSecond": {
+                "default": 13,
+                "title": "Characterspersecond",
+                "type": "integer"
+              },
+              "longChapterHours": {
+                "default": 6.0,
+                "title": "Longchapterhours",
+                "type": "number"
+              }
+            },
+            "title": "NarrationCapabilities",
+            "type": "object"
+          },
+          "NotificationCapabilities": {
+            "description": "How this server can tell a reader their book finished.\n\nAdvertised so a client offers an email preference only where mail is\nactually configured, rather than a switch that silently does nothing.",
+            "properties": {
+              "email": {
+                "default": false,
+                "title": "Email",
+                "type": "boolean"
+              }
+            },
+            "title": "NotificationCapabilities",
+            "type": "object"
+          },
+          "NotificationPreferenceRequest": {
+            "properties": {
+              "emailOnCompletion": {
+                "title": "Emailoncompletion",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "emailOnCompletion"
+            ],
+            "title": "NotificationPreferenceRequest",
+            "type": "object"
+          },
+          "NotificationPreferenceResponse": {
+            "description": "What completion mail would do for the signed-in reader right now.",
+            "properties": {
+              "email": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Email"
+              },
+              "emailOnCompletion": {
+                "default": false,
+                "title": "Emailoncompletion",
+                "type": "boolean"
+              }
+            },
+            "title": "NotificationPreferenceResponse",
+            "type": "object"
+          },
+          "OutputRequest": {
+            "properties": {
+              "author": {
+                "anyOf": [
+                  {
+                    "maxLength": 500,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Author"
+              },
+              "format": {
+                "default": "m4b",
+                "title": "Format",
+                "type": "string"
+              },
+              "sourceCover": {
+                "default": true,
+                "title": "Sourcecover",
+                "type": "boolean"
+              },
+              "title": {
+                "anyOf": [
+                  {
+                    "maxLength": 500,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Title"
+              }
+            },
+            "title": "OutputRequest",
+            "type": "object"
+          },
+          "PreflightResponse": {
+            "properties": {
+              "availableCredits": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Availablecredits"
+              },
+              "estimatedCredits": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Estimatedcredits"
+              },
+              "normalizedCharacters": {
+                "title": "Normalizedcharacters",
+                "type": "integer"
+              },
+              "sourceId": {
+                "title": "Sourceid",
+                "type": "string"
+              },
+              "valid": {
+                "default": true,
+                "title": "Valid",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "sourceId",
+              "normalizedCharacters"
+            ],
+            "title": "PreflightResponse",
+            "type": "object"
+          },
+          "ProgressResponse": {
+            "properties": {
+              "completed": {
+                "title": "Completed",
+                "type": "integer"
+              },
+              "stage": {
+                "title": "Stage",
+                "type": "string"
+              },
+              "total": {
+                "title": "Total",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "stage",
+              "completed",
+              "total"
+            ],
+            "title": "ProgressResponse",
+            "type": "object"
+          },
+          "TokenRefresh": {
+            "additionalProperties": false,
+            "properties": {
+              "refreshToken": {
+                "maxLength": 4096,
+                "minLength": 1,
+                "title": "Refreshtoken",
+                "type": "string"
+              }
+            },
+            "required": [
+              "refreshToken"
+            ],
+            "title": "TokenRefresh",
+            "type": "object"
+          },
+          "TtsRequest": {
+            "properties": {
+              "chapterPauseMs": {
+                "anyOf": [
+                  {
+                    "maximum": 60000.0,
+                    "minimum": 0.0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Chapterpausems"
+              },
+              "chapterPauses": {
+                "default": false,
+                "deprecated": true,
+                "title": "Chapterpauses",
+                "type": "boolean"
+              },
+              "headingAfterPauseMs": {
+                "default": 0,
+                "maximum": 60000.0,
+                "minimum": 0.0,
+                "title": "Headingafterpausems",
+                "type": "integer"
+              },
+              "headingBeforePauseMs": {
+                "default": 0,
+                "maximum": 60000.0,
+                "minimum": 0.0,
+                "title": "Headingbeforepausems",
+                "type": "integer"
+              },
+              "linePauseMs": {
+                "default": 0,
+                "maximum": 60000.0,
+                "minimum": 0.0,
+                "title": "Linepausems",
+                "type": "integer"
+              },
+              "normalizeText": {
+                "default": true,
+                "deprecated": true,
+                "description": "Legacy field. Kenkui always normalizes source text.",
+                "title": "Normalizetext",
+                "type": "boolean"
+              },
+              "paragraphPauseMs": {
+                "default": 0,
+                "maximum": 60000.0,
+                "minimum": 0.0,
+                "title": "Paragraphpausems",
+                "type": "integer"
+              },
+              "prepareNumbers": {
+                "default": false,
+                "title": "Preparenumbers",
+                "type": "boolean"
+              },
+              "pronunciationCorrections": {
+                "default": false,
+                "title": "Pronunciationcorrections",
+                "type": "boolean"
+              },
+              "scenePauseMs": {
+                "default": 0,
+                "maximum": 60000.0,
+                "minimum": 0.0,
+                "title": "Scenepausems",
+                "type": "integer"
+              },
+              "stutterHandling": {
+                "default": false,
+                "title": "Stutterhandling",
+                "type": "boolean"
+              }
+            },
+            "title": "TtsRequest",
+            "type": "object"
+          },
+          "ValidationError": {
+            "properties": {
+              "ctx": {
+                "title": "Context",
+                "type": "object"
+              },
+              "input": {
+                "title": "Input"
+              },
+              "loc": {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "integer"
+                    }
+                  ]
+                },
+                "title": "Location",
+                "type": "array"
+              },
+              "msg": {
+                "title": "Message",
+                "type": "string"
+              },
+              "type": {
+                "title": "Error Type",
+                "type": "string"
+              }
+            },
+            "required": [
+              "loc",
+              "msg",
+              "type"
+            ],
+            "title": "ValidationError",
+            "type": "object"
+          },
+          "VoiceListResponse": {
+            "properties": {
+              "items": {
+                "items": {
+                  "$ref": "#/components/schemas/VoiceResponse"
+                },
+                "title": "Items",
+                "type": "array"
+              }
+            },
+            "required": [
+              "items"
+            ],
+            "title": "VoiceListResponse",
+            "type": "object"
+          },
+          "VoiceResponse": {
+            "properties": {
+              "id": {
+                "title": "Id",
+                "type": "string"
+              },
+              "language": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Language"
+              },
+              "licenseId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Licenseid"
+              },
+              "name": {
+                "title": "Name",
+                "type": "string"
+              },
+              "voiceRights": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Voicerights"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "language"
+            ],
+            "title": "VoiceResponse",
+            "type": "object"
+          }
+        }
+      },
+      "info": {
+        "title": "Kenkui Server API",
+        "version": "1.0.0"
+      },
+      "openapi": "3.1.0",
+      "paths": {
+        "/v1/assets": {
+          "post": {
+            "description": "Accept one EPUB body and retain it behind a server-assigned private path.",
+            "operationId": "upload_asset_v1_assets_post",
+            "responses": {
+              "201": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/AssetResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "Upload Asset",
+            "tags": [
+              "assets"
+            ]
+          }
+        },
+        "/v1/assets/{asset_id}/book": {
+          "get": {
+            "description": "Inspect an owned local EPUB through Kenkui's public Pipeline API.",
+            "operationId": "inspect_book_v1_assets__asset_id__book_get",
+            "parameters": [
+              {
+                "in": "path",
+                "name": "asset_id",
+                "required": true,
+                "schema": {
+                  "title": "Asset Id",
+                  "type": "string"
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/BookResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Inspect Book",
+            "tags": [
+              "assets"
+            ]
+          }
+        },
+        "/v1/assets/{asset_id}/cover": {
+          "get": {
+            "operationId": "get_cover_v1_assets__asset_id__cover_get",
+            "parameters": [
+              {
+                "in": "path",
+                "name": "asset_id",
+                "required": true,
+                "schema": {
+                  "title": "Asset Id",
+                  "type": "string"
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {}
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Get Cover",
+            "tags": [
+              "assets"
+            ]
+          },
+          "post": {
+            "description": "Create a new owned EPUB; never mutate a source used by another draft/job.",
+            "operationId": "upload_cover_v1_assets__asset_id__cover_post",
+            "parameters": [
+              {
+                "in": "path",
+                "name": "asset_id",
+                "required": true,
+                "schema": {
+                  "title": "Asset Id",
+                  "type": "string"
+                }
+              }
+            ],
+            "responses": {
+              "201": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/AssetResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Upload Cover",
+            "tags": [
+              "assets"
+            ]
+          }
+        },
+        "/v1/auth/callback": {
+          "get": {
+            "operationId": "callback_v1_auth_callback_get",
+            "parameters": [
+              {
+                "in": "query",
+                "name": "code",
+                "required": true,
+                "schema": {
+                  "title": "Code",
+                  "type": "string"
+                }
+              },
+              {
+                "in": "query",
+                "name": "state",
+                "required": true,
+                "schema": {
+                  "title": "State",
+                  "type": "string"
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {}
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Callback",
+            "tags": [
+              "auth"
+            ]
+          }
+        },
+        "/v1/auth/login": {
+          "get": {
+            "operationId": "login_v1_auth_login_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {}
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "Login",
+            "tags": [
+              "auth"
+            ]
+          }
+        },
+        "/v1/auth/logout": {
+          "post": {
+            "operationId": "logout_v1_auth_logout_post",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {}
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "Logout",
+            "tags": [
+              "auth"
+            ]
+          }
+        },
+        "/v1/auth/native/authorize": {
+          "get": {
+            "operationId": "authorize_v1_auth_native_authorize_get",
+            "parameters": [
+              {
+                "in": "query",
+                "name": "state",
+                "required": true,
+                "schema": {
+                  "pattern": "^[A-Za-z0-9_-]{43}$",
+                  "title": "State",
+                  "type": "string"
+                }
+              },
+              {
+                "in": "query",
+                "name": "code_challenge",
+                "required": true,
+                "schema": {
+                  "pattern": "^[A-Za-z0-9_-]{43}$",
+                  "title": "Code Challenge",
+                  "type": "string"
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {}
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Authorize",
+            "tags": [
+              "native-auth"
+            ]
+          }
+        },
+        "/v1/auth/native/config": {
+          "get": {
+            "operationId": "config_v1_auth_native_config_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {}
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "Config",
+            "tags": [
+              "native-auth"
+            ]
+          }
+        },
+        "/v1/auth/native/exchange": {
+          "post": {
+            "operationId": "exchange_v1_auth_native_exchange_post",
+            "requestBody": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CodeExchange"
+                  }
+                }
+              },
+              "required": true
+            },
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {}
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Exchange",
+            "tags": [
+              "native-auth"
+            ]
+          }
+        },
+        "/v1/auth/native/logout": {
+          "post": {
+            "operationId": "logout_v1_auth_native_logout_post",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {}
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "Logout",
+            "tags": [
+              "native-auth"
+            ]
+          }
+        },
+        "/v1/auth/native/refresh": {
+          "post": {
+            "operationId": "refresh_v1_auth_native_refresh_post",
+            "requestBody": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/TokenRefresh"
+                  }
+                }
+              },
+              "required": true
+            },
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {}
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Refresh",
+            "tags": [
+              "native-auth"
+            ]
+          }
+        },
+        "/v1/auth/session": {
+          "get": {
+            "operationId": "current_session_v1_auth_session_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "title": "Response Current Session V1 Auth Session Get",
+                      "type": "object"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "Current Session",
+            "tags": [
+              "auth"
+            ]
+          }
+        },
+        "/v1/billing": {
+          "get": {
+            "description": "Local execution has no credits, provider, or reservation workflow.",
+            "operationId": "billing_v1_billing_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/BillingResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "Billing",
+            "tags": [
+              "billing"
+            ]
+          }
+        },
+        "/v1/billing/checkout": {
+          "post": {
+            "operationId": "checkout_v1_billing_checkout_post",
+            "requestBody": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/CheckoutRequest"
+                  }
+                }
+              },
+              "required": true
+            },
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "title": "Response Checkout V1 Billing Checkout Post",
+                      "type": "object"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Checkout",
+            "tags": [
+              "billing"
+            ]
+          }
+        },
+        "/v1/billing/history": {
+          "get": {
+            "operationId": "credit_history_v1_billing_history_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/CreditHistoryResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "Credit History",
+            "tags": [
+              "billing"
+            ]
+          }
+        },
+        "/v1/capabilities": {
+          "get": {
+            "operationId": "capabilities_v1_capabilities_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/Capabilities"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "500": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    }
+                  }
+                },
+                "description": "Normalized internal server error"
+              }
+            },
+            "summary": "Capabilities"
+          }
+        },
+        "/v1/health": {
+          "get": {
+            "operationId": "health_v1_health_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "title": "Response Health V1 Health Get",
+                      "type": "object"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "500": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    }
+                  }
+                },
+                "description": "Normalized internal server error"
+              }
+            },
+            "summary": "Health"
+          }
+        },
+        "/v1/jobs": {
+          "get": {
+            "description": "Return local jobs, or only the caller's owned jobs in hosted mode.",
+            "operationId": "list_jobs_v1_jobs_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/JobListResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "List Jobs",
+            "tags": [
+              "jobs"
+            ]
+          },
+          "post": {
+            "description": "Admit local work or hosted credit-backed work before starting its runner.",
+            "operationId": "create_job_v1_jobs_post",
+            "parameters": [
+              {
+                "in": "header",
+                "name": "Idempotency-Key",
+                "required": false,
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Idempotency-Key"
+                }
+              }
+            ],
+            "requestBody": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/JobRequest"
+                  }
+                }
+              },
+              "required": true
+            },
+            "responses": {
+              "202": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/JobResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Create Job",
+            "tags": [
+              "jobs"
+            ]
+          }
+        },
+        "/v1/jobs/preflight": {
+          "post": {
+            "description": "Validate executable local intent without creating a Job or reservation.",
+            "operationId": "preflight_v1_jobs_preflight_post",
+            "requestBody": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/JobRequest"
+                  }
+                }
+              },
+              "required": true
+            },
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/PreflightResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Preflight",
+            "tags": [
+              "jobs"
+            ]
+          }
+        },
+        "/v1/jobs/{job_id}": {
+          "get": {
+            "description": "Return the authoritative durable snapshot used for SSE reconnect recovery.",
+            "operationId": "get_job_v1_jobs__job_id__get",
+            "parameters": [
+              {
+                "in": "path",
+                "name": "job_id",
+                "required": true,
+                "schema": {
+                  "title": "Job Id",
+                  "type": "string"
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/JobResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Get Job",
+            "tags": [
+              "jobs"
+            ]
+          }
+        },
+        "/v1/jobs/{job_id}/artifact": {
+          "get": {
+            "description": "Authorize artifact retrieval from an owned completed local job only.",
+            "operationId": "get_artifact_v1_jobs__job_id__artifact_get",
+            "parameters": [
+              {
+                "in": "path",
+                "name": "job_id",
+                "required": true,
+                "schema": {
+                  "title": "Job Id",
+                  "type": "string"
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {}
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Get Artifact",
+            "tags": [
+              "jobs"
+            ]
+          }
+        },
+        "/v1/jobs/{job_id}/cancel": {
+          "post": {
+            "description": "Durably request cancellation once; repeated calls return the same snapshot.",
+            "operationId": "cancel_job_v1_jobs__job_id__cancel_post",
+            "parameters": [
+              {
+                "in": "path",
+                "name": "job_id",
+                "required": true,
+                "schema": {
+                  "title": "Job Id",
+                  "type": "string"
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/JobResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Cancel Job",
+            "tags": [
+              "jobs"
+            ]
+          }
+        },
+        "/v1/jobs/{job_id}/events": {
+          "get": {
+            "description": "Stream append-only events; callers re-fetch the snapshot after reconnecting.",
+            "operationId": "stream_events_v1_jobs__job_id__events_get",
+            "parameters": [
+              {
+                "in": "path",
+                "name": "job_id",
+                "required": true,
+                "schema": {
+                  "title": "Job Id",
+                  "type": "string"
+                }
+              },
+              {
+                "in": "header",
+                "name": "Last-Event-ID",
+                "required": false,
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Last-Event-Id"
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {}
+                  },
+                  "text/event-stream": {
+                    "schema": {
+                      "type": "string"
+                    },
+                    "x-event-schema": {
+                      "$ref": "#/components/schemas/EventResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Stream Events",
+            "tags": [
+              "jobs"
+            ]
+          }
+        },
+        "/v1/notifications": {
+          "get": {
+            "operationId": "preference_v1_notifications_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/NotificationPreferenceResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "Preference",
+            "tags": [
+              "notifications"
+            ]
+          },
+          "patch": {
+            "operationId": "set_preference_v1_notifications_patch",
+            "requestBody": {
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/NotificationPreferenceRequest"
+                  }
+                }
+              },
+              "required": true
+            },
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/NotificationPreferenceResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              },
+              "422": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/HTTPValidationError"
+                    }
+                  }
+                },
+                "description": "Validation Error"
+              }
+            },
+            "summary": "Set Preference",
+            "tags": [
+              "notifications"
+            ]
+          }
+        },
+        "/v1/voices": {
+          "get": {
+            "description": "Return only enabled entries in the server's explicit local registry.",
+            "operationId": "list_voices_v1_voices_get",
+            "responses": {
+              "200": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/VoiceListResponse"
+                    }
+                  }
+                },
+                "description": "Successful Response"
+              }
+            },
+            "summary": "List Voices",
+            "tags": [
+              "voices"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "deployments": {
+    "deferred": [
+      "fresh GHCR OCI source-label verification",
+      "current Modal deployed code revision",
+      "live database migration IDs and row checksums",
+      "deployed Studio source-label verification"
+    ],
+    "evidenceDate": "2026-11-02",
+    "evidenceSource": "read-only Render get_service/list_deploys, supplied by root agent",
+    "historicalLabelsNotFreshlyVerified": {
+      "core": "97cba6bdb663c15d2d90d6e4e017be23ecdb9c7c",
+      "server": "22c6eadcc180fd916b2f121e46c602c39a5b6254",
+      "studio": "468e067d02837e3a3ad79f5235c8b8111afc8e37"
+    },
+    "production": {
+      "autoDeploy": false,
+      "deployId": "dep-db9ogep42hec73caqr5g",
+      "finishedAt": "2026-10-17T14:40:49Z",
+      "imagePath": "ghcr.io/d1zzl3d0p/kenkui-server@sha256:7964ea844ff40a7c17d77f888c546c1dec7fcd2cf8f2904c2ce4743d8ac2fee7",
+      "imageSha": "sha256:4f00d1240d421b2c85c15f89ec7f59da1568e492f8b9d3e61a087dcf6ab53a9f",
+      "plan": "1c-2g",
+      "serviceId": "srv-dajcep8jo6nc73dacrpg",
+      "suspended": false
+    },
+    "staging": {
+      "deployId": "dep-dasimmo473hc738fmbbg",
+      "finishedAt": "2026-09-27T14:46:16Z",
+      "imagePath": "ghcr.io/d1zzl3d0p/kenkui-server@sha256:7964ea844ff40a7c17d77f888c546c1dec7fcd2cf8f2904c2ce4743d8ac2fee7",
+      "imageSha": "sha256:4f00d1240d421b2c85c15f89ec7f59da1568e492f8b9d3e61a087dcf6ab53a9f",
+      "serviceId": "srv-dajceonqj5pc73d2qmsg"
+    }
+  },
+  "fixturePolicy": {
+    "clock": "2026-11-02T18:00:00Z",
+    "httpStorage": "Existing local SQLite/AssetStore and hosted test fixture with real InMemoryBillingRepository; no R2/Modal/network.",
+    "normalization": [
+      "Fixed synthetic UUIDs and request IDs",
+      "Fixed ZIP timestamps",
+      "Cookie expiry wall time becomes <clock>; cookie flags and other headers remain"
+    ],
+    "postgres": "Actual repository SQL and migrations in a fresh disposable schema; no live database reads.",
+    "secrets": "Every credential-like value is synthetic test input, never a user/provider credential.",
+    "workos": "SDK calls use synthetic verified users; real BrowserAuthBackend/router/ownership middleware run unchanged."
+  },
+  "formatVersion": 1,
+  "neonInventory": {
+    "authEnabled": false,
+    "contents": "not inspected; never interpret absent inventory as an empty database",
+    "evidenceDate": "2026-11-02",
+    "evidenceSource": "read-only connected inventory supplied by root",
+    "functionsPresent": false,
+    "plan": "Free",
+    "postgresMajor": 17,
+    "productionProject": "mute-unit-91304892",
+    "region": "aws-us-east-1",
+    "stagingProject": "divine-boat-06396016"
+  },
+  "postgresContract": {
+    "authorizationStates": [
+      "released",
+      "settled"
+    ],
+    "concurrentAdmissions": {
+      "accepted": 1,
+      "rejected": 1
+    },
+    "creditsAfterFinalizationReplay": 200,
+    "creditsAfterIdempotentAdmission": 300,
+    "creditsAfterPaymentReplay": 500,
+    "dispatchCount": 2,
+    "jobCount": 2,
+    "ledger": [
+      {
+        "count": 1,
+        "credits": 500,
+        "kind": "purchase"
+      },
+      {
+        "count": 1,
+        "credits": 200,
+        "kind": "release"
+      },
+      {
+        "count": 2,
+        "credits": -500,
+        "kind": "reservation"
+      },
+      {
+        "count": 1,
+        "credits": 0,
+        "kind": "settlement"
+      }
+    ],
+    "migrations": [
+      "0000_core.sql",
+      "0001_hosted.sql",
+      "0002_beta.sql",
+      "0002_notifications.sql",
+      "0003_retention.sql",
+      "0004_credit_lots.sql",
+      "0005_checkpoints.sql"
+    ],
+    "ownershipPreserved": true
+  },
+  "repositories": {
+    "core": {
+      "detached": true,
+      "sha": "97cba6bdb663c15d2d90d6e4e017be23ecdb9c7c",
+      "version": "10.1.1"
+    },
+    "server": {
+      "branch": "migration/neon-full",
+      "implementationBase": "2795daf838aac4e04cea28998e741d972f8c2972",
+      "sha": "8ce780667f893dabcf0d4ee41bf0e6eacf855cc1",
+      "version": "10.1.0"
+    },
+    "studio": {
+      "branch": "migration/neon-auth",
+      "sha": "ea95155bd1649889c07aaadeafd3cb383d5bbf6f",
+      "version": "10.1.0"
+    }
+  },
+  "runtime": {
+    "node": "22.22.3",
+    "npm": "10.9.8",
+    "postgresTest": "17.7",
+    "python": "3.12.13",
+    "pythonPackages": {
+      "fastapi": "0.129.2",
+      "kenkui": "10.1.1",
+      "kenkui-server": "10.1.0",
+      "psycopg": "3.3.5",
+      "pydantic": "2.13.4",
+      "pytest": "8.4.2",
+      "starlette": "0.52.1",
+      "workos": "5.46.0"
+    }
+  },
+  "syntheticOnly": true
+}
