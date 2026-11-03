@@ -3,6 +3,7 @@ import type { Pool,PoolClient,QueryResultRow } from 'pg';
 /** One bounded stream read. No client remains checked out after resolution or abort. */
 export async function streamQuery<T extends QueryResultRow>(pool:()=>Pool,text:string,values:unknown[],signal?:AbortSignal):Promise<T[]> {
   signal?.throwIfAborted();
+  const started=Date.now();
   return new Promise<T[]>((resolve,reject)=>{
     let client:PoolClient|undefined,settled=false,released=false;
     const release=(destroy=false)=>{if(client&&!released){released=true;client.release(destroy);}};
@@ -20,8 +21,23 @@ export async function streamQuery<T extends QueryResultRow>(pool:()=>Pool,text:s
       void pool().connect().then(async checkedOut=>{
         client=checkedOut;
         if(settled){release(true);return;}
-        try {finish(undefined,(await client.query<T>(text,values)).rows);}
-        catch(error){finish(error);}
+        try {
+          // Destroying a pg socket does not cancel a backend waiting on a lock.
+          // Arm PostgreSQL itself before the read, scoped to this short transaction.
+          const serverMilliseconds=Math.min(3500,5000-(Date.now()-started)-500);
+          if(serverMilliseconds<1)throw new Error('Stream query deadline exceeded');
+          await client.query(`BEGIN READ ONLY; SET LOCAL statement_timeout = '${serverMilliseconds}ms'; SET LOCAL idle_in_transaction_session_timeout = '${serverMilliseconds}ms'`);
+          if(settled)return;
+          const rows=(await client.query<T>(text,values)).rows;
+          if(settled)return;
+          await client.query('COMMIT');
+          finish(undefined,rows);
+        }catch(error){
+          if(!settled){
+            try {await client.query('ROLLBACK');}catch{/* A broken connection is destroyed below. */}
+            finish(error);
+          }
+        }
       },error=>finish(error));
     }catch(error){finish(error);}
   });

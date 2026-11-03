@@ -108,6 +108,38 @@ it.each(['checkout','query'])('bounds a stalled %s to five seconds, handles late
   expect(release).toHaveBeenCalledExactlyOnceWith(true);
 });
 
+it.each(['setup','read','commit','rollback'])('handles abort during %s without later SQL, leaked timers or repeated release',async phase=>{
+  vi.useFakeTimers();let unblock!:(value:unknown)=>void;
+  const release=vi.fn(),query=vi.fn(async(sql:string)=>{
+    const step=sql.startsWith('BEGIN')?'setup':sql==='COMMIT'?'commit':sql==='ROLLBACK'?'rollback':'read';
+    if(phase==='rollback'&&step==='read')throw Error('read failed');
+    if(step===phase)return new Promise(resolve=>{unblock=resolve;});
+    return {rows:step==='read'?[{value:'kept'}]:[]};
+  });
+  const pool={connect:vi.fn(async()=>({query,release}))} as unknown as Pool,abort=new AbortController();
+  const pending=streamQuery(()=>pool,'SELECT 1',[],abort.signal),rejected=expect(pending).rejects.toMatchObject({name:'AbortError'});
+  await vi.advanceTimersByTimeAsync(0);expect(unblock).toBeTypeOf('function');const count=query.mock.calls.length;
+  abort.abort();await rejected;unblock({rows:[]});await vi.advanceTimersByTimeAsync(0);
+  expect(query).toHaveBeenCalledTimes(count);expect(release).toHaveBeenCalledExactlyOnceWith(true);expect(vi.getTimerCount()).toBe(0);
+});
+
+it('commits before returning rows and rolls back failed reads without leaking transaction settings',async()=>{
+  vi.useFakeTimers();const release=vi.fn();let fail=false;
+  const query=vi.fn(async(sql:string)=>{if(sql==='SELECT 1'){if(fail)throw Error('read failed');return {rows:[{value:'kept'}]};}return {rows:[]};});
+  const pool={connect:vi.fn(async()=>({query,release}))} as unknown as Pool;
+  expect(await streamQuery(()=>pool,'SELECT 1',[])).toEqual([{value:'kept'}]);
+  expect(query.mock.calls.map(c=>c[0])).toEqual(["BEGIN READ ONLY; SET LOCAL statement_timeout = '3500ms'; SET LOCAL idle_in_transaction_session_timeout = '3500ms'",'SELECT 1','COMMIT']);expect(release).toHaveBeenCalledExactlyOnceWith(false);
+  query.mockClear();release.mockClear();fail=true;await expect(streamQuery(()=>pool,'SELECT 1',[])).rejects.toThrow('read failed');
+  expect(query.mock.calls.map(c=>c[0])).toEqual(["BEGIN READ ONLY; SET LOCAL statement_timeout = '3500ms'; SET LOCAL idle_in_transaction_session_timeout = '3500ms'",'SELECT 1','ROLLBACK']);expect(release).toHaveBeenCalledExactlyOnceWith(true);expect(vi.getTimerCount()).toBe(0);
+});
+
+it('reduces the server timeout after delayed checkout to stay inside the request deadline',async()=>{
+  vi.useFakeTimers();let checkout!:(value:unknown)=>void;const release=vi.fn(),query=vi.fn(async()=>({rows:[]}));
+  const pool={connect:vi.fn(()=>new Promise(resolve=>{checkout=resolve;}))} as unknown as Pool;
+  const pending=streamQuery(()=>pool,'SELECT 1',[]);await vi.advanceTimersByTimeAsync(4000);checkout({query,release});await pending;
+  expect(query.mock.calls[0]).toEqual(["BEGIN READ ONLY; SET LOCAL statement_timeout = '500ms'; SET LOCAL idle_in_transaction_session_timeout = '500ms'"]);expect(release).toHaveBeenCalledExactlyOnceWith(false);expect(vi.getTimerCount()).toBe(0);
+});
+
 it('does not classify cancel_requested as terminal and closes a request-aborted idle stream',async()=>{
   vi.useFakeTimers();const s=setup();s.events.readStatus.mockResolvedValue('cancel_requested');const abort=new AbortController();
   const res=await s.app.request('/v1/jobs/'+id+'/events',{headers,signal:abort.signal});const reader=res.body!.getReader(),pending=reader.read();await vi.advanceTimersByTimeAsync(5000);

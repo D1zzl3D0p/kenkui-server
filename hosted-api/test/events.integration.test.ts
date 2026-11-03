@@ -83,11 +83,48 @@ describe.skipIf(!connectionString)('bounded event reads on actual Python-migrate
     const app=createApi({config:loadConfig({KENKUI_ENV:'staging'}),getPool:()=>pool,auth:{async verify(){return {userId:owner,issuer:'fixture',subject:'fixture'};}}});
     registerEventRoutes(app,{jobs:new JobStore(()=>pool),events});const reads=vi.spyOn(events,'readEvents');
     await admin.query('BEGIN');await admin.query('LOCK TABLE '+schema+'.jobs IN ACCESS EXCLUSIVE MODE');
-    const abort=new AbortController(),pending=app.request('/v1/jobs/'+id+'/events',{headers,signal:abort.signal});
-    await until(async()=>{await admin.query('SELECT pg_stat_clear_snapshot()');return Number((await admin.query("SELECT count(*) FROM pg_stat_activity WHERE application_name=$1 AND wait_event_type='Lock'",[schema])).rows[0].count)===1;});
+    const abort=new AbortController(),pending=app.request('/v1/jobs/'+id+'/events',{headers,signal:abort.signal});let pid:number|undefined;
+    await until(async()=>{await admin.query('SELECT pg_stat_clear_snapshot()');pid=(await admin.query("SELECT pid FROM pg_stat_activity WHERE application_name=$1 AND wait_event_type='Lock'",[schema])).rows[0]?.pid;return pid!==undefined;});
     abort.abort();await pending;
-    await until(async()=>pool.totalCount===0);expect(reads).not.toHaveBeenCalled();await admin.query('ROLLBACK');
-  });
+    await until(async()=>pool.totalCount===0);expect(reads).not.toHaveBeenCalled();
+    await until(async()=>{await admin.query('SELECT pg_stat_clear_snapshot()');return (await admin.query('SELECT pid FROM pg_stat_activity WHERE pid=$1',[pid])).rows.length===0;});
+    expect((await admin.query('SELECT mode FROM pg_locks WHERE pid=pg_backend_pid() AND relation=$1::regclass AND granted',[schema+'.jobs'])).rows).toContainEqual({mode:'AccessExclusiveLock'});
+    await admin.query('ROLLBACK');
+  },10000);
+
+  it('stops every blocked backend from repeated aborted reconnects while the blocker stays held',async()=>{
+    await admin.query('BEGIN');await admin.query('LOCK TABLE '+schema+'.job_events IN ACCESS EXCLUSIVE MODE');
+    const pids:number[]=[],pending:Promise<unknown>[]=[];
+    try {
+      for(let attempt=0;attempt<3;attempt++){
+        const abort=new AbortController(),read=events.readEvents(id,0n,100,abort.signal);pending.push(read);
+        const rejected=expect(read).rejects.toMatchObject({name:'AbortError'});
+        await until(async()=>{await admin.query('SELECT pg_stat_clear_snapshot()');const pid=(await admin.query("SELECT pid FROM pg_stat_activity WHERE application_name=$1 AND wait_event_type='Lock' AND NOT(pid=ANY($2::int[]))",[schema,pids])).rows[0]?.pid;if(pid!==undefined){pids.push(pid);return true;}return false;});
+        abort.abort();await rejected;expect(pool.totalCount).toBe(0);
+      }
+      // Pool counters cannot prove PostgreSQL stopped executing a destroyed socket.
+      await until(async()=>{await admin.query('SELECT pg_stat_clear_snapshot()');return (await admin.query('SELECT pid FROM pg_stat_activity WHERE pid=ANY($1::int[])',[pids])).rows.length===0;});
+      expect((await admin.query('SELECT mode FROM pg_locks WHERE pid=pg_backend_pid() AND relation=$1::regclass AND granted',[schema+'.job_events'])).rows).toContainEqual({mode:'AccessExclusiveLock'});
+    }finally{await admin.query('ROLLBACK');await Promise.allSettled(pending);}
+  },10000);
+
+  it('enforces a server statement deadline without client abort and restores settings for normal pool users',async()=>{
+    const previous=(await pool.query("SELECT current_setting('statement_timeout') AS statement,current_setting('idle_in_transaction_session_timeout') AS idle")).rows[0];
+    await pool.query("SET statement_timeout='8s'; SET idle_in_transaction_session_timeout='12s'");
+    expect(await events.readEvents(id,0n,100)).toEqual([]);
+    const settings=(await pool.query("SELECT current_setting('statement_timeout') AS statement,current_setting('idle_in_transaction_session_timeout') AS idle,current_setting('transaction_read_only') AS readonly")).rows[0];
+    expect(settings).toEqual({statement:'8s',idle:'12s',readonly:'off'});
+    await admin.query('BEGIN');await admin.query('LOCK TABLE '+schema+'.job_events IN ACCESS EXCLUSIVE MODE');
+    const read=events.readEvents(id,0n,100),rejected=expect(read).rejects.toMatchObject({code:'57014'});let pid:number|undefined;
+    try {
+      await until(async()=>{await admin.query('SELECT pg_stat_clear_snapshot()');pid=(await admin.query("SELECT pid FROM pg_stat_activity WHERE application_name=$1 AND wait_event_type='Lock'",[schema])).rows[0]?.pid;return pid!==undefined;});
+      await rejected;
+      await until(async()=>{await admin.query('SELECT pg_stat_clear_snapshot()');return (await admin.query('SELECT pid FROM pg_stat_activity WHERE pid=$1',[pid])).rows.length===0;});
+      expect((await admin.query('SELECT mode FROM pg_locks WHERE pid=pg_backend_pid() AND relation=$1::regclass AND granted',[schema+'.job_events'])).rows).toContainEqual({mode:'AccessExclusiveLock'});
+    }finally{await admin.query('ROLLBACK');await read.catch(()=>{});}
+    const next=(await pool.query("SELECT current_setting('statement_timeout') AS statement,current_setting('idle_in_transaction_session_timeout') AS idle")).rows[0];expect(next).toEqual(previous);
+    expect((await admin.query("SELECT count(*) FROM pg_stat_activity WHERE application_name=$1 AND state LIKE 'idle in transaction%'",[schema])).rows[0].count).toBe('0');
+  },10000);
 
   it('releases a late pool checkout after abort and never runs the event query',async()=>{
     const held=await pool.connect(),abort=new AbortController();
