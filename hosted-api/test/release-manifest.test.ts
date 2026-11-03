@@ -20,7 +20,7 @@ function config(directory:string,extra:Record<string,string>={}) {
 it('actual canonical deploy config derives all pins from verified receipt/runtime hashes',async()=>{
   const directory=await fixture();try{
     const result=config(directory,{NEON_AUTH_JWKS_URL:'https://ignored.invalid/keys'});expect(result.status).toBe(0);
-    const env=JSON.parse(result.stdout);expect(env).toMatchObject({NEON_AUTH_BASE_URL:pin.issuer,NEON_AUTH_JWKS_URL:pin.jwksUrl,KENKUI_NATIVE_CLIENT_ID:pin.clientId,KENKUI_ESTIMATED_COST_CENTS_PER_MILLION:'333'});
+    const env=JSON.parse(result.stdout);expect(env).not.toHaveProperty('DATABASE_URL');expect(env).toMatchObject({KENKUI_API_DATABASE_URL:'postgresql://api_runtime@synthetic.invalid/db',NEON_AUTH_BASE_URL:pin.issuer,NEON_AUTH_JWKS_URL:pin.jwksUrl,KENKUI_NATIVE_CLIENT_ID:pin.clientId,KENKUI_ESTIMATED_COST_CENTS_PER_MILLION:'333'});
   }finally{await rm(directory,{recursive:true,force:true});}
 });
 it('actual deploy path rejects a JWKS-only env substitution before configuration can apply',async()=>{

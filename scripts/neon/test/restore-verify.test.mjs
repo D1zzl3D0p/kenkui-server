@@ -8,12 +8,14 @@ import { captureInventory,writePrivateManifest } from '../inventory.mjs';
 import { assertEmptyTarget,verifyRestore as rawVerifyRestore } from '../restore-verify.mjs';
 
 const base='postgresql://postgres@127.0.0.1:55438/postgres',python=resolve('.venv/bin/python');
-const pg='/opt/homebrew/opt/libpq/bin/';
+const pg=process.env.KENKUI_PG_BIN;
 function reviewFor(source,target,extra={}) {return {format:'restore-review-v1',mode:'copy',purpose:'restored-copy',environment:source.environment,source:{target:source.target,captureDigest:source.captureDigest,databaseIdentity:{projectId:source.target.projectId,branchId:source.target.branchId,database:source.target.database}},destination:{target:target.target,captureDigest:target.captureDigest,databaseIdentity:{projectId:target.target.projectId,branchId:target.target.branchId,database:target.target.database}},approvalRef:'synthetic-independent-review',attestedBy:'synthetic-operator',attestedAt:new Date().toISOString(),migrationIds:[],newSequences:{},...extra};}
 function verifyRestore(source,target,review) {return rawVerifyRestore(source,target,review?.mode==='migrated'?reviewFor(source,target,{...review,purpose:'migrated-target'}):review??reviewFor(source,target));}
 function py(code,data={}) {return JSON.parse(execFileSync(python,['-c',code],{input:JSON.stringify(data),encoding:'utf8',stdio:['pipe','pipe','pipe']}));}
 function sql(url,statement) {return py("import sys,json,psycopg\nd=json.load(sys.stdin)\nwith psycopg.connect(d['url'],autocommit=True) as c:\n c.execute(d['sql'])\nprint('null')",{url,sql:statement});}
 test('real disposable copy, mutations, migration delta, managed/private permissions and safe CLI', {skip:process.env.KENKUI_TEST_DATABASE_URL!==base},async t=>{
+  assert(pg && pg.startsWith('/'),'Set KENKUI_PG_BIN to a vetted absolute PostgreSQL 17+ client directory');
+  for(const bin of ['pg_dump','pg_restore'])assert(Number(execFileSync(join(pg,bin),['--version'],{encoding:'utf8'}).match(/PostgreSQL\) (\d+)/)?.[1])>=17);
   const root=mkdtempSync(join(tmpdir(),'kenkui-restore-verifier-'));
   const names=py(`import json,uuid,psycopg
 from psycopg import sql
@@ -41,8 +43,8 @@ print(json.dumps(names))`);
   const options=i=>({databaseUrl:urls[i],environment:'staging',mode:i===0?'source':'restored-copy',synthetic:true,target:{host:'127.0.0.1',port:55438,database:names[i],projectId:'synthetic-project',branchId:'synthetic-'+i},r2Keys:[key,'checkpoints/a9bb44f5451bbbc0fe393a9c4ad8b7a8fb4c0c14516542a14c595c96a26cff6c'],keySalt:'synthetic',managedAuth:'required'});
   try {
     await assertEmptyTarget(options(1));
-    execFileSync(pg+'pg_dump',['--format=custom','--no-owner','--no-acl','--file',dump,urls[0]],{stdio:'pipe'});
-    execFileSync(pg+'pg_restore',['--no-owner','--no-acl','--exit-on-error','--dbname',urls[1],dump],{stdio:'pipe'});
+    execFileSync(join(pg,'pg_dump'),['--format=custom','--no-owner','--no-acl','--file',dump,urls[0]],{stdio:'pipe'});
+    execFileSync(join(pg,'pg_restore'),['--no-owner','--no-acl','--exit-on-error','--dbname',urls[1],dump],{stdio:'pipe'});
     const source=await captureInventory(options(0)),target=await captureInventory(options(1));
     await t.test('all tables/auth/private evidence and exact established quarantine digest survive empty-target copy',()=>{
       assert.equal(verifyRestore(source,target).status,'verified-copy');

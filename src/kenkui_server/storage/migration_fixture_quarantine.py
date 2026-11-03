@@ -9,6 +9,8 @@ from uuid import UUID
 
 from psycopg import sql
 
+from kenkui_server.storage.migration_allocation_evidence import allocation_exceptions
+
 ASSERTION = "owner-approved-synthetic-fixtures-preserve-all-exclude-recovery"
 APPROVAL_KEYS = ("approvalArtifactDigest", "approvalRef", "attestedBy", "attestedAt", "records")
 MANIFEST_KEYS = {
@@ -179,12 +181,18 @@ def fixture_fingerprint(conn: Any, environment: str, owner: UUID) -> str:
         return _fingerprint(_projection(conn, environment, owner))
 
 
-def _validate_owner(conn: Any, environment: str, owner: UUID, record: dict[str, Any]) -> None:
+def _validate_owner(
+    conn: Any, environment: str, owner: UUID, record: dict[str, Any], approved: list[dict[str, Any]]
+) -> None:
     data = _projection(conn, environment, owner)
     require(_fingerprint(data) == record["fixtureFingerprint"])
     require(len(data["identity"]) == 1 and data["identity"][0]["email"] is None)
     require(len(data["bindings"]) == 1 and not data["payments"])
     require(all(j["status"] in ("succeeded", "failed", "cancelled") for j in data["jobs"]))
+    invalid, candidates = allocation_exceptions(conn, owner)
+    account_ids = {a["id"] for a in data["accounts"]}
+    require(invalid == len(candidates) and all(r["chronologyValid"] for r in candidates))
+    require(candidates == [r for r in approved if r["accountId"] in account_ids])
     balances = {a["id"]: int(a["available_credits"]) for a in data["accounts"]}
     available_from_lots = dict.fromkeys(balances, 0)
     ledger_balances = dict.fromkeys(balances, 0)
@@ -212,6 +220,11 @@ def _validate_owner(conn: Any, environment: str, owner: UUID, record: dict[str, 
     for auth in data["authorizations"]:
         require(auth["account_owner"] == auth["job_owner"] == str(owner))
         authorizations[auth["id"]] = auth["account_id"]
+    lot_accounts = {lot["id"]: lot["account_id"] for lot in data["lots"]}
+    for allocation in data["allocations"]:
+        account = allocation["account_id"]
+        require(authorizations.get(allocation["authorization_id"]) == account)
+        require(lot_accounts.get(allocation["lot_id"]) == account)
     for entry in data["ledger"]:
         account = entry["account_id"]
         require(account in balances and not entry["reference"].startswith("stripe:"))
@@ -330,6 +343,14 @@ def validate_quarantine(
     require(isinstance(data["records"], list) and len(data["records"]) == len(missing) > 0)
     require(restored_snapshot_digest(conn) == data["restoredSnapshotDigest"])
     conn.execute("LOCK TABLE identity_link_proofs,migration_challenges IN SHARE MODE")
+    approved = []
+    if "historicalSettlements" in evidence:
+        historical = evidence["historicalSettlements"]
+        require(historical["assertion"] == "independently-reviewed-historical-pre-0004")
+        require(_digest(evidence.get("originalSourceCaptureDigest")))
+        require(historical["sourceCaptureDigest"] == evidence["originalSourceCaptureDigest"])
+        approved = historical["records"]
+        require(isinstance(approved, list))
     remaining = dict(missing)
     keys = {"ownerId", "legacySubject", "fixtureFingerprint"}
     if data["version"] == 2:
@@ -346,7 +367,7 @@ def validate_quarantine(
             and str(remaining[sub]) == entry["ownerId"]
         )
         require(_digest(entry["fixtureFingerprint"]))
-        _validate_owner(conn, environment, remaining.pop(sub), entry)
+        _validate_owner(conn, environment, remaining.pop(sub), entry, approved)
     # An operator can rebind unchanged reviewed records to a new snapshot. A change
     # needs a fresh durable decision; replaying a formerly active approval is insufficient.
     classifications = {

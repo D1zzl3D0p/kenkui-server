@@ -1,4 +1,5 @@
 import type { Hono } from 'hono';
+import { readBoundedBody,boundedText } from './request-body.js';
 import { getOnly } from './get-only.js';
 import { InvalidStripeEvent, packs, type Checkout, type StripePayments } from '../billing/stripe.js';
 import { JsonIntegerTooLong, parseExactJson } from '../billing/integers.js';
@@ -62,7 +63,7 @@ export function registerBillingRoutes(app:Hono<ApiEnv>,services:BillingServices)
     return c.json({items:await services.store.history(result.id)});
   });
   app.post('/v1/billing/checkout',async c=>{
-    const amount=checkoutCredits(await c.req.text(),c.req.header('Content-Type'));
+    const amount=checkoutCredits(await boundedText(c.req.raw,8192),c.req.header('Content-Type'));
     if(!services.checkoutEnabled)throw new ApiError(503,'http_error','Card payments are not configured yet.');
     const credits=Number(amount);
     if(!packs.has(credits))throw new ApiError(422,'http_error','invalid_credit_pack');
@@ -74,7 +75,7 @@ export function registerBillingRoutes(app:Hono<ApiEnv>,services:BillingServices)
   if(webhook)app.post('/v1/billing/webhooks/stripe',async c=>{
     const signature=c.req.header('Stripe-Signature');
     if(!signature)return c.body(null,400);
-    try {await webhook.processStripeEvent(new Uint8Array(await c.req.arrayBuffer()),signature);}
+    try {await webhook.processStripeEvent(await readBoundedBody(c.req.raw,1024*1024,'Stripe event is too large.'),signature);}
     catch(error){
       if(error instanceof InvalidStripeEvent||error instanceof PaymentReferenceConflict)return c.body(null,400);
       throw error;

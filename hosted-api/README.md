@@ -16,7 +16,9 @@ No provider deploy command has been run.
 
 `src/index.ts` exports the Neon web `fetch` handler. It reads configuration on
 the first invocation, constructs the Hono app once, and passes the lazy `getPool`
-function without calling it. Importing modules does not read `DATABASE_URL`, open
+function without calling it. The job and preflight endpoints accept up to 12 MiB of JSON wire bytes, Stripe accepts 1 MiB of unmodified signed bytes, and checkout and notification preferences accept 8 KiB. Each route counts streamed bytes before parsing.
+
+Importing modules does not read `KENKUI_API_DATABASE_URL`, open
 connections, query, run migrations, or provision services. A failed configuration
 load returns a sanitized 503 and can be retried.
 
@@ -33,7 +35,7 @@ Set values separately for staging and production:
 | `KENKUI_EMAIL_NOTIFICATIONS` | `true` advertises configured notification support; deployment must match worker settings |
 | `KENKUI_INGRESS_PROTECTION` | `true` requires the origin secret at configuration load |
 | `KENKUI_ORIGIN_SECRET` | When set, every request must carry matching `X-Kenkui-Origin-Secret`, including OPTIONS; edge ingress injects this, clients never receive it |
-| `DATABASE_URL` | Required only when a database operation first calls `getPool`; use the environment's pooled Neon URL |
+| `KENKUI_API_DATABASE_URL` | Restricted API role. Required only when a database operation first calls `getPool`; use the environment's pooled Neon URL |
 
 The handler binds real Neon JWT verification when `NEON_AUTH_BASE_URL`,
 `NEON_AUTH_JWKS_URL`, `KENKUI_AUTH_RESOURCE`, and `KENKUI_NATIVE_CLIENT_ID` are

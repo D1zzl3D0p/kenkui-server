@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Hono } from 'hono';
+import { readBoundedBody } from './request-body.js';
 import { getOnly } from './get-only.js';
 import { ApiError, type ApiEnv, type ApiConfig } from '../types.js';
 import type { AssetResponse, ModalBridge } from '../compute/modal.js';
@@ -8,19 +9,6 @@ import type { ObjectStore } from '../storage/r2.js';
 
 export interface AssetServices {assets:AssetStore;objects:ObjectStore;bridge:Pick<ModalBridge,'inspect'|'cover'|'replaceCover'>}
 const fail=(status:413|415|422,message:string)=>new ApiError(status,'http_error',message);
-export async function readBoundedBody(request:Request,max:number,limitMessage:string):Promise<Buffer> {
-  const declared=request.headers.get('content-length');
-  if(declared&&(!/^\d+$/.test(declared)||!Number.isSafeInteger(Number(declared))))throw fail(422,'Invalid content length.');
-  if(declared&&Number(declared)>max)throw fail(413,limitMessage);
-  const reader=request.body?.getReader();
-  const chunks:Uint8Array[]=[];let size=0;
-  try {
-    if(reader)while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>max){await reader.cancel();throw fail(413,limitMessage);}chunks.push(value);}
-  }catch(error){if(error instanceof ApiError)throw error;throw fail(422,'Incomplete upload.');}
-  finally{reader?.releaseLock();}
-  if(declared&&size!==Number(declared))throw fail(422,'Incomplete upload.');
-  return Buffer.concat(chunks,size);
-}
 function imageType(bytes:Uint8Array):'image/png'|'image/jpeg'|undefined {
   if(bytes.length<32)return undefined;
   if(Buffer.from(bytes.subarray(0,8)).equals(Buffer.from('89504e470d0a1a0a','hex')))return 'image/png';

@@ -6,11 +6,13 @@ import { tmpdir } from 'node:os';
 import { join,resolve } from 'node:path';
 import { captureInventory } from '../inventory.mjs';
 import { verifyRestore } from '../restore-verify.mjs';
-const base='postgresql://postgres@127.0.0.1:55438/postgres',python=resolve('.venv/bin/python'),pg='/opt/homebrew/opt/libpq/bin/';
+const base='postgresql://postgres@127.0.0.1:55438/postgres',python=resolve('.venv/bin/python'),pg=process.env.KENKUI_PG_BIN;
 function py(code,data={}) {return JSON.parse(execFileSync(python,['-c',code],{input:JSON.stringify(data),encoding:'utf8',stdio:['pipe','pipe','pipe']}));}
 function sql(url,query) {return py("import sys,json,psycopg\nd=json.load(sys.stdin)\nwith psycopg.connect(d['url'],autocommit=True) as c:c.execute(d['query'])\nprint('null')",{url,query});}
 function review(source,target,extra={}) {return {format:'restore-review-v1',purpose:'restored-copy',environment:'staging',source:{target:source.target,captureDigest:source.captureDigest,databaseIdentity:{projectId:source.target.projectId,branchId:source.target.branchId,database:source.target.database}},destination:{target:target.target,captureDigest:target.captureDigest,databaseIdentity:{projectId:target.target.projectId,branchId:target.target.branchId,database:target.target.database}},approvalRef:'synthetic-independent-review',attestedBy:'synthetic-operator',attestedAt:new Date().toISOString(),migrationIds:[],newSequences:{},...extra,attestedAt:new Date().toISOString()};}
 test('actual pre0004 settlement ->0004 ->pre0008 source copy ->all pending migrations preserves history', {skip:process.env.KENKUI_TEST_DATABASE_URL!==base},async()=>{
+  assert(pg && pg.startsWith('/'),'Set KENKUI_PG_BIN to a vetted absolute PostgreSQL 17+ client directory');
+  for(const bin of ['pg_dump','pg_restore'])assert(Number(execFileSync(join(pg,bin),['--version'],{encoding:'utf8'}).match(/PostgreSQL\) (\d+)/)?.[1])>=17);
   const root=mkdtempSync(join(tmpdir(),'kenkui-actual-upgrade-'));
   const names=py(`import json,uuid,tempfile,shutil,psycopg
 from pathlib import Path
@@ -30,6 +32,8 @@ with tempfile.TemporaryDirectory() as tmp:
   c.execute("INSERT INTO jobs(id,spec_json,status,version,progress_json,owner_id) VALUES ('historical-job','{}','succeeded',0,'{}','00000000-0000-0000-0000-000000000001')")
   c.execute("INSERT INTO credit_accounts(id,identity_id,available_credits) VALUES ('00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000001',4)")
   c.execute("INSERT INTO credit_authorizations(id,job_id,account_id,credits,status,created_at,finalized_at) VALUES ('00000000-0000-0000-0000-000000000003','historical-job','00000000-0000-0000-0000-000000000002',3,'settled','2020-01-01Z','2020-01-02Z')")
+  c.execute("INSERT INTO jobs(id,spec_json,status,version,progress_json,owner_id) SELECT 'released-job',spec_json,'cancelled',version,progress_json,owner_id FROM jobs")
+  c.execute("INSERT INTO credit_authorizations(id,job_id,account_id,credits,status,created_at,finalized_at) SELECT gen_random_uuid(),'released-job',account_id,credits,'released',created_at,finalized_at FROM credit_authorizations")
  for f in sorted(Path('migrations/postgresql').glob('*.sql')):
   if f.name<'0008':shutil.copy(f,p/f.name)
  db.migrate(p)
@@ -38,9 +42,9 @@ db.close();print(json.dumps(names))`);
   const options=i=>({databaseUrl:urls[i],environment:'staging',mode:i?'restored-copy':'source',synthetic:true,target:{host:'127.0.0.1',port:55438,database:names[i],projectId:'synthetic-project',branchId:'synthetic-'+i},managedAuth:'absent-reviewed-source',r2Keys:[],keySalt:'synthetic'});
   try {
     const source=await captureInventory(options(0)),dump=join(root,'copy.dump');
-    assert.equal(source.creditInvariants.historicalSettlementCandidates.length,1);
-    execFileSync(pg+'pg_dump',['--format=custom','--no-owner','--no-acl','--file',dump,urls[0]],{stdio:'pipe'});
-    execFileSync(pg+'pg_restore',['--no-owner','--no-acl','--exit-on-error','--dbname',urls[1],dump],{stdio:'pipe'});
+    assert.deepEqual(source.creditInvariants.historicalSettlementCandidates.map(r=>r.status).sort(),['released','settled']);
+    execFileSync(join(pg,'pg_dump'),['--format=custom','--no-owner','--no-acl','--file',dump,urls[0]],{stdio:'pipe'});
+    execFileSync(join(pg,'pg_restore'),['--no-owner','--no-acl','--exit-on-error','--dbname',urls[1],dump],{stdio:'pipe'});
     const restored=await captureInventory(options(1));
     assert.throws(()=>verifyRestore(source,restored,review(source,restored)),/historical|allocation/i);
     const historicalSettlements={assertion:'independently-reviewed-historical-pre-0004',sourceCaptureDigest:source.captureDigest,records:source.creditInvariants.historicalSettlementCandidates};
@@ -59,6 +63,15 @@ db.close();print(json.dumps(names))`);
       ["UPDATE credit_authorizations SET finalized_at=clock_timestamp()","UPDATE credit_authorizations SET finalized_at='2020-01-02Z'"],
       ["INSERT INTO credit_allocations VALUES ('00000000-0000-0000-0000-000000000003','legacy:00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000002',1)","DELETE FROM credit_allocations"],
     ]) {sql(urls[1],change);try {const bad=await captureInventory(migratedOptions);assert.throws(()=>verifyRestore(source,bad,review(source,bad,{...approved,destination:{target:bad.target,captureDigest:bad.captureDigest,databaseIdentity:{projectId:bad.target.projectId,branchId:bad.target.branchId,database:bad.target.database}},reviewedTargetDigest:bad.fullDigest})));}finally{sql(urls[1],undo);}}
+    sql(urls[1],"INSERT INTO credit_allocations SELECT id,'legacy:'||account_id,account_id,1 FROM credit_authorizations WHERE status='released'");
+    try {
+      const partial=await captureInventory(migratedOptions);
+      assert.equal(partial.creditInvariants.invalidAllocations,2);
+      assert.deepEqual(partial.creditInvariants.historicalSettlementCandidates.map(r=>r.status),['settled']);
+      sql(urls[1],"UPDATE credit_allocations SET credits=3");
+      const valid=await captureInventory(migratedOptions);
+      assert.equal(valid.creditInvariants.invalidAllocations,1);
+    } finally {sql(urls[1],"DELETE FROM credit_allocations");}
     for(const finalized of ['NULL','clock_timestamp()']) {
       sql(urls[0],'UPDATE credit_authorizations SET finalized_at='+finalized);
       try {
@@ -71,5 +84,7 @@ db.close();print(json.dumps(names))`);
     const bad=await captureInventory(migratedOptions);
     const fabricated={...historicalSettlements,records:bad.creditInvariants.historicalSettlementCandidates};
     assert.throws(()=>verifyRestore(source,bad,review(source,bad,{...approved,destination:{target:bad.target,captureDigest:bad.captureDigest,databaseIdentity:{projectId:bad.target.projectId,branchId:bad.target.branchId,database:bad.target.database}},reviewedTargetDigest:bad.fullDigest,historicalSettlements:fabricated})),/historical|allocation/i);
+    sql(urls[1],"DELETE FROM credit_authorizations WHERE job_id='new-job'; DELETE FROM jobs WHERE id='new-job'");
+    execFileSync(python,['scripts/neon/test/directory-upgrade.py'],{input:JSON.stringify({root,url:urls[1],source,target:after,review:approved}),stdio:['pipe','pipe','inherit']});
   } finally {for(const n of names)sql(base,'DROP DATABASE '+n+' WITH (FORCE)');rmSync(root,{recursive:true,force:true});}
 });

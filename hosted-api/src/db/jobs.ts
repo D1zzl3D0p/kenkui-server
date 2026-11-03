@@ -15,6 +15,9 @@ export interface AdmissionResult {
   jobId:string;dispatchId:string;spec:JobSpec;status:string;version:number;progressJson:string;replayed:boolean;
 }
 const conflict=(code:string)=>new ApiError(409,'http_error',code);
+// This class is thrown only inside admission before a candidate job is inserted.
+class UnusedCandidate extends ApiError {}
+const denied=(reason:string)=>new UnusedCandidate(409,'http_error',reason);
 const queuedProgress='{"completed":0,"stage":"queued","total":0}';
 
 async function reserveLots(client:PoolClient,account:string,authorization:string,credits:bigint){
@@ -86,21 +89,21 @@ export class JobStore {
           WHERE k.key=$1 AND j.owner_id=$2`,[key,ownerId])).rows[0];
         if(existing){
           const stored=decodeSpec(existing.spec_json);
-          if(encodeSpec(stored)!==encodeSpec(spec))throw conflict('idempotency_conflict');
+          if(encodeSpec(stored)!==encodeSpec(spec))throw denied('idempotency_conflict');
           return {jobId:existing.id,dispatchId:existing.dispatch_id,status:existing.status,version:existing.version,
             progressJson:existing.progress_json,spec:stored,replayed:true};
         }
       }
       const active=await client.query("SELECT count(*) FROM jobs WHERE owner_id=$1 AND status NOT IN ('succeeded','failed','cancelled')",[ownerId]);
-      if(BigInt(active.rows[0].count)>=3n)throw conflict('active_job_limit');
+      if(BigInt(active.rows[0].count)>=3n)throw denied('active_job_limit');
       const source=(await client.query('SELECT owner_id,deleted_at FROM assets WHERE id=$1 FOR UPDATE',[spec.source_id])).rows[0];
-      if(!source)throw new ApiError(404,'not_found','Not found');
-      if(source.owner_id!==ownerId)throw new ApiError(403,'http_error','resource is not owned by this user');
-      if(source.deleted_at!==null)throw conflict('source_expired');
-      if(credits>9223372036854775807n)throw conflict('insufficient_credits');
+      if(!source)throw new UnusedCandidate(404,'not_found','Not found');
+      if(source.owner_id!==ownerId)throw new UnusedCandidate(403,'http_error','resource is not owned by this user');
+      if(source.deleted_at!==null)throw denied('source_expired');
+      if(credits>9223372036854775807n)throw denied('insufficient_credits');
       const amount=credits.toString(),authorization=randomUUID();
       const debit=await client.query('UPDATE credit_accounts SET available_credits=available_credits-$1 WHERE id=$2 AND available_credits >= $1',[amount,accountId]);
-      if(!debit.rowCount)throw conflict('insufficient_credits');
+      if(!debit.rowCount)throw denied('insufficient_credits');
       if(credits>2147483647n)throw Error('invalid_credit_amount');
       await client.query("INSERT INTO credit_authorizations(id,job_id,account_id,credits,status) VALUES ($1,$2,$3,$4,'reserved')",[authorization,jobId,accountId,amount]);
       await reserveLots(client,accountId,authorization,credits);
@@ -120,7 +123,15 @@ export async function submitJob(store:Pick<JobStore,'admitJob'>,signals:Recovery
   dispatch:(id:string)=>Promise<unknown>,input:AdmissionInput):Promise<AdmissionResult>{
   if(input.credits<1n)throw conflict('empty_speech');
   await signals.arm(input.jobId);
-  const admitted=await store.admitJob(input);
+  let admitted:AdmissionResult;
+  try { admitted=await store.admitJob(input); }
+  catch(error){
+    if(error instanceof UnusedCandidate){
+      try { await signals.clear(input.jobId); }
+      catch { /* Preserve the business response; daily reconciliation owns any orphan. */ }
+    }
+    throw error;
+  }
   if(admitted.replayed){
     await signals.arm(admitted.jobId);
     if(admitted.jobId!==input.jobId)await signals.clear(input.jobId);

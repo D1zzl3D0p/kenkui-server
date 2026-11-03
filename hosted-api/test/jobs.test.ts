@@ -24,6 +24,18 @@ function setup(){
   const post=(path='/v1/jobs',body:unknown=payload)=>app.request(path,{method:'POST',headers,body:JSON.stringify(body)});
   return {app,post,jobs,assets,billing,bridge,signals,objects,order,row};
 }
+it.each(['/v1/jobs','/v1/jobs/preflight'])('bounds actual streamed bytes before preflight or dispatch at %s',async path=>{
+  const s=setup();
+  const body=new ReadableStream({start(c){c.enqueue(new Uint8Array(12*1024*1024));c.enqueue(new Uint8Array(1));c.close();}});
+  const request=new Request('http://localhost'+path,{method:'POST',headers:{...headers,'Content-Length':'1'},body,duplex:'half'} as RequestInit);
+  expect((await s.app.fetch(request)).status).toBe(413);
+  expect(s.order).toEqual([]);
+});
+it('accepts a large valid chapter selection within the existing bridge envelope',async()=>{
+  const s=setup(),chapters=Array.from({length:9000},(_,i)=>String(i).padEnd(500,'x'));
+  expect((await s.post('/v1/jobs/preflight',{...payload,chapters})).status).toBe(200);
+  expect(s.bridge.preflight).toHaveBeenCalledOnce();
+});
 it('authorizes before exact Python preflight and arms before committed admission and dispatch',async()=>{
   const s=setup();const res=await s.post();expect(res.status).toBe(202);
   expect(await res.json()).toEqual({sourceCover:true,sourceId:source,narratorVoiceId:voice,castingMode:'single',id,status:'queued',progress:{stage:'queued',completed:0,total:0}});

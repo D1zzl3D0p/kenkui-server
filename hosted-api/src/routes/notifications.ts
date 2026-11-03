@@ -2,6 +2,7 @@ import { createHmac,timingSafeEqual } from 'node:crypto';
 import type { Hono } from 'hono';
 import type { NotificationStore } from '../db/notifications.js';
 import { ApiError,type ApiEnv } from '../types.js';
+import { boundedText } from './request-body.js';
 import { getOnly } from './get-only.js';
 import { publicBody,record,validation } from './job-request.js';
 
@@ -14,7 +15,7 @@ function identityUuid(value:string):string|null {
 export function registerNotificationRoutes(app:Hono<ApiEnv>,store:Pick<NotificationStore,'settings'|'setEnabled'>,secret:string):void {
   app.get('/v1/notifications',getOnly,async c=>c.json(await store.settings(c.get('principal').userId)));
   app.patch('/v1/notifications',async c=>{
-    const value=publicBody(await c.req.text(),c.req.header('Content-Type'));
+    const value=publicBody(await boundedText(c.req.raw,8192),c.req.header('Content-Type'));
     if(!record(value))throw validation([{type:'model_attributes_type',loc:['body'],msg:'Input should be a valid dictionary or object to extract fields from',input:value}]);
     if(!Object.hasOwn(value,'emailOnCompletion'))throw validation([{type:'missing',loc:['body','emailOnCompletion'],msg:'Field required',input:value}]);
     if(typeof value.emailOnCompletion!=='boolean')throw validation([{type:'bool_type',loc:['body','emailOnCompletion'],msg:'Input should be a valid boolean',input:value.emailOnCompletion}]);

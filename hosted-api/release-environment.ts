@@ -15,7 +15,7 @@ export function releaseEnvironment(env:NodeJS.ProcessEnv,reviewedAuthority:unkno
     const supplied=JSON.parse(env.KENKUI_RELEASE_AUTHORITY) as Record<string,unknown>;
     if(!supplied||typeof supplied!=='object'||Array.isArray(supplied)||Object.keys(supplied).length!==5||Object.keys(pin).some(key=>supplied[key]!==pin[key]))throw Error('Release authority override mismatch');
   }
-  const selected:Record<string,string>={KENKUI_ENV:environment,DATABASE_URL:database,KENKUI_INGRESS_PROTECTION:'true',NEON_AUTH_BASE_URL:pin.issuer as string,NEON_AUTH_JWKS_URL:pin.jwksUrl as string,KENKUI_AUTH_RESOURCE:origin,KENKUI_NATIVE_CLIENT_ID:pin.clientId};
+  const selected:Record<string,string>={KENKUI_ENV:environment,KENKUI_API_DATABASE_URL:database,KENKUI_INGRESS_PROTECTION:'true',NEON_AUTH_BASE_URL:pin.issuer as string,NEON_AUTH_JWKS_URL:pin.jwksUrl as string,KENKUI_AUTH_RESOURCE:origin,KENKUI_NATIVE_CLIENT_ID:pin.clientId};
   for(const name of ['KENKUI_ALLOWED_ORIGINS','KENKUI_ORIGIN_SECRET','R2_ENDPOINT','R2_BUCKET','R2_ACCESS_KEY_ID','R2_SECRET_ACCESS_KEY','KENKUI_MODAL_BRIDGE_URL','KENKUI_MODAL_PROXY_KEY','KENKUI_MODAL_PROXY_SECRET','KENKUI_BRIDGE_SECRET','KENKUI_UNSUBSCRIBE_SECRET','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','KENKUI_WEB_ORIGIN','KENKUI_STRIPE_API_VERSION'])selected[name]=required(name);
   if(env.R2_KEY_SALT===undefined)throw Error('Missing release configuration: R2_KEY_SALT');
   selected.R2_KEY_SALT=env.R2_KEY_SALT; // Existing empty-salt keys must remain addressable.

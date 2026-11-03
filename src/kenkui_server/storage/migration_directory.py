@@ -5,10 +5,12 @@ import json
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import uuid4
 
 from kenkui_server.storage.migration_fixture_quarantine import (
+    ASSERTION,
+    load_json,
     prior_classifications,
     validate_quarantine,
 )
@@ -49,15 +51,18 @@ class ImportResult:
     quarantine_digest: str | None
 
 
-def import_directory(
-    connection: Any,
-    environment: str,
-    source: bytes,
-    evidence: dict[str, Any],
-    *,
-    activate: bool,
-    quarantine: bytes | None = None,
-) -> ImportResult:
+class ParsedSource(NamedTuple):
+    digest: str
+    mode: str
+    watermark: str
+    frozen: bool
+    captured: datetime
+    valid_until: datetime | None
+    invited: list[str]
+    subjects: dict[str, tuple[str, str, bool, bool]]
+
+
+def parse_source(environment: str, source: bytes, evidence: dict[str, Any]) -> ParsedSource:
     authority = AUTHORITIES.get(environment)
     if authority is None or evidence.get("environment") != environment:
         raise ValueError("invalid migration authority")
@@ -66,9 +71,9 @@ def import_directory(
     checked(evidence.get("complete") is True and evidence.get("sourceDigest") == digest)
     mode = evidence.get("mode")
     watermark = evidence.get("watermark")
-    checked(
-        isinstance(watermark, str) and bool(watermark.strip()) and mode in ("provisional", "final")
-    )
+    if not isinstance(watermark, str) or not isinstance(mode, str):
+        raise ValueError("invalid migration mode or watermark")
+    checked(bool(watermark.strip()) and mode in ("provisional", "final"))
     frozen = evidence.get("admissionsFrozen") is True and evidence.get("writesFrozen") is True
     if mode == "final":
         checked(
@@ -83,7 +88,7 @@ def import_directory(
     if not isinstance(invitations, list):
         raise ValueError("missing invitation policy")
     invited = sorted({mailbox(value)[1] for value in invitations})
-    export = json.loads(source)
+    export = load_json(source)
     checked(export.get("authority") == {"environmentId": authority[0], "clientId": authority[1]})
     checked(export.get("capturedAt") == evidence["capturedAt"])
     checked(isinstance(export.get("source"), str) and bool(export["source"].strip()))
@@ -109,14 +114,124 @@ def import_directory(
             )
         checked(type(row["banned"]) is bool)
         subjects[subject] = address, key, verification is not None, row["banned"]
+    return ParsedSource(digest, mode, watermark, frozen, captured, valid_until, invited, subjects)
+
+
+def lock_release(connection: Any, environment: str) -> None:
+    connection.execute("SET LOCAL row_security=off")
+    owner = connection.execute(
+        "SELECT pg_get_userbyid(datdba) = current_user "
+        "AND current_setting('transaction_isolation')='read committed' AS authorized "
+        "FROM pg_database WHERE datname=current_database()"
+    ).fetchone()
+    checked(bool(owner and owner["authorized"]))
+    connection.execute("SELECT pg_advisory_xact_lock(915001,hashtext(%s))", (environment,))
+
+
+def backfill_directory(
+    connection: Any,
+    environment: str,
+    source: bytes,
+    evidence: dict[str, Any],
+    pair_review: bytes | None,
+    *,
+    apply: bool,
+) -> dict[str, Any]:
+    parsed = parse_source(environment, source, evidence)
     with connection.transaction():
-        owner = connection.execute(
-            "SELECT pg_get_userbyid(datdba) = current_user "
-            "AND current_setting('transaction_isolation')='read committed' AS authorized "
-            "FROM pg_database WHERE datname=current_database()"
-        ).fetchone()
-        checked(bool(owner and owner["authorized"]))
-        connection.execute("SELECT pg_advisory_xact_lock(915001,hashtext(%s))", (environment,))
+        lock_release(connection, environment)
+        connection.execute("LOCK TABLE identities,provider_identities IN SHARE ROW EXCLUSIVE MODE")
+        now = connection.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
+        checked(parsed.captured <= now and (parsed.valid_until is None or now < parsed.valid_until))
+        restored = connection.execute(
+            "SELECT workos_subject,id FROM identities WHERE workos_subject IS NOT NULL"
+        ).fetchall()
+        owners = {r["workos_subject"]: r["id"] for r in restored}
+        checked(len(owners) == len(restored))
+        unmatched = {sub: str(owner) for sub, owner in owners.items() if sub not in parsed.subjects}
+        if pair_review is None:
+            checked(not unmatched and "pairReviewDigest" not in evidence)
+        else:
+            checked(hashlib.sha256(pair_review).hexdigest() == evidence.get("pairReviewDigest"))
+            review = load_json(pair_review)
+            checked(
+                set(review)
+                == {
+                    "version",
+                    "environment",
+                    "assertion",
+                    "approvalArtifactDigest",
+                    "approvalRef",
+                    "attestedBy",
+                    "attestedAt",
+                    "records",
+                }
+            )
+            checked(type(review["version"]) is int and review["version"] == 1)
+            checked(review["environment"] == environment and review["assertion"] == ASSERTION)
+            checked(bool(re.fullmatch(r"[a-f0-9]{64}", review["approvalArtifactDigest"])))
+            checked(
+                all(
+                    isinstance(review[k], str) and review[k].strip() and review[k].isprintable()
+                    for k in ("attestedBy", "approvalRef")
+                )
+            )
+            checked(parsed.captured <= datetime.fromisoformat(review["attestedAt"]) <= now)
+            records = review["records"]
+            checked(isinstance(records, list) and len(records) == len(unmatched) > 0)
+            for r in records:
+                checked(set(r) == {"ownerId", "legacySubject"})
+                sub = r["legacySubject"]
+                checked(
+                    isinstance(sub, str)
+                    and bool(sub.strip())
+                    and sub.isprintable()
+                    and not any(c in sub for c in "*?[]")
+                    and sub in unmatched
+                )
+                checked(unmatched.pop(sub) == r["ownerId"])
+        bindings = connection.execute(
+            "SELECT subject,identity_id FROM provider_identities WHERE issuer=%s", (LEGACY_ISSUER,)
+        ).fetchall()
+        existing = {r["subject"]: r["identity_id"] for r in bindings}
+        checked(all(owners.get(sub) == owner for sub, owner in existing.items()))
+        pending = [
+            (LEGACY_ISSUER, sub, owner) for sub, owner in owners.items() if sub not in existing
+        ]
+        if apply:
+            with connection.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO provider_identities(issuer,subject,identity_id) VALUES (%s,%s,%s)",
+                    pending,
+                )
+        if parsed.valid_until is not None:
+            checked(
+                connection.execute(
+                    "SELECT clock_timestamp()<%s AS fresh", (parsed.valid_until,)
+                ).fetchone()["fresh"]
+            )
+        return {
+            "restored_owners": len(owners),
+            "existing": len(existing),
+            "pending": len(pending),
+            "source_digest": parsed.digest,
+        }
+
+
+def import_directory(
+    connection: Any,
+    environment: str,
+    source: bytes,
+    evidence: dict[str, Any],
+    *,
+    activate: bool,
+    quarantine: bytes | None = None,
+) -> ImportResult:
+    digest, mode, watermark, frozen, captured, valid_until, invited, subjects = parse_source(
+        environment, source, evidence
+    )
+    with connection.transaction():
+        lock_release(connection, environment)
         connection.execute("LOCK TABLE identities,provider_identities IN SHARE MODE")
         now = connection.execute("SELECT clock_timestamp() AS now").fetchone()["now"]
         checked(captured <= now and (valid_until is None or now < valid_until))

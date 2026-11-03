@@ -1,6 +1,6 @@
 import type { Hono } from 'hono';
 import { ApiError,type ApiEnv } from '../types.js';
-import { readBoundedBody } from '../routes/assets.js';
+import { readBoundedBody } from '../routes/request-body.js';
 import { unavailable } from '../db/migration.js';
 import type { Admission } from './admission.js';
 import type { MigrationChallenges } from './migration-challenge.js';

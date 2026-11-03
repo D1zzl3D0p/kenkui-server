@@ -49,8 +49,30 @@ test('enum-only destination is occupied and enum-label drift changes exact-copy 
     await assert.rejects(()=>captureInventory(config(dbs[1],'restored-copy')),/schema/);
   } finally {for(const n of dbs)sql(base,'DROP DATABASE IF EXISTS '+n+' WITH (FORCE)');}
 });
+test('large objects, standalone collations and schemas cannot be certified empty or omitted from a full capture',{skip:process.env.KENKUI_TEST_DATABASE_URL!==base},async()=>{
+  const [name]=names(),address=url(name),options=config(name,'restored-copy');
+  sql(base,'CREATE DATABASE '+name);
+  try {
+    for(const [create,drop] of [["SELECT lo_from_bytea(18765,'abc')","SELECT lo_unlink(18765)"],["CREATE SCHEMA vacant","DROP SCHEMA vacant"],["CREATE FOREIGN DATA WRAPPER unused","DROP FOREIGN DATA WRAPPER unused"],['CREATE COLLATION synthetic FROM "C"','DROP COLLATION synthetic']]){
+      sql(address,create);await assert.rejects(()=>assertEmptyTarget(options));sql(address,drop);
+    }
+    const role='lo_probe_'+name.slice(-16);
+    sql(address,'CREATE ROLE '+role+' LOGIN; REVOKE SELECT ON pg_catalog.pg_largeobject_metadata FROM PUBLIC');
+    try {await assert.rejects(()=>assertEmptyTarget({...options,databaseUrl:address.replace('postgres@',role+'@')}));}
+    finally {sql(address,'GRANT SELECT ON pg_catalog.pg_largeobject_metadata TO PUBLIC; DROP ROLE '+role);}
+    migrate(address);
+    const without=await captureInventory(options);assert(without.fullDigest);
+    sql(address,"SELECT lo_from_bytea(18765,'original')");
+    await assert.rejects(()=>captureInventory(options));
+    sql(address,"SELECT lo_put(18765,0,'changed')");
+    await assert.rejects(()=>captureInventory(options));
+    sql(address,'SELECT lo_unlink(18765)');
+    assert.equal((await captureInventory(options)).fullDigest,without.fullDigest);
+  } finally {sql(base,'DROP DATABASE '+name+' WITH (FORCE)');}
+});
 test('ICU catalog reader supports known locale fields and refuses missing effective rules',()=>{
   assert.deepEqual(py(`import json,runpy
+import sys;sys.path.insert(0,'scripts/neon')
 read=runpy.run_path('scripts/neon/inventory.py')['database_collation']
 class Catalog:
  def __init__(self,value):self.value=value

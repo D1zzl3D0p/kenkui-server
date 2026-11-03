@@ -37,6 +37,6 @@ export function createLazyPool(config: () => DatabaseConfig, deps:PoolDependenci
   };
 }
 
-const sharedPool = createLazyPool(() => ({connectionString:process.env.DATABASE_URL ?? ''}),{log:e => console.error(JSON.stringify(e))});
+const sharedPool = createLazyPool(() => ({connectionString:process.env.KENKUI_API_DATABASE_URL ?? ''}),{log:e => console.error(JSON.stringify(e))});
 export const getPool = (): Pool => sharedPool.getPool();
 export const closePool = (): Promise<void> => sharedPool.close();

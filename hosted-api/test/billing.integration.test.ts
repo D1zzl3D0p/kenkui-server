@@ -32,6 +32,13 @@ describe.skipIf(!connectionString)('atomic hosted billing on PostgreSQL',()=>{
     jobs=new JobStore(()=>pool);billing=new BillingStore(()=>pool);
   });
   afterEach(async()=>{await pool?.end();if(admin){await admin.query('DROP SCHEMA '+schema+' CASCADE');await admin.end();}});
+  async function expectUnusedCandidate(candidate:ReturnType<typeof input>,reason:string){
+    const original=randomUUID(),markers=new Set<string>([original]);
+    await expect(submitJob(jobs,{
+      async arm(id){markers.add(id);},async clear(id){markers.delete(id);},
+    },async()=>{throw Error('unexpected dispatch');},candidate)).rejects.toThrow(reason);
+    expect(markers).toEqual(new Set([original]));
+  }
   async function contend<T>(run:()=>Promise<T>){
     const lock=await pool.connect();await lock.query('BEGIN');await lock.query('SELECT id FROM credit_accounts WHERE id=$1 FOR UPDATE',[account]);
     const pending=Promise.allSettled([run(),run()]);
@@ -60,7 +67,7 @@ describe.skipIf(!connectionString)('atomic hosted billing on PostgreSQL',()=>{
     await pool.query("UPDATE jobs SET spec_json=(spec_json::jsonb - 'tts' || jsonb_build_object('tts','{}'::jsonb,'output',jsonb_build_object('path','artifact.m4b'),'casting',jsonb_build_object('voice_id','narrator')))::text,status='succeeded'");
     await pool.query('UPDATE assets SET deleted_at=now()');
     expect((await jobs.admitJob({...input(''),credits:9n})).status).toBe('succeeded');
-    await expect(jobs.admitJob({...input(''),spec:jobSpec({...raw,chapters:['other']})})).rejects.toThrow('idempotency_conflict');
+    await expectUnusedCandidate({...input(''),spec:jobSpec({...raw,chapters:['other']})},'idempotency_conflict');
     await expect(jobs.admitJob(input())).rejects.toThrow('source_expired');
   });
   it('grants concurrent deliveries once, detects conflicting repeats and preserves large balances',async()=>{
@@ -119,7 +126,7 @@ describe.skipIf(!connectionString)('atomic hosted billing on PostgreSQL',()=>{
     expect((await pool.query('SELECT * FROM credit_allocations')).rows).toEqual([]);
     expect((await pool.query('SELECT sum(reserved) FROM credit_lots')).rows[0].sum).toBe('0');
     for(let i=0;i<3;i++)await jobs.admitJob({...input(),credits:1n});
-    await expect(jobs.admitJob(input())).rejects.toThrow('active_job_limit');
+    await expectUnusedCandidate(input(),'active_job_limit');
   });
   it.each(['settle','release'])('matches complete Python rows before and after repeated %s',async terminal=>{
     const candidate=input('full');await billing.grantPayment('cs_full',account,1100);await jobs.admitJob(candidate);
@@ -131,6 +138,17 @@ describe.skipIf(!connectionString)('atomic hosted billing on PostgreSQL',()=>{
   it('keeps recovery armed across rollback, ambiguous commit and dispatch; replays without starting a second worker',async()=>{
     const markers=new Set<string>(),calls:string[]=[];
     const signals={arm:async(id:string)=>{calls.push('arm:'+id);markers.add(id);},clear:async(id:string)=>{calls.push('clear:'+id);markers.delete(id);}};
+    const denied={...input(),credits:11n};
+    await expect(submitJob(jobs,signals,async()=>{},denied)).rejects.toThrow('insufficient_credits');
+    expect(markers.size).toBe(0);
+    execFileSync('../.venv/bin/python',['-c',`import json,sys
+from types import SimpleNamespace
+from kenkui_server.maintenance import recover_with_signals
+def forbidden(): raise AssertionError("empty minute opened a database")
+recover_with_signals(SimpleNamespace(list_job_ids=lambda:json.load(sys.stdin)),forbidden,forbidden)`],
+      {input:JSON.stringify([...markers])});
+    await expect(submitJob(jobs,{...signals,clear:async()=>{throw Error('cleanup failed');}},async()=>{},denied)).rejects.toThrow('insufficient_credits');
+    markers.delete(denied.jobId);
     const pending=input('crash');
     await expect(submitJob(jobs,{...signals,arm:async()=>{throw Error('failed R2 arm');}},async()=>{},pending)).rejects.toThrow('failed R2 arm');
     expect((await pool.query('SELECT * FROM credit_authorizations')).rows).toEqual([]);

@@ -18,7 +18,7 @@ function historical(source,review) {
   requireCheck(Array.isArray(candidates),'Missing historical allocation evidence');
   if(!candidates.length&&!review.historicalSettlements)return [];
   const h=review.historicalSettlements;
-  requireCheck(h?.assertion==='independently-reviewed-historical-pre-0004'&&h.sourceCaptureDigest===source.captureDigest&&same(h.records,candidates)&&candidates.every(r=>r.chronologyValid===true&&r.status==='settled'&&r.finalizedAt&&r.legacyLots.length===1),'Independent historical pre-0004 source attestation required; unresolved chronology blocks');
+  requireCheck(h?.assertion==='independently-reviewed-historical-pre-0004'&&h.sourceCaptureDigest===source.captureDigest&&same(h.records,candidates)&&candidates.every(r=>r.chronologyValid===true&&['settled','released'].includes(r.status)&&r.finalizedAt&&r.legacyLots.length===1),'Independent historical pre-0004 source attestation required; unresolved chronology blocks');
   return candidates;
 }
 function healthy(m,approved) {

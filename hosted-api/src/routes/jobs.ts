@@ -7,6 +7,7 @@ import type { BillingStore } from '../db/billing.js';
 import { submitJob,type AdmissionResult,type JobStore,type RecoverySignals } from '../db/jobs.js';
 import { artifactFilename,type ObjectStore } from '../storage/r2.js';
 import { ApiError,type ApiConfig,type ApiEnv } from '../types.js';
+import { boundedText } from './request-body.js';
 import { getOnly } from './get-only.js';
 import { bridgeLimits,jobRequest,rawInteger,selectedCastingLimits } from './job-request.js';
 
@@ -48,13 +49,13 @@ export function registerJobRoutes(app:Hono<ApiEnv>,config:ApiConfig,services:()=
   };
   const methodNotAllowed=()=>{throw new ApiError(405,'method_not_allowed','Method not allowed');};
   app.post('/v1/jobs/preflight',async c=>{
-    const x=await preflight(await c.req.text(),c.req.header('Content-Type'),c.get('principal').userId);
+    const x=await preflight(await boundedText(c.req.raw,12*1024*1024),c.req.header('Content-Type'),c.get('principal').userId);
     return c.json({sourceId:x.spec.source_id,normalizedCharacters:x.characters,valid:BigInt(x.account.availableCredits)>=x.credits,estimatedCredits:rawInteger(x.credits),availableCredits:rawInteger(x.account.availableCredits)});
   });
   // Static POST-only resources must precede the dynamic GET /:id in Hono.
   app.all('/v1/jobs/preflight',methodNotAllowed);
   app.post('/v1/jobs',async c=>{
-    const owner=c.get('principal').userId,x=await preflight(await c.req.text(),c.req.header('Content-Type'),owner);
+    const owner=c.get('principal').userId,x=await preflight(await boundedText(c.req.raw,12*1024*1024),c.req.header('Content-Type'),owner);
     const admitted=await submitJob(x.selected.jobs,x.selected.signals,id=>x.selected.bridge.dispatch(id),{
       jobId:randomUUID(),dispatchId:randomUUID(),ownerId:owner,accountId:x.account.id,spec:x.spec,credits:x.credits,idempotencyKey:c.req.header('Idempotency-Key')??null,
     });

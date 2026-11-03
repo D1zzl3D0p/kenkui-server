@@ -2,17 +2,16 @@
 
 import hashlib
 import json
-import re
 import sys
 from datetime import UTC, datetime
-from urllib.parse import parse_qsl, unquote, urlsplit
 
 import psycopg
 from psycopg import sql
-from psycopg.conninfo import conninfo_to_dict
 from psycopg.rows import dict_row
+from release_target import validate_target
 
 from kenkui_server.storage.assets import R2AssetStore
+from kenkui_server.storage.migration_allocation_evidence import allocation_exceptions
 from kenkui_server.storage.migration_fixture_quarantine import INVENTORY, restored_snapshot_digest
 
 USER_SCHEMA = "n.nspname<>'information_schema' AND left(n.nspname,3)<>'pg_'"
@@ -34,46 +33,7 @@ def validate(d):
     require(d.get("environment") in ("staging", "production"))
     require(d.get("mode") in ("source", "restored-copy", "migrated-target"))
     require(d.get("managedAuth") in ("required", "absent-reviewed-source"))
-    pin = d.get("target", {})
-    require(set(pin) == {"host", "port", "database", "projectId", "branchId"})
-    require(
-        all(
-            isinstance(pin[k], str) and pin[k].strip() == pin[k] and pin[k]
-            for k in ("host", "database", "projectId", "branchId")
-        )
-    )
-    require(type(pin["port"]) is int and 1 <= pin["port"] <= 65535)
-    raw = d.get("databaseUrl")
-    require(isinstance(raw, str) and raw and not any(ord(c) <= 32 for c in raw))
-    uri = urlsplit(raw)
-    require(uri.scheme in ("postgres", "postgresql") and not uri.fragment)
-    require(bool(re.fullmatch(r"[a-z0-9.-]+", uri.hostname or "")))
-    require(uri.hostname == pin["host"] and (uri.port or 5432) == pin["port"])
-    require(
-        unquote(uri.path) == "/" + pin["database"]
-        and bool(re.fullmatch(r"[A-Za-z0-9_.-]+", pin["database"]))
-    )
-    pairs = parse_qsl(uri.query, keep_blank_values=True, strict_parsing=True)
-    require(len(pairs) == len({k for k, _ in pairs}))
-    require(all(k in ("sslmode", "sslrootcert", "channel_binding") and v for k, v in pairs))
-    effective = conninfo_to_dict(raw)
-    require(
-        effective.get("host") == pin["host"]
-        and int(effective.get("port", 5432)) == pin["port"]
-        and effective.get("dbname") == pin["database"]
-    )
-    synthetic = d.get("synthetic") is True
-    if synthetic:
-        require(
-            d["environment"] == "staging" and pin["host"] == "127.0.0.1" and pin["port"] == 55438
-        )
-        require(bool(re.fullmatch(r"rehearsal_test_[a-f0-9]{32}(?:_empty)?", pin["database"])))
-        require(
-            pin["projectId"] == "synthetic-project" and pin["branchId"].startswith("synthetic-")
-        )
-        require(effective.get("sslmode", "disable") == "disable")
-    else:
-        require(effective.get("sslmode") == "verify-full")
+    validate_target(d)
     require(isinstance(d.get("r2Keys"), list) and all(isinstance(k, str) for k in d["r2Keys"]))
     require(isinstance(d.get("keySalt"), str))
 
@@ -155,6 +115,35 @@ def capture(d):
             "row_security=off; SET LOCAL TIME ZONE 'UTC'; SET LOCAL extra_float_digits=3;"
             " SET LOCAL search_path=public"
         )
+        # Large objects live outside user relations. Read the unfiltered catalog directly.
+        require(
+            c.execute("SELECT 1 FROM pg_catalog.pg_largeobject_metadata LIMIT 1").fetchone() is None
+        )
+        # Fail closed for user-created catalog classes the inventory does not project.
+        # FirstNormalObjectId (16384) separates initdb objects from independently created ones.
+        unsupported = c.execute("""
+            SELECT 1 FROM (
+                SELECT objid,classid FROM pg_catalog.pg_depend
+                UNION ALL SELECT objid,classid FROM pg_catalog.pg_shdepend
+                    WHERE dbid=(SELECT oid FROM pg_catalog.pg_database
+                                WHERE datname=current_database())
+            ) deps WHERE objid >= 16384 AND classid NOT IN (
+              'pg_class'::regclass,'pg_namespace'::regclass,'pg_type'::regclass,
+              'pg_proc'::regclass,'pg_constraint'::regclass,'pg_attrdef'::regclass,
+              'pg_trigger'::regclass,'pg_policy'::regclass,'pg_rewrite'::regclass)
+            UNION ALL SELECT 1 FROM pg_catalog.pg_rewrite
+                WHERE oid >= 16384 AND rulename <> '_RETURN'
+            UNION ALL SELECT 1 FROM pg_catalog.pg_extension WHERE extname <> 'plpgsql'
+            UNION ALL SELECT 1 FROM pg_catalog.pg_foreign_data_wrapper
+            UNION ALL SELECT 1 FROM pg_catalog.pg_publication
+            UNION ALL SELECT 1 FROM pg_catalog.pg_subscription WHERE subdbid=(
+              SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+            LIMIT 1""").fetchone()
+        require(unsupported is None)
+        schemas = {
+            r["nspname"]
+            for r in c.execute("SELECT n.nspname FROM pg_namespace n WHERE " + USER_SCHEMA)
+        }
         relations = c.execute(
             (
                 "SELECT n.nspname AS schema,c.relname AS name,c.oid,c.relkind FROM pg_class c"
@@ -174,7 +163,7 @@ def capture(d):
         ).fetchall()
         types = user_types(c)
         if d.get("emptyOnly"):
-            require(not relations and not functions and not types)
+            require(schemas == {"public"} and not relations and not functions and not types)
             return {}
         require(
             relations and all(r["relkind"] in ("r", "p", "S", "v", "i", "I") for r in relations)
@@ -187,6 +176,13 @@ def capture(d):
         )
         if d["managedAuth"] == "required":
             require(any(r["schema"] == "neon_auth" for r in base))
+        represented = {
+            "public",
+            *(r["schema"] for r in relations),
+            *(f["nspname"] for f in functions),
+            *(t["schema"] for t in types),
+        }
+        require(schemas == represented)
         for r in base:
             require(
                 c.execute(
@@ -485,55 +481,7 @@ def credit_invariants(c, base):
         "credit_ledger_entries e WHERE e.account_id=a.id),0))::text AS "
         '"openingResidualCredits"\n        FROM credit_accounts a ORDER BY a.id'
     ).fetchall()
-    missing = c.execute(
-        "SELECT z.*,to_jsonb(z)::text AS row_bytes FROM credit_authorizations z WHERE"
-        " z.status IN ('reserved','settled') AND z.credits<>COALESCE((SELECT "
-        "sum(a.credits) FROM credit_allocations a WHERE a.authorization_id=z.id AND "
-        "a.account_id=z.account_id),0) ORDER BY z.id"
-    ).fetchall()
-    historical = []
-    for row in missing:
-        allocations = c.execute(
-            "SELECT count(*) AS n FROM credit_allocations WHERE authorization_id=%s", (row["id"],)
-        ).fetchone()["n"]
-        if row["status"] != "settled" or allocations != 0:
-            continue
-        lot = c.execute(
-            (
-                "SELECT id,reference,created_at FROM credit_lots WHERE account_id=%s AND "
-                "kind='legacy' ORDER BY id"
-            ),
-            (row["account_id"],),
-        ).fetchall()
-        chronology = (
-            len(lot) == 1
-            and row["finalized_at"] is not None
-            and row["created_at"] <= row["finalized_at"] < lot[0]["created_at"]
-            and lot[0]["id"] == lot[0]["reference"] == "legacy:" + str(row["account_id"])
-        )
-        historical.append(
-            {
-                "authorizationId": str(row["id"]),
-                "accountId": str(row["account_id"]),
-                "jobId": row["job_id"],
-                "credits": str(row["credits"]),
-                "status": row["status"],
-                "createdAt": row["created_at"].isoformat(),
-                "finalizedAt": row["finalized_at"].isoformat() if row["finalized_at"] else None,
-                "legacyLots": [
-                    {
-                        "id": x["id"],
-                        "reference": x["reference"],
-                        "createdAt": x["created_at"].isoformat(),
-                    }
-                    for x in lot
-                ],
-                "sourceRowDigest": hashlib.sha256(
-                    row["row_bytes"].encode("utf8") + b"\n"
-                ).hexdigest(),
-                "chronologyValid": chronology,
-            }
-        )
+    invalid_allocations, historical = allocation_exceptions(c)
     return {
         "accounts": accounts,
         "orphanReferences": orphans,
@@ -550,7 +498,7 @@ def credit_invariants(c, base):
             "a.id=z.account_id JOIN jobs j ON j.id=z.job_id WHERE "
             "a.identity_id<>j.owner_id"
         ),
-        "invalidAllocations": len(missing),
+        "invalidAllocations": invalid_allocations,
         "historicalSettlementCandidates": historical,
         "invalidLotAllocations": count(
             "SELECT count(*) AS n FROM credit_lots l WHERE l.reserved<>COALESCE((SELECT "

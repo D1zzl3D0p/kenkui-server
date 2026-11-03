@@ -9,6 +9,11 @@ function setup(){
   const store={settings:vi.fn().mockResolvedValue({email:'old@example.invalid',emailOnCompletion:true}),setEnabled:vi.fn().mockResolvedValue(undefined)};
   registerNotificationRoutes(app,store,secret);return {app,store};
 }
+it('rejects oversized preference changes before touching a store',async()=>{
+  const {app,store}=setup();
+  const res=await app.request('/v1/notifications',{method:'PATCH',headers,body:' '.repeat(8193)});
+  expect(res.status).toBe(413);expect(store.setEnabled).not.toHaveBeenCalled();expect(store.settings).not.toHaveBeenCalled();
+});
 it('reads and updates only the mapped internal identity, retaining its existing email',async()=>{
   const {app,store}=setup();expect(await (await app.request('/v1/notifications',{headers})).json()).toEqual({email:'old@example.invalid',emailOnCompletion:true});
   expect(store.settings).toHaveBeenCalledWith(owner);

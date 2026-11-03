@@ -1,7 +1,7 @@
 name: Verify and prepare Neon release
 on:
   pull_request:
-    paths: ['hosted-api/**', 'ingress/**', 'deploy/neon/**', 'scripts/neon/**', '.github/workflows/neon.yml']
+    paths: ['hosted-api/**', 'ingress/**', 'deploy/neon/**', 'scripts/neon/**', 'src/kenkui_server/storage/**', 'migrations/postgresql/**', 'tests/postgres/test_migration_directory.py', 'pyproject.toml', 'uv.lock', '.github/workflows/neon.yml']
   workflow_dispatch:
     inputs:
       environment:
@@ -24,6 +24,10 @@ env:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: kenkui-server
     services:
       postgres:
         image: postgres:17
@@ -33,31 +37,18 @@ jobs:
         options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
-      - run: npm ci
-        working-directory: hosted-api
-      - run: npm run typecheck
-        working-directory: hosted-api
-      - name: Relevant ingress and same-runtime contracts
-        run: npm test -- test/standalone.test.ts test/release-environment.test.ts test/release-manifest.test.ts test/catalog.test.ts test/auth.test.ts test/stripe.test.ts test/assets.test.ts test/events.test.ts
-        working-directory: hosted-api
-      - run: npm run build
-        working-directory: hosted-api
-      - uses: actions/setup-go@v5
+          path: kenkui-server
+      - uses: actions/checkout@v4
         with:
-          go-version: '1.27.3'
-          cache: false
-      - name: Reviewed Docker context with the actual Moby matcher
-        run: go test -mod=readonly ./...
-        working-directory: scripts/neon/docker-context
-      - name: Archive authorization, resource bounds and guarded fallback verification
-        run: node --test --test-timeout=15000 scripts/neon/test/*.test.mjs
-      - run: npm run smoke
-        working-directory: hosted-api
-        env:
-          KENKUI_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:55438/postgres
+          repository: D1zzl3D0p/kenkui
+          ref: 97cba6bdb663c15d2d90d6e4e017be23ecdb9c7c
+          path: kenkui
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+      - run: uv sync --frozen --all-groups --extra hosted
       - name: Ensure independent PostgreSQL 17 fixture binaries
         run: |
           if [ ! -x /usr/lib/postgresql/17/bin/initdb ]; then
@@ -71,15 +62,49 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y postgresql-17
           fi
+          test -x /usr/lib/postgresql/17/bin/pg_dump
+          test -x /usr/lib/postgresql/17/bin/pg_restore
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm ci
+        working-directory: kenkui-server/hosted-api
+      - run: npm run typecheck
+        working-directory: kenkui-server/hosted-api
+      - name: Relevant ingress and same-runtime contracts
+        run: npm test -- test/standalone.test.ts test/release-environment.test.ts test/release-manifest.test.ts test/catalog.test.ts test/auth.test.ts test/stripe.test.ts test/assets.test.ts test/events.test.ts
+        working-directory: kenkui-server/hosted-api
+      - run: npm run build
+        working-directory: kenkui-server/hosted-api
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Reviewed Docker context with the actual Moby matcher
+        run: go test -mod=readonly ./...
+        working-directory: kenkui-server/scripts/neon/docker-context
+      - name: Archive authorization, resource bounds and guarded fallback verification
+        env:
+          KENKUI_PG_BIN: /usr/lib/postgresql/17/bin
+          KENKUI_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:55438/postgres
+        run: node --test --test-timeout=240000 scripts/neon/test/*.test.mjs
+      - name: Verify owner-only import and locked directory history
+        env:
+          KENKUI_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:55438/postgres
+        run: .venv/bin/python -m pytest -q tests/postgres/test_migration_directory.py
+      - run: npm run smoke
+        working-directory: kenkui-server/hosted-api
+        env:
+          KENKUI_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:55438/postgres
       - name: Exact production artifacts with independently verified TLS
         run: node test/production-artifact.mjs
-        working-directory: hosted-api
+        working-directory: kenkui-server/hosted-api
         env:
           KENKUI_PG_BIN: /usr/lib/postgresql/17/bin
       - run: npm ci
-        working-directory: ingress
+        working-directory: kenkui-server/ingress
       - run: npm run types:check && npm run typecheck && npm test
-        working-directory: ingress
+        working-directory: kenkui-server/ingress
   release:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: verify

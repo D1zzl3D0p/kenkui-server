@@ -70,6 +70,18 @@ it('uses resolved internal account, decimal balance, string feature flag and str
   create.mockRejectedValue(Error('private'));expect((await post('{"credits":1100}')).status).toBe(502);
   services.checkoutEnabled=false;expect((await post('{"credits":500}')).status).toBe(503);
 });
+it.each([['/v1/billing/checkout',8192],['/v1/billing/webhooks/stripe',1024*1024]] as const)('bounds streamed bytes before checkout or Stripe processing at %s',async(path,limit)=>{
+  const {app,services,accountForOwner}=setup();
+  const processEvent=vi.spyOn(services.webhook,'processStripeEvent');
+  for(const declared of [undefined,'1']){
+    const stream=new ReadableStream<Uint8Array>({start(controller){
+      controller.enqueue(new Uint8Array(limit));controller.enqueue(new Uint8Array(1));controller.close();
+    }});
+    const request=new Request('http://localhost'+path,{method:'POST',headers:{...headers,'Stripe-Signature':'present',...(declared?{'Content-Length':declared}:{})},body:stream,duplex:'half'} as RequestInit);
+    expect((await app.fetch(request)).status).toBe(413);
+  }
+  expect(accountForOwner).not.toHaveBeenCalled();expect(processEvent).not.toHaveBeenCalled();
+});
 it('webhook waits for durable write, rejects changed bytes without DB access and propagates DB failures',async()=>{
   const {app,grant}=setup();
   const body=JSON.stringify({type:'checkout.session.completed',data:{object:{id:'cs_fixture',client_reference_id:'internal',payment_status:'paid',

@@ -83,8 +83,41 @@ def test_activation_reconciles_all_owners_and_only_swaps_complete_runs(database)
         )
 
 
-def test_final_run_survives_rehearsal_window_and_cli_hides_private_input(database, tmp_path):
-    db = database
+@pytest.fixture()
+def release_target(tmp_path):
+    assert os.environ["KENKUI_TEST_DATABASE_URL"] == URL
+    name = "rehearsal_test_" + uuid4().hex
+    address = URL.removesuffix("postgres") + name
+    with psycopg.connect(URL, autocommit=True) as admin:
+        admin.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+        db = PostgresDatabase(address)
+        try:
+            pin = tmp_path / "target.json"
+            pin.write_text(
+                json.dumps(
+                    {
+                        "environment": "staging",
+                        "synthetic": True,
+                        "target": {
+                            "database": name,
+                            "host": "127.0.0.1",
+                            "port": 55438,
+                            "projectId": "synthetic-project",
+                            "branchId": "synthetic-target",
+                        },
+                    }
+                )
+            )
+            pin.chmod(0o600)
+            yield db, address, pin
+        finally:
+            db.close()
+            admin.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
+
+
+def test_final_run_survives_rehearsal_window_and_cli_hides_private_input(release_target, tmp_path):
+    db, address, pin = release_target
+    db.migrate()
     captured = (datetime.now(UTC) - timedelta(days=3)).isoformat()
     source, evidence = sample(captured=captured)
     evidence.update(
@@ -94,20 +127,19 @@ def test_final_run_survives_rehearsal_window_and_cli_hides_private_input(databas
         admissionsFrozen=True,
         writesFrozen=True,
     )
-    with db.connection() as conn:
-        schema = conn.execute("SELECT current_schema() AS s").fetchone()["s"]
     export = tmp_path / "source"
     attestation = tmp_path / "evidence"
     export.write_bytes(source)
     env = dict(
         os.environ,
         KENKUI_ENV="staging",
-        KENKUI_STAGING_RELEASE_DATABASE_URL=URL,
-        PGOPTIONS=f"-c search_path={schema}",
+        KENKUI_STAGING_RELEASE_DATABASE_URL=address,
     )
     command = [
         sys.executable,
         "scripts/neon/import-legacy-directory.py",
+        "--target-file",
+        str(pin),
         "--environment",
         "staging",
         "--source-file",
@@ -128,6 +160,16 @@ def test_final_run_survives_rehearsal_window_and_cli_hides_private_input(databas
             "quarantined_owners": 0,
             "quarantine_digest": None,
         }
+    for unsafe in [
+        dict(PGHOSTADDR="127.0.0.1"),
+        dict(PGOPTIONS="-c search_path=not_public"),
+        dict(KENKUI_STAGING_RELEASE_DATABASE_URL=URL),
+        dict(KENKUI_STAGING_RELEASE_DATABASE_URL=address + "?host=127.0.0.1"),
+    ]:
+        denied = subprocess.run(
+            [*command, "--dry-run"], env=env | unsafe, capture_output=True, text=True
+        )
+        assert (denied.returncode, denied.stderr.strip()) == (1, '{"accepted":0}')
     assert (
         db.execute("SELECT valid_until FROM migration_directory_runs").fetchone()["valid_until"]
         is None
@@ -558,6 +600,10 @@ def seed_owner(conn, n, subject):
 def manifest(conn, evidence, records, *, approval_ref="fixture-review/1", version=1):
     from kenkui_server.storage.migration_fixture_quarantine import restored_snapshot_digest
 
+    # The synthetic original capture is frozen when legacy history is seeded.
+    original = getattr(conn, "_synthetic_original_history", None)
+    if original:
+        evidence.update(originalSourceCaptureDigest="f" * 64, historicalSettlements=original)
     snapshot = restored_snapshot_digest(conn)
     payload = {
         k: evidence[k]
@@ -677,6 +723,11 @@ def legacy_finance_records(conn):
                         VALUES(%s,%s,%s,%s,'settled')""",
             (settled, f"settled-{i}", account, -net),
         )
+        conn.execute(
+            """UPDATE credit_authorizations SET created_at='2020-01-01Z',
+                     finalized_at='2020-01-02Z' WHERE account_id=%s""",
+            (account,),
+        )
         released = UUID(int=400 + i)
         for auth, kind, credits in [
             (settled, "reservation", net),
@@ -711,6 +762,15 @@ def legacy_finance_records(conn):
                 )
             ],
         )
+    from kenkui_server.storage.migration_allocation_evidence import allocation_exceptions
+
+    with conn.transaction():
+        _, history = allocation_exceptions(conn)
+    conn._synthetic_original_history = {
+        "assertion": "independently-reviewed-historical-pre-0004",
+        "sourceCaptureDigest": "f" * 64,
+        "records": history,
+    }
     records[2].update(financePolicy="strict-v1", legacyOpeningBalances=[])
     return records
 
@@ -1249,10 +1309,204 @@ def test_unreviewed_or_unsafe_inventory_cannot_be_approved_by_updating_only_dige
         assert conn.execute("SELECT count(*) n FROM migration_directory_runs").fetchone()["n"] == 1
 
 
-def test_quarantine_cli_requires_independent_evidence_and_hides_records(database, tmp_path):
+@pytest.mark.parametrize(
+    "action", ["--dry-run", "--activate", "--backfill-dry-run", "--backfill-apply"]
+)
+def test_owner_cli_rejects_wrong_transport_before_authentication(monkeypatch, tmp_path, action):
+    import runpy
+
+    monkeypatch.syspath_prepend("scripts/neon")
+    cli = runpy.run_path("scripts/neon/import-legacy-directory.py")
+    attempts = []
+    monkeypatch.setattr(psycopg, "connect", lambda *a, **kw: attempts.append(1))
+    raw, ev = sample()
+    target = tmp_path / "target"
+    target.write_text(
+        json.dumps(
+            {
+                "environment": "staging",
+                "target": {
+                    "host": "synthetic.invalid",
+                    "port": 5432,
+                    "database": "reviewed",
+                    "projectId": "project",
+                    "branchId": "branch",
+                },
+            }
+        )
+    )
+    target.chmod(0o600)
+    source, attestation = tmp_path / "source", tmp_path / "attestation"
+    source.write_bytes(raw)
+    attestation.write_text(json.dumps(ev))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "import",
+            "--environment",
+            "staging",
+            "--target-file",
+            str(target),
+            "--source-file",
+            str(source),
+            "--attestation-file",
+            str(attestation),
+            action,
+        ],
+    )
+    monkeypatch.setenv("KENKUI_ENV", "staging")
+    base = "postgresql://owner@synthetic.invalid/reviewed?sslmode=verify-full"
+    for url in [
+        base.replace("reviewed", "identical_copy"),
+        base.replace("verify-full", "prefer"),
+        base + "&service=alternate",
+        base + "&hostaddr=127.0.0.1",
+        base + "&sslmode=disable",
+    ]:
+        monkeypatch.setenv("KENKUI_STAGING_RELEASE_DATABASE_URL", url)
+        assert cli["main"]() == 1
+    monkeypatch.setenv("KENKUI_STAGING_RELEASE_DATABASE_URL", base)
+    monkeypatch.setenv("PGHOSTADDR", "127.0.0.1")
+    assert cli["main"]() == 1
+    assert not attempts
+
+
+def test_release_backfill_from_original_schema_then_directory(release_target, tmp_path):
+    from shutil import copyfile
+
+    from kenkui_server.storage.migration_fixture_quarantine import fixture_fingerprint
+
+    db, address, pin = release_target
+    old = tmp_path / "old"
+    old.mkdir()
+    for migration in Path("migrations/postgresql").glob("*.sql"):
+        if migration.name < "0006":
+            copyfile(migration, old / migration.name)
+    db.migrate(old)
+    owner, fixture = uuid4(), uuid4()
+    db.execute(
+        "INSERT INTO identities(id,workos_subject) VALUES(%s,'user_old'),(%s,'absent-fixture')",
+        (owner, fixture),
+    )
+    db.migrate()
+    raw, ev = sample()
+    source, attestation, pairs, quarantine = [
+        tmp_path / k for k in ("source", "attestation", "pairs", "manifest")
+    ]
+    source.write_bytes(raw)
+    env = dict(os.environ, KENKUI_ENV="staging", KENKUI_STAGING_RELEASE_DATABASE_URL=address)
+    cmd = [
+        sys.executable,
+        "scripts/neon/import-legacy-directory.py",
+        "--target-file",
+        str(pin),
+        "--environment",
+        "staging",
+        "--source-file",
+        str(source),
+        "--attestation-file",
+        str(attestation),
+    ]
+    pair = {"ownerId": str(fixture), "legacySubject": "absent-fixture"}
+
+    def review(records):
+        pairs.write_text(
+            json.dumps(
+                dict(
+                    version=1,
+                    environment="staging",
+                    assertion="owner-approved-synthetic-fixtures-preserve-all-exclude-recovery",
+                    approvalArtifactDigest="1" * 64,
+                    approvalRef="fixture-review/1",
+                    attestedBy="synthetic-release",
+                    attestedAt=datetime.now(UTC).isoformat(),
+                    records=records,
+                )
+            )
+        )
+        pairs.chmod(0o600)
+        ev["pairReviewDigest"] = hashlib.sha256(pairs.read_bytes()).hexdigest()
+        attestation.write_text(json.dumps(ev))
+
+    def backfill(mode, success):
+        result = subprocess.run(
+            [*cmd, "--pair-review-file", str(pairs), mode], env=env, capture_output=True, text=True
+        )
+        assert result.returncode == (0 if success else 1), result.stderr
+
+    for invalid in [
+        [],
+        [pair, pair],
+        [pair | {"ownerId": str(owner)}],
+        [pair, {"ownerId": str(owner), "legacySubject": "user_old"}],
+    ]:
+        review(invalid)
+        backfill("--backfill-apply", False)
+        assert not db.execute("SELECT * FROM provider_identities").fetchall()
+    review([pair])
+    # A conflicting binding is pre-existing state; abort before inserting any remaining row.
+    db.execute(
+        "INSERT INTO provider_identities VALUES(%s,'absent-fixture',%s)", (LEGACY_ISSUER, owner)
+    )
+    backfill("--backfill-apply", False)
+    assert len(db.execute("SELECT * FROM provider_identities").fetchall()) == 1
+    db.execute("DELETE FROM provider_identities")
+    backfill("--backfill-dry-run", True)
+    assert not db.execute("SELECT * FROM provider_identities").fetchall()
+    backfill("--backfill-apply", True)
+    backfill("--backfill-apply", True)
+    assert {
+        tuple(r.values())
+        for r in db.execute("SELECT issuer,subject,identity_id FROM provider_identities").fetchall()
+    } == {(LEGACY_ISSUER, "user_old", owner), (LEGACY_ISSUER, "absent-fixture", fixture)}
+    with db.connection() as conn:
+        record = pair | {"fixtureFingerprint": fixture_fingerprint(conn, "staging", fixture)}
+        quarantine.write_bytes(manifest(conn, ev, [record]))
+    attestation.write_text(json.dumps(ev))
+    for mode in ("--dry-run", "--activate"):
+        out = subprocess.run(
+            [*cmd, "--quarantine-file", str(quarantine), mode],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert json.loads(out.stdout)["quarantined_owners"] == 1
+    assert not db.execute(
+        "SELECT * FROM migration_directory_rows WHERE owner_id=%s", (fixture,)
+    ).fetchall()
+    assert not db.execute("SELECT * FROM identity_link_proofs").fetchall()
+    # Clone the complete activated DB. Content/digests cannot authenticate a different target.
+    copy_name = "rehearsal_test_" + uuid4().hex
+    db.close()
+    with psycopg.connect(URL, autocommit=True) as admin:
+        admin.execute(
+            sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
+                sql.Identifier(copy_name), sql.Identifier(address.rsplit("/", 1)[1])
+            )
+        )
+        try:
+            wrong = env | {
+                "KENKUI_STAGING_RELEASE_DATABASE_URL": URL.removesuffix("postgres") + copy_name
+            }
+            for mode in ("--dry-run", "--activate"):
+                result = subprocess.run(
+                    [*cmd, "--quarantine-file", str(quarantine), mode],
+                    env=wrong,
+                    capture_output=True,
+                    text=True,
+                )
+                assert (result.returncode, result.stderr.strip()) == (1, '{"accepted":0}')
+        finally:
+            admin.execute(sql.SQL("DROP DATABASE {}").format(sql.Identifier(copy_name)))
+
+
+def test_quarantine_cli_requires_independent_evidence_and_hides_records(release_target, tmp_path):
+    database, address, pin = release_target
+    database.migrate()
     raw, evidence = sample()
     with database.connection() as conn:
-        schema = conn.execute("SELECT current_schema() AS s").fetchone()["s"]
         q = manifest(conn, evidence, fixture_records(conn, "staging", 1))
     source, attestation, quarantine = [
         tmp_path / n for n in ("source", "attestation", "quarantine")
@@ -1263,6 +1517,8 @@ def test_quarantine_cli_requires_independent_evidence_and_hides_records(database
     command = [
         sys.executable,
         "scripts/neon/import-legacy-directory.py",
+        "--target-file",
+        str(pin),
         "--environment",
         "staging",
         "--source-file",
@@ -1275,8 +1531,7 @@ def test_quarantine_cli_requires_independent_evidence_and_hides_records(database
     env = dict(
         os.environ,
         KENKUI_ENV="staging",
-        KENKUI_STAGING_RELEASE_DATABASE_URL=URL,
-        PGOPTIONS=f"-c search_path={schema}",
+        KENKUI_STAGING_RELEASE_DATABASE_URL=address,
     )
     out = subprocess.run(
         [*command, "--dry-run"], env=env, text=True, capture_output=True, check=True
@@ -1467,6 +1722,24 @@ def test_uncorroborated_fixture_credits_fail_first_capture(database, case):
             elif case == "no-lots":
                 conn.execute("DELETE FROM credit_allocations")
                 conn.execute("DELETE FROM credit_lots")
+        records[0]["fixtureFingerprint"] = fixture_fingerprint(conn, "staging", UUID(int=100))
+        q = manifest(conn, ev, records)
+        for activate in (False, True):
+            with pytest.raises(ValueError):
+                import_directory(conn, "staging", raw, ev, activate=activate, quarantine=q)
+        assert not conn.execute("SELECT * FROM migration_directory_runs").fetchall()
+
+
+@pytest.mark.parametrize(
+    "change", ["UPDATE credit_allocations SET credits=1", "DELETE FROM credit_allocations"]
+)
+def test_fixture_rejects_first_snapshot_of_broken_released_allocation(database, change):
+    from kenkui_server.storage.migration_fixture_quarantine import fixture_fingerprint
+
+    with database.connection() as conn:
+        raw, ev = sample()
+        records = fixture_records(conn, "staging", 1)
+        conn.execute(change)
         records[0]["fixtureFingerprint"] = fixture_fingerprint(conn, "staging", UUID(int=100))
         q = manifest(conn, ev, records)
         for activate in (False, True):
