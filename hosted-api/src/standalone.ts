@@ -1,6 +1,9 @@
 import { getRequestListener } from '@hono/node-server';
 import { createServer } from 'node:http';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { dirname } from 'node:path';
+import { standaloneEnvironment } from '../release-manifest.js';
+declare const STANDALONE_ENTRY:boolean;
 import handler from './index.js';
 import { closePool } from './db/pool.js';
 
@@ -8,7 +11,10 @@ import { closePool } from './db/pool.js';
 export function serveApi(api:{fetch(request:Request):Response|Promise<Response>}=handler,options:{port?:number;hostname?:string}={}) {
   return createServer(getRequestListener(request=>api.fetch(request))).listen(options.port??8080,options.hostname??'0.0.0.0');
 }
-if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
+if(typeof STANDALONE_ENTRY!=='undefined' && STANDALONE_ENTRY && import.meta.main) {
+  const args=process.argv.slice(2);
+  if(args.length!==2||args[0]!=='--receipt')throw Error('Standalone release requires --receipt <verified-manifest>');
+  Object.assign(process.env,standaloneEnvironment(process.env,dirname(fileURLToPath(import.meta.url)),args[1]!));
   const port=Number(process.env.PORT??'8080');
   if(!Number.isInteger(port)||port<1||port>65535)throw Error('Invalid port');
   const server=serveApi(handler,{port,hostname:'0.0.0.0'});

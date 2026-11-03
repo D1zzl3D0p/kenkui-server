@@ -43,10 +43,10 @@ jobs:
       - name: Relevant ingress and same-runtime contracts
         run: npm test -- test/standalone.test.ts test/release-environment.test.ts test/release-manifest.test.ts test/catalog.test.ts test/auth.test.ts test/stripe.test.ts test/assets.test.ts test/events.test.ts
         working-directory: hosted-api
-      - name: Archive authorization, resource bounds and fallback byte verification
-        run: node --test scripts/neon/test/*.test.mjs
       - run: npm run build
         working-directory: hosted-api
+      - name: Archive authorization, resource bounds and guarded fallback verification
+        run: node --test --test-timeout=15000 scripts/neon/test/*.test.mjs
       - run: npm run smoke
         working-directory: hosted-api
         env:

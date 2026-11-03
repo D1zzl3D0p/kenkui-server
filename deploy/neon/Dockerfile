@@ -8,4 +8,4 @@ COPY --chown=node:node deploy/neon/verify-standalone.mjs ./verify-standalone.mjs
 RUN node verify-standalone.mjs /app/runtime /app/release-manifest.json
 USER node
 EXPOSE 8080
-CMD ["node", "runtime/standalone.js"]
+CMD ["node", "runtime/standalone.js", "--receipt", "/app/release-manifest.json"]
