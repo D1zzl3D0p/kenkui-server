@@ -12,6 +12,23 @@ import pytest
 BASELINE = Path(__file__).parents[1] / "contracts/neon/baseline.json"
 
 
+def assert_supported_migrations(observed, frozen):
+    # Only these reviewed additive migrations may extend the immutable baseline.
+    assert observed == frozen + [
+        "0006_provider_identities.sql",
+        "0007_source_upload_intents.sql",
+    ]
+
+
+def test_contract_migration_allowlist_rejects_unknown_missing_or_reordered_migrations():
+    frozen = json.loads(BASELINE.read_text())["postgresContract"]["migrations"]
+    approved = frozen + ["0006_provider_identities.sql", "0007_source_upload_intents.sql"]
+    assert_supported_migrations(approved, frozen)
+    for observed in [approved + ["9999_unreviewed.sql"], approved[:-1], list(reversed(approved))]:
+        with pytest.raises(AssertionError):
+            assert_supported_migrations(observed, frozen)
+
+
 @pytest.mark.skipif(
     not os.environ.get("KENKUI_TEST_DATABASE_URL"), reason="requires disposable PostgreSQL"
 )
@@ -22,9 +39,9 @@ def test_contract_export_freezes_postgres_admission_and_payment_invariants():
     assert callable(exporter), "missing synthetic PostgreSQL invariant exporter"
     observed = exporter(os.environ["KENKUI_TEST_DATABASE_URL"])
     frozen = json.loads(BASELINE.read_text())["postgresContract"]
-    # This is the sole deliberate extension. Unknown/missing migrations still fail;
-    # the frozen baseline and every previous ownership/credit invariant stay exact.
-    assert observed["migrations"] == frozen["migrations"] + ["0006_provider_identities.sql"]
+    # Only reviewed additive extensions are normalized. Every previous invariant
+    # remains exact, and unknown/missing/reordered migrations still fail.
+    assert_supported_migrations(observed["migrations"], frozen["migrations"])
     assert {**observed, "migrations": frozen["migrations"]} == frozen
     assert observed["creditsAfterPaymentReplay"] == 500
     assert observed["creditsAfterIdempotentAdmission"] == 300

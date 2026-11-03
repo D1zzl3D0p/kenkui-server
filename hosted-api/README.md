@@ -62,6 +62,77 @@ for browser/native v2 contracts, provider configuration, and mandatory live gate
   so they cannot replace TLS verification. The Neon SDK handles expected idle
   disconnects; unexpected errors emit only `database.pool_error` metadata.
 
+## Private assets and document operations
+
+Asset configuration is read only by the first relevant resource request, with no
+provider connections at import, static requests or route registration. Keep R2,
+Modal, database and credentials isolated per environment. Reuse the existing
+Python R2 settings exactly: `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY`, and `R2_KEY_SALT` (existing empty-salt semantics remain).
+The same salt, kind and server-owned ID produce the same private key in Python
+and TypeScript. No public request accepts an object key or URL.
+
+Set `KENKUI_MODAL_BRIDGE_URL` to the matching deployed function's actual HTTPS
+`*.modal.run` root. `KENKUI_MODAL_PROXY_KEY` and `KENKUI_MODAL_PROXY_SECRET` are
+the separate Modal proxy-token pair; `KENKUI_BRIDGE_SECRET` matches the inner
+bridge's secret. All three credentials are server-only. The client disables
+redirects and implicit retries, caps response bytes, and bounds its HTTP wait to
+120 seconds. This is not a promise that timed-out Python work has stopped.
+Transient 429/503/504 upstream failures return safe retryable public errors.
+
+`registerAssetRoutes` preserves EPUB-only 50 MiB uploads and PNG/JPEG 8 MiB
+covers. It derives the owner from the verified internal principal before private
+reads or compute calls. Uploads retain baseline behavior: bytes labelled EPUB
+are accepted and hashed; inspection performs actual EPUB validation. Covers are
+immutable deterministic snapshots in Python. Internal `/cover` uses the same
+existing reader and 8 MiB decompressed member bound, returning bounded base64;
+public responses remain image bytes with private/no-store and nosniff headers.
+
+Apply additive `0007_source_upload_intents.sql` only through the existing Python
+migration command, before deploying either runtime. No request runs DDL. A source
+PUT first commits a durable intent, then transfers bytes with no open transaction,
+then atomically publishes its owned asset and removes the intent. Failed or
+ambiguous PUTs leave tracking. Finalization, retries and daily cleanup share a
+per-source transaction advisory lock and enforce database-clock expiry. Expired
+intents permanently fence publication of that attempt and retain tombstones,
+so delayed PUT completion remains eligible for later deletion. Covers keep a
+semantic operation ID, with one stable live attempt generation. After a failed
+attempt expires, or a completed snapshot reaches normal retention, the same
+source/image can retry using a fresh generation and a different private key.
+Old cleanup cannot delete that new key. Existing live completed snapshots remain
+idempotent, including legacy generation-zero IDs. A newly reserved cover attempt
+has no digest until its deterministic transformation finishes; neither runtime
+can publish it while the digest is NULL.
+
+The existing daily retention pass also makes at most 100 upload/tombstone cleanup
+attempts, selected fairly by indexed next-due time. It commits claims before R2
+DELETE, tolerates missing objects, retains tracking after failures, and rotates
+each attempt to the next day. Completed assets keep their existing durable row:
+repeat cleanup uses `deleted_at` plus `next_source_cleanup_at`, preserving the
+original live/recent-job guard and normal 24-hour source TTL. Live assets always
+suppress deletion. Tracking rows are retained indefinitely because a lost or
+hung provider operation has no proven maximum lifetime. This adds row growth
+and bounded daily retries; backlog can delay deletion beyond 24 hours. No extra
+queue, polling loop or keepalive was added.
+
+Job download routes must select an authorized job's stored `artifacts.path`:
+worker attempt IDs are `jobUUID.leaseUUID`, while older objects may use a UUID.
+`ObjectStore.artifactUrl` preserves the existing 300-second private signed GET
+and the hosted route's 303/no-store redirect, so Range transfers go directly to
+R2. Never substitute jobId for an attempt's stored path. `streamArtifact` offers
+a backpressured, cancellable Range-aware fallback without buffering an audiobook.
+`artifactFilename` preserves Python's sanitization and Unicode character limit.
+The Modal preflight count is authoritative; billing/admission must enrich its
+null pricing and balance fields using the authoritative account.
+
+Live gates remain deferred to staging acceptance: verify private bucket access,
+matching existing salted objects, successful browser/native upload and inspection,
+immutable cover retry and read, actual signed download MIME/filename/Range and
+cancellation, proxy plus inner authentication, deadline behavior, and the existing
+daily maintenance schedule's coverage of migration 0007. Exercise failed/ambiguous
+PUT and late-completion cleanup with real R2; synthetic tests establish protocol
+behavior, not provider acceptance. No providers or customer prices changed here.
+
 ## Catalog provenance and compatibility
 
 `src/catalog.json` contains 59 VCTK metadata records exported from core

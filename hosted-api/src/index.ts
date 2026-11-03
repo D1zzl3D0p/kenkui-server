@@ -7,6 +7,10 @@ import { IdentityLinker } from './auth/linking.js';
 import { createNeonAuth,loadNeonAuthConfig } from './auth/neon.js';
 import { createLegacyVerifier,LegacyRecovery } from './auth/recovery.js';
 import { registerAuthRoutes } from './auth/pages.js';
+import { AssetStore } from './db/assets.js';
+import { ModalBridge } from './compute/modal.js';
+import { R2ObjectStore } from './storage/r2.js';
+import { registerAssetRoutes, type AssetServices } from './routes/assets.js';
 
 let app:ReturnType<typeof createApi>|undefined;
 
@@ -26,6 +30,30 @@ export default {
           const recovery=process.env.KENKUI_LEGACY_TOKEN_ISSUER?new LegacyRecovery(auth,createLegacyVerifier(process.env.KENKUI_LEGACY_TOKEN_ISSUER),identities,new IdentityLinker(getPool),getPool):undefined;
           registerAuthRoutes(next,authConfig,recovery?{recovery}:{});
         }
+        let objects:R2ObjectStore|undefined;
+        let bridge:ModalBridge|undefined;
+        const required=(name:string):string=>{
+          const value=process.env[name];
+          if(!value)throw new Error('Asset configuration is unavailable');
+          return value;
+        };
+        const assetServices:AssetServices={
+          assets:new AssetStore(getPool),
+          get objects() {
+            return objects??=new R2ObjectStore({
+              endpoint:required('R2_ENDPOINT'),bucket:required('R2_BUCKET'),keySalt:process.env.R2_KEY_SALT??'',
+              accessKeyId:required('R2_ACCESS_KEY_ID'),secretAccessKey:required('R2_SECRET_ACCESS_KEY'),
+            });
+          },
+          get bridge() {
+            return bridge??=new ModalBridge({
+              environment:config.environment,url:required('KENKUI_MODAL_BRIDGE_URL'),
+              key:required('KENKUI_MODAL_PROXY_KEY'),secret:required('KENKUI_MODAL_PROXY_SECRET'),
+              bridgeSecret:required('KENKUI_BRIDGE_SECRET'),
+            });
+          },
+        };
+        registerAssetRoutes(next,config,()=>assetServices);
         app=next;
       } catch {
         // A failed bootstrap is retryable after configuration is corrected. Never log env.

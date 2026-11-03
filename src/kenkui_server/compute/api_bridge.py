@@ -21,7 +21,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from kenkui_server.api.assets import inspect_book
+from kenkui_server.api.assets import get_cover, inspect_book
 from kenkui_server.api.covers import MAX_COVER_BYTES, image_type, replace_cover
 from kenkui_server.api.jobs import _preflight
 from kenkui_server.api.schemas import (
@@ -35,6 +35,7 @@ from kenkui_server.api.schemas import (
 )
 from kenkui_server.config import DEFAULT_CHARACTER_MODEL
 from kenkui_server.jobs.models import Asset
+from kenkui_server.storage.source_uploads import SourceUploadConflict
 
 Identifier = Annotated[
     str,
@@ -102,6 +103,11 @@ class DispatchRequest(OperationRequest):
     dispatch_id: Identifier = Field(alias="dispatchId")
 
 
+class CoverResponse(WireModel):
+    cover_base64: Annotated[str, Field(max_length=11184812)] = Field(alias="coverBase64")
+    media_type: Literal["image/png", "image/jpeg"] = Field(alias="mediaType")
+
+
 class DispatchResponse(WireModel):
     accepted: bool
 
@@ -144,7 +150,13 @@ def _replace_cover(services: Any, payload: CoverRequest, max_upload_bytes: int) 
         f"kenkui-cover-v1:{payload.environment}:{payload.owner_id}:{source.id}:"
         f"{source.sha256}:{hashlib.sha256(image).hexdigest()}",
     )
-    new_id = str(identifier)
+    try:
+        new_id = services.repositories.source_uploads.cover_attempt(
+            str(identifier), payload.owner_id
+        )
+    except SourceUploadConflict as error:
+        raise HTTPException(409, "cover retry conflicts with stored asset") from error
+    identifier = UUID(new_id)
     try:
         existing = services.repositories.assets.get(new_id)
     except KeyError:
@@ -166,20 +178,17 @@ def _replace_cover(services: Any, payload: CoverRequest, max_upload_bytes: int) 
         raise HTTPException(422, "The cover or EPUB is invalid.") from error
     if len(updated) > max_upload_bytes:
         raise HTTPException(413, "The book with its new cover exceeds the upload limit.")
-    # Never keep a DB transaction open during parsing or object transfer.
-    # Concurrent retries write the same bytes; failed upload creates no metadata.
-    services.assets.put_source(new_id, updated)
+    # Reserve durable cleanup tracking before PUT. Same-byte concurrent retries
+    # share one intent; completed asset rows retain tracking after finalization.
     asset = Asset(new_id, new_id, hashlib.sha256(updated).hexdigest(), "epub")
     try:
-        services.repositories.assets.put_for_owner(asset, UUID(payload.owner_id))
-    except Exception:
-        # Unique-insert races and ambiguous commits return the durable winner.
-        # If no row exists, propagate failure instead of accepting lost metadata.
-        existing = services.repositories.assets.get(new_id)
-        _source(services, new_id, payload.owner_id)
-        if existing.sha256 != asset.sha256:
-            raise HTTPException(409, "cover retry conflicts with stored asset") from None
-        asset = existing
+        existing = services.repositories.source_uploads.begin(asset, payload.owner_id)
+        if existing is not None:
+            return AssetResponse(id=existing.id, format=existing.format, sha256=existing.sha256)
+        services.assets.put_source(new_id, updated)
+        asset = services.repositories.source_uploads.complete(new_id, payload.owner_id)
+    except SourceUploadConflict as error:
+        raise HTTPException(409, "cover retry conflicts with stored asset") from error
     return AssetResponse(id=asset.id, format=asset.format, sha256=asset.sha256)
 
 
@@ -305,6 +314,24 @@ def create_bridge_app(
         def calculate() -> BookResponse:
             _source(selected, payload.source_id, payload.owner_id)
             return anyio.run(inspect_book, payload.source_id, request)
+
+        return await bounded(calculate)
+
+    @app.post("/cover", response_model=CoverResponse)
+    async def read_source_cover(payload: SourceRequest, request: Request) -> CoverResponse:
+        selected = dependencies(payload)
+
+        def calculate() -> CoverResponse:
+            _source(selected, payload.source_id, payload.owner_id)
+            response = anyio.run(get_cover, payload.source_id, request)
+            # Existing read_cover enforces MAX_COVER_BYTES before decompressing.
+            media_type = response.media_type
+            if media_type not in {"image/png", "image/jpeg"}:
+                raise HTTPException(422, "The source cover cannot be read.")
+            return CoverResponse(
+                coverBase64=base64.b64encode(bytes(response.body)).decode("ascii"),
+                mediaType="image/png" if media_type == "image/png" else "image/jpeg",
+            )
 
         return await bounded(calculate)
 

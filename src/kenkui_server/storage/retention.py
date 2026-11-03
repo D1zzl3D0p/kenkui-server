@@ -94,7 +94,9 @@ class PostgresRetention:
         self.objects = objects
 
     def run(self) -> int:
-        deleted = 0
+        from kenkui_server.storage.source_uploads import PostgresSourceUploads
+
+        deleted = PostgresSourceUploads(self.database).reap(self.objects)
         # Lock the asset during deletion; admission takes the same row lock.
         with self.database.transaction():
             sources = self.database.execute("""
@@ -108,7 +110,9 @@ class PostgresRetention:
             for source in sources:
                 self.objects.delete_source(source["id"])
                 self.database.execute(
-                    "UPDATE assets SET deleted_at=now() WHERE id=%s", (source["id"],)
+                    "UPDATE assets SET deleted_at=now(), "
+                    "next_source_cleanup_at=now()+interval '24 hours' WHERE id=%s",
+                    (source["id"],),
                 )
                 deleted += 1
         with self.database.transaction():

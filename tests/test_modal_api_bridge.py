@@ -493,6 +493,128 @@ def test_cover_upload_failure_can_retry_without_metadata_or_source_mutation(brid
     )
 
 
+def test_private_cover_read_preserves_png_and_ownership(bridge):
+    missing = bridge.client.post("/cover", json=bridge.body, headers=AUTH)
+    assert missing.status_code == 404
+    body = bridge.body | {"coverBase64": base64.b64encode(PNG).decode(), "mediaType": "image/png"}
+    replaced = bridge.client.post("/replace_cover", json=body, headers=AUTH)
+    assert replaced.status_code == 200
+    source = bridge.body | {"sourceId": replaced.json()["id"]}
+    response = bridge.client.post("/cover", json=source, headers=AUTH)
+    assert response.status_code == 200
+    assert response.json() == {
+        "coverBase64": base64.b64encode(PNG).decode(),
+        "mediaType": "image/png",
+    }
+    assert (
+        bridge.client.post(
+            "/cover", json=source | {"ownerId": str(uuid4())}, headers=AUTH
+        ).status_code
+        == 403
+    )
+    assert (
+        bridge.client.post(
+            "/cover", json=source | {"environment": "production"}, headers=AUTH
+        ).status_code
+        == 403
+    )
+    assert bridge.client.post("/cover", json=source).status_code == 401
+
+
+def test_expired_failed_cover_gets_fresh_generation_and_old_cleanup_cannot_delete_it(
+    bridge, monkeypatch
+):
+    from kenkui_server.storage.source_uploads import PostgresSourceUploads
+
+    body = bridge.body | {"coverBase64": base64.b64encode(PNG).decode(), "mediaType": "image/png"}
+    real_put = bridge.objects.put_source
+
+    def ambiguous(identifier, data):
+        real_put(identifier, data)
+        raise RuntimeError("lost PUT acknowledgement")
+
+    monkeypatch.setattr(bridge.objects, "put_source", ambiguous)
+    with pytest.raises(RuntimeError, match="lost PUT"):
+        bridge.client.post("/replace_cover", json=body, headers=AUTH)
+    old = bridge.database.execute("SELECT source_id FROM source_upload_intents").fetchone()[
+        "source_id"
+    ]
+    bridge.database.execute(
+        "UPDATE source_upload_intents SET expires_at=clock_timestamp()-interval '1 second', "
+        "next_cleanup_at=clock_timestamp() WHERE source_id=%s",
+        (old,),
+    )
+    uploads = PostgresSourceUploads(bridge.database)
+    assert uploads.reap(bridge.objects) == 1
+    monkeypatch.setattr(bridge.objects, "put_source", real_put)
+    retried = bridge.client.post("/replace_cover", json=body, headers=AUTH)
+    assert retried.status_code == 200
+    fresh = retried.json()["id"]
+    assert fresh != old
+    snapshot = bridge.objects.read_source(fresh)
+    # Old operation tombstone can repeatedly delete only the old salted key.
+    real_put(old, b"late completion of old attempt")
+    bridge.database.execute(
+        "UPDATE source_upload_intents SET next_cleanup_at=clock_timestamp() WHERE source_id=%s",
+        (old,),
+    )
+    assert uploads.reap(bridge.objects) == 1
+    assert bridge.objects.read_source(fresh) == snapshot
+    assert bridge.client.post("/replace_cover", json=body, headers=AUTH).json() == retried.json()
+
+
+def test_expired_completed_cover_can_retry_while_original_source_has_active_job(bridge):
+    from kenkui_server.storage.retention import PostgresRetention
+    from kenkui_server.storage.source_uploads import PostgresSourceUploads
+
+    body = bridge.body | {"coverBase64": base64.b64encode(PNG).decode(), "mediaType": "image/png"}
+    first = bridge.client.post("/replace_cover", json=body, headers=AUTH)
+    assert first.status_code == 200
+    old = first.json()["id"]
+    admit(bridge)
+    bridge.database.execute("UPDATE assets SET created_at=now()-interval '25 hours'")
+    assert PostgresRetention(bridge.database, bridge.objects).run() == 1
+    assert bridge.repo.assets.get(bridge.source).id == bridge.source
+    with pytest.raises(KeyError):
+        bridge.repo.assets.get(old)
+    fresh = bridge.client.post("/replace_cover", json=body, headers=AUTH)
+    assert fresh.status_code == 200 and fresh.json()["id"] != old
+    snapshot = bridge.objects.read_source(fresh.json()["id"])
+    bridge.database.execute(
+        "UPDATE assets SET next_source_cleanup_at=clock_timestamp() WHERE id=%s", (old,)
+    )
+    assert PostgresSourceUploads(bridge.database).reap(bridge.objects) == 1
+    assert bridge.objects.read_source(fresh.json()["id"]) == snapshot
+
+
+def test_cover_generation_selection_is_atomic_and_null_digest_cannot_publish(bridge):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from kenkui_server.storage.source_uploads import PostgresSourceUploads, SourceUploadConflict
+
+    uploads = PostgresSourceUploads(bridge.database)
+    semantic_id = str(uuid4())
+
+    def select(_):
+        return uploads.cover_attempt(semantic_id, str(bridge.owner))
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        first = list(executor.map(select, range(4)))
+    assert first == [semantic_id] * 4
+    with pytest.raises(SourceUploadConflict):
+        uploads.complete(first[0], str(bridge.owner))
+    bridge.database.execute(
+        "UPDATE source_upload_intents SET expires_at=clock_timestamp()-interval '1 second'"
+    )
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        second = list(executor.map(select, range(4)))
+    assert len(set(second)) == 1 and second[0] != first[0]
+    assert (
+        bridge.database.execute("SELECT count(*) AS n FROM source_upload_intents").fetchone()["n"]
+        == 2
+    )
+
+
 def admit(bridge):
     account = str(uuid4())
     row = bridge.database.execute(

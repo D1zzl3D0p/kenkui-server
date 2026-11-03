@@ -279,7 +279,7 @@ class PostgresAssetRepository:
 
     def get(self, asset_id: str) -> Asset:
         row = self._connection.execute(
-            "SELECT id, path, sha256, format FROM assets WHERE id = %s",
+            "SELECT id, path, sha256, format FROM assets WHERE id = %s AND deleted_at IS NULL",
             (asset_id,),
         ).fetchone()
         if row is None:
@@ -435,6 +435,9 @@ class PostgresRepositories(PostgresExecution):
         self.jobs = PostgresJobRepository(connection)
         self.events = PostgresJobEventRepository(connection)
         self.assets = PostgresAssetRepository(connection)
+        from kenkui_server.storage.source_uploads import PostgresSourceUploads
+
+        self.source_uploads = PostgresSourceUploads(connection)
         self.inspections = PostgresInspectionRepository(connection)
         self.dispatches = PostgresDispatchRepository(connection)
         self.artifacts = PostgresArtifactRepository(connection)
