@@ -103,6 +103,135 @@ def database_collation(c):
     return {key: catalog[key] for key in fields if key in catalog}
 
 
+def default_acls(c):
+    """Portable future-object policy only; never infer existing-object access.
+
+    PG17 pg_default_acl documents r/S/f/T/n. Global entries override built-in
+    defaults; per-schema entries augment them. Keep empty ACLs as real objects.
+    """
+    allowed = {
+        "r": {
+            "SELECT",
+            "INSERT",
+            "UPDATE",
+            "DELETE",
+            "TRUNCATE",
+            "REFERENCES",
+            "TRIGGER",
+            "MAINTAIN",
+        },
+        "S": {"USAGE", "SELECT", "UPDATE"},
+        "f": {"EXECUTE"},
+        "T": {"USAGE"},
+        "n": {"USAGE", "CREATE"},
+    }
+    count = c.execute("SELECT count(*) AS count FROM pg_catalog.pg_default_acl").fetchone()["count"]
+    require(type(count) is int and count >= 0)
+    rows = c.execute("""
+        SELECT d.oid,d.defaclrole AS owner_oid,d.defaclnamespace AS schema_oid,
+               d.defaclobjtype AS object_type,d.defaclacl IS NULL AS acl_null,
+               cardinality(d.defaclacl) AS acl_items,o.rolname AS owner,n.nspname AS schema,
+               x.grantor AS grantor_oid,g.rolname AS grantor,
+               x.grantee AS grantee_oid,r.rolname AS grantee,
+               x.privilege_type AS privilege,x.is_grantable AS grant_option
+        FROM pg_catalog.pg_default_acl d
+        LEFT JOIN pg_catalog.pg_roles o ON o.oid=d.defaclrole
+        LEFT JOIN pg_catalog.pg_namespace n ON n.oid=d.defaclnamespace
+        LEFT JOIN LATERAL pg_catalog.aclexplode(d.defaclacl) x ON true
+        LEFT JOIN pg_catalog.pg_roles g ON g.oid=x.grantor
+        LEFT JOIN pg_catalog.pg_roles r ON r.oid=x.grantee
+    """).fetchall()
+    records = {}
+    for row in rows:
+        oid, owner_oid, schema_oid = row["oid"], row["owner_oid"], row["schema_oid"]
+        owner, schema, kind = row["owner"], row["schema"], row["object_type"]
+        require(type(oid) is int and oid > 0 and type(owner_oid) is int and owner_oid > 0)
+        require(type(schema_oid) is int and schema_oid >= 0)
+        require(isinstance(owner, str) and bool(owner))
+        require(
+            (schema_oid == 0 and schema is None)
+            or (schema_oid > 0 and isinstance(schema, str) and bool(schema))
+        )
+        require(isinstance(kind, str) and kind in allowed)
+        require(kind != "n" or schema is None)  # PostgreSQL schemas cannot be nested.
+        require(row["acl_null"] is False)  # Unexpected SQL NULL has unspecified semantics here.
+        require(type(row["acl_items"]) is int and row["acl_items"] >= 0)
+        definition = {
+            "kind": "default-acl",
+            "owner": owner,
+            "schema": schema,
+            "objectType": kind,
+            "privileges": [],
+        }
+        identity = (owner, schema, kind, owner_oid, schema_oid, row["acl_items"])
+        if oid not in records:
+            records[oid] = (identity, definition, set())
+        require(records[oid][0] == identity)
+        privileges = records[oid][1]["privileges"]
+        if row["acl_items"] == 0:
+            require(
+                not privileges
+                and all(
+                    row[k] is None
+                    for k in (
+                        "grantor_oid",
+                        "grantor",
+                        "grantee_oid",
+                        "grantee",
+                        "privilege",
+                        "grant_option",
+                    )
+                )
+            )
+            # LEFT JOIN must yield exactly one sentinel for a present empty array.
+            require(not records[oid][2])
+            records[oid][2].add(None)
+            continue
+        grantor, grantee = row["grantor"], row["grantee"]
+        require(type(row["grantor_oid"]) is int and row["grantor_oid"] > 0)
+        require(isinstance(grantor, str) and bool(grantor))
+        require(type(row["grantee_oid"]) is int and row["grantee_oid"] >= 0)
+        require(
+            (row["grantee_oid"] == 0 and grantee is None)
+            or (row["grantee_oid"] > 0 and isinstance(grantee, str) and bool(grantee))
+        )
+        require(isinstance(row["privilege"], str) and row["privilege"] in allowed[kind])
+        require(type(row["grant_option"]) is bool)
+        require(not (row["grantee_oid"] == 0 and row["grant_option"]))
+        privilege = {
+            "grantor": grantor,
+            "grantee": {"kind": "public"}
+            if row["grantee_oid"] == 0
+            else {"kind": "role", "name": grantee},
+            "privilege": row["privilege"],
+            "grantOption": row["grant_option"],
+        }
+        require(privilege not in privileges)
+        privileges.append(privilege)
+        records[oid][2].add((row["grantor_oid"], row["grantee_oid"]))
+    require(len(records) == count)
+    objects = {}
+    for identity, definition, items in records.values():
+        require(items == {None} if identity[-1] == 0 else len(items) == identity[-1])
+        definition["privileges"].sort(
+            key=lambda p: (
+                p["grantor"],
+                p["grantee"]["kind"],
+                p["grantee"].get("name", ""),
+                p["privilege"],
+                p["grantOption"],
+            )
+        )
+        key = "@pg_default_acl:" + json.dumps(
+            [definition["owner"], definition["schema"], definition["objectType"]],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        require(key not in objects)
+        objects[key] = definition
+    return dict(sorted(objects.items()))
+
+
 def capture(d):
     validate(d)
     with (
@@ -127,7 +256,6 @@ def capture(d):
                 SELECT oid FROM pg_catalog.pg_cast
                 UNION ALL SELECT oid FROM pg_catalog.pg_transform
                 UNION ALL SELECT oid FROM pg_catalog.pg_am
-                UNION ALL SELECT oid FROM pg_catalog.pg_default_acl
                 UNION ALL SELECT oid FROM pg_catalog.pg_language
                 UNION ALL SELECT oid FROM pg_catalog.pg_event_trigger
                 UNION ALL SELECT oid FROM pg_catalog.pg_collation
@@ -151,7 +279,8 @@ def capture(d):
             ) deps WHERE objid >= 16384 AND classid NOT IN (
               'pg_class'::regclass,'pg_namespace'::regclass,'pg_type'::regclass,
               'pg_proc'::regclass,'pg_constraint'::regclass,'pg_attrdef'::regclass,
-              'pg_trigger'::regclass,'pg_policy'::regclass,'pg_rewrite'::regclass)
+              'pg_trigger'::regclass,'pg_policy'::regclass,'pg_rewrite'::regclass,
+              'pg_default_acl'::regclass)
             UNION ALL SELECT 1 FROM pg_catalog.pg_rewrite
                 WHERE oid >= 16384 AND rulename <> '_RETURN'
             UNION ALL SELECT 1 FROM pg_catalog.pg_extension WHERE extname <> 'plpgsql'
@@ -183,8 +312,15 @@ def capture(d):
             + " ORDER BY n.nspname,p.proname,args"
         ).fetchall()
         types = user_types(c)
+        default_policies = default_acls(c)
         if d.get("emptyOnly"):
-            require(schemas == {"public"} and not relations and not functions and not types)
+            require(
+                schemas == {"public"}
+                and not relations
+                and not functions
+                and not types
+                and not default_policies
+            )
             return {}
         require(
             relations and all(r["relkind"] in ("r", "p", "S", "v", "i", "I") for r in relations)
@@ -376,6 +512,9 @@ def capture(d):
                     "SELECT pg_get_functiondef(%s) AS definition", (f["oid"],)
                 ).fetchone()["definition"],
             }
+        require(default_policies == default_acls(c))
+        require(not (objects.keys() & default_policies.keys()))
+        objects.update(default_policies)
         names = {(r["schema"], r["name"]) for r in base}
         require(
             all(
