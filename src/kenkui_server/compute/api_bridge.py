@@ -191,6 +191,7 @@ def create_bridge_app(
     max_upload_bytes: int = 50 * 1024 * 1024,
     max_speech_characters: int = 10000000,
     request_timeout_seconds: float = 120,
+    max_operations: int = 2,
     model_allowlist: tuple[str, ...] = (DEFAULT_CHARACTER_MODEL,),
 ) -> FastAPI:
     """Modal proxy auth is mandatory too; this secret protects the inner app."""
@@ -198,23 +199,74 @@ def create_bridge_app(
         raise ValueError("bridge environment and secret are required")
     if not 0 < request_timeout_seconds <= 120:
         raise ValueError("bridge deadline must be within 120 seconds")
+    if max_operations < 1:
+        raise ValueError("bridge operation capacity must be positive")
     services: Any = None
+    operations: anyio.abc.TaskGroup | None = None
+    capacity: anyio.Semaphore | None = None
+    accepting = False
 
     async def bounded(operation: Callable[[], Result]) -> Result:
+        if not accepting or operations is None or capacity is None:
+            raise HTTPException(503, "bridge is shutting down")
+        try:
+            capacity.acquire_nowait()
+        except anyio.WouldBlock as error:
+            raise HTTPException(429, "bridge operation capacity exhausted") from error
+        finished = anyio.Event()
+        result: list[Result] = []
+        failure: list[Exception] = []
+        slot = capacity
+
+        async def execute() -> None:
+            # The lifespan owns this work, independently of request deadlines
+            # and disconnects. Retain both admission and the thread limiter
+            # until real completion, including during graceful shutdown.
+            with anyio.CancelScope(shield=True):
+                try:
+                    result.append(await anyio.to_thread.run_sync(operation))
+                except Exception as error:
+                    failure.append(error)
+                finally:
+                    slot.release()
+                    finished.set()
+
+        try:
+            operations.start_soon(execute)
+        except BaseException:
+            slot.release()
+            raise
         try:
             with anyio.fail_after(request_timeout_seconds):
-                return await anyio.to_thread.run_sync(operation, abandon_on_cancel=True)
+                await finished.wait()
         except TimeoutError as error:
-            # Parsing/transfers may finish after this response, until the Modal
-            # function hard timeout (240s). Covers are idempotent; dispatch keeps
-            # its lease on an ambiguous spawn. Never retry with a new identity.
+            # This bounds the HTTP wait only. The tracked operation keeps its
+            # slot and dependencies until it actually finishes; retries may
+            # receive 429. Do not assume Modal kills post-response threads.
             raise HTTPException(504, "bridge operation deadline exceeded") from error
+        if failure:
+            raise failure[0]
+        return result[0]
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        yield
-        if services is not None and callable(getattr(services, "close", None)):
-            services.close()
+        nonlocal operations, capacity, accepting
+        try:
+            async with anyio.create_task_group() as tasks:
+                operations = tasks
+                capacity = anyio.Semaphore(max_operations)
+                accepting = True
+                try:
+                    yield
+                finally:
+                    accepting = False
+            # Task-group exit drains shielded operations before dependencies
+            # close. A hung provider call can delay graceful shutdown.
+        finally:
+            operations = None
+            capacity = None
+            if services is not None and callable(getattr(services, "close", None)):
+                services.close()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.hosted_auth = None  # Ownership checked before invoking legacy helpers.

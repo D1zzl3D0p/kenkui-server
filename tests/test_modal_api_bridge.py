@@ -205,6 +205,165 @@ def test_document_deadline_returns_504_without_waiting_for_processing():
             release.set()
 
 
+@pytest.fixture
+def blocked_source():
+    import threading
+
+    lock = threading.Lock()
+    release = threading.Event()
+    entered = threading.Event()
+    completed = threading.Event()
+    closed = threading.Event()
+    state = SimpleNamespace(active=0, peak=0, active_when_closed=None)
+
+    class Assets:
+        def get(self, source):
+            with lock:
+                state.active += 1
+                state.peak = max(state.peak, state.active)
+                entered.set()
+            try:
+                release.wait(5)
+                raise KeyError(source)
+            finally:
+                with lock:
+                    state.active -= 1
+                    completed.set()
+
+    def close():
+        state.active_when_closed = state.active
+        closed.set()
+
+    state.services = SimpleNamespace(
+        repositories=SimpleNamespace(assets=Assets()),
+        close=close,
+    )
+    state.release = release
+    state.entered = entered
+    state.completed = completed
+    state.closed = closed
+    state.body = {
+        "environment": "staging",
+        "ownerId": str(uuid4()),
+        "sourceId": str(uuid4()),
+    }
+    try:
+        yield state
+    finally:
+        release.set()
+
+
+def test_timed_out_operations_keep_capacity_and_reject_retries_until_completed(blocked_source):
+    from kenkui_server.compute.api_bridge import create_bridge_app
+
+    state = blocked_source
+    app = create_bridge_app(
+        environment="staging",
+        secret="synthetic-bridge-secret",
+        services_factory=lambda: state.services,
+        request_timeout_seconds=0.01,
+        max_operations=1,
+    )
+    with TestClient(app) as client:
+        import anyio
+
+        async def limit_threads():
+            anyio.to_thread.current_default_thread_limiter().total_tokens = 1
+
+        client.portal.call(limit_threads)
+        try:
+            responses = [client.post("/inspect", json=state.body, headers=AUTH) for _ in range(3)]
+            assert [response.status_code for response in responses] == [504, 429, 429]
+            assert state.active == 1
+            assert state.peak == 1
+        finally:
+            state.release.set()
+        assert state.completed.wait(2)
+        # A completed operation returns its slot, so subsequent requests resume.
+        response = client.post("/inspect", json=state.body, headers=AUTH)
+        assert response.status_code == 404
+    assert state.active_when_closed == 0
+
+
+def test_shutdown_drains_timed_out_operations_before_closing_dependencies(blocked_source):
+    import threading
+
+    from kenkui_server.compute.api_bridge import create_bridge_app
+
+    state = blocked_source
+    client = TestClient(
+        create_bridge_app(
+            environment="staging",
+            secret="synthetic-bridge-secret",
+            services_factory=lambda: state.services,
+            request_timeout_seconds=0.01,
+            max_operations=1,
+        )
+    )
+    client.__enter__()
+    assert client.post("/inspect", json=state.body, headers=AUTH).status_code == 504
+    shutdown = threading.Thread(target=lambda: client.__exit__(None, None, None))
+    shutdown.start()
+    try:
+        assert not state.closed.wait(0.05)
+        assert state.active == 1
+    finally:
+        state.release.set()
+        shutdown.join(2)
+    assert not shutdown.is_alive()
+    assert state.closed.is_set()
+    assert state.active_when_closed == 0
+
+
+def test_cancelling_client_keeps_operation_tracked_and_capacity_recovers(blocked_source):
+    import anyio
+    import httpx
+
+    from kenkui_server.compute.api_bridge import create_bridge_app
+
+    state = blocked_source
+    app = create_bridge_app(
+        environment="staging",
+        secret="synthetic-bridge-secret",
+        services_factory=lambda: state.services,
+        request_timeout_seconds=1,
+        max_operations=1,
+    )
+
+    async def scenario():
+        anyio.to_thread.current_default_thread_limiter().total_tokens = 1
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://bridge.test",
+            ) as client:
+                async with anyio.create_task_group() as requests:
+                    requests.start_soon(
+                        lambda: client.post("/inspect", json=state.body, headers=AUTH)
+                    )
+                    with anyio.fail_after(2):
+                        while not state.entered.is_set():
+                            await anyio.sleep(0.001)
+                    requests.cancel_scope.cancel()
+                try:
+                    response = await client.post("/inspect", json=state.body, headers=AUTH)
+                    assert response.status_code == 429
+                    assert state.active == 1
+                    assert state.peak == 1
+                    assert not state.closed.is_set()
+                finally:
+                    state.release.set()
+                with anyio.fail_after(2):
+                    while not state.completed.is_set():
+                        await anyio.sleep(0.001)
+                assert (
+                    await client.post("/inspect", json=state.body, headers=AUTH)
+                ).status_code == 404
+        assert state.active_when_closed == 0
+
+    anyio.run(scenario)
+
+
 def test_environment_owner_and_strict_ids_cannot_select_foreign_objects(bridge):
     for patch, expected in [
         ({"environment": "production"}, 403),
