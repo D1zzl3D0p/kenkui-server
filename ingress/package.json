@@ -5,9 +5,11 @@
   "engines": {"node": "24.21.0"},
   "scripts": {
     "types": "wrangler types --env staging --include-runtime false --strict-vars false",
+    "types:check": "node check-types.mjs",
     "typecheck": "tsc --noEmit",
     "dry-run": "wrangler deploy --env staging --dry-run --outdir dist",
-    "test": "vitest run test/index.test.ts && node --test test/runtime.test.mjs"
+    "pretest": "npm run dry-run",
+    "test": "vitest run test/index.test.ts && node --test --test-timeout=10000 test/runtime.test.mjs"
   },
   "devDependencies": {"wrangler": "4.156.1", "typescript": "7.0.2", "miniflare": "5.20261101.0-beta", "vitest": "5.1.0", "@cloudflare/workers-types": "5.20261101.1"},
   "overrides": {"miniflare": {"sharp": "0.35.5", "undici": "7.30.1"}}

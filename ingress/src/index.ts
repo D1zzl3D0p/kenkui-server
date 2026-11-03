@@ -4,6 +4,16 @@ type Config = Pick<Cloudflare.Env,'ORIGIN_URL'|'ALLOWED_ORIGINS'|'KENKUI_ORIGIN_
 type Bindings = {[K in keyof Config]:Config[K] extends string?string:Config[K]};
 type Send = (request:Request)=>Promise<Response>;
 
+// Hono decodes unreserved escapes before routing. Accept those aliases without
+// rewriting wire bytes; reject other/malformed escapes instead of routing ambiguously.
+function routingPath(path:string):string {
+  if(/%(?![0-9a-fA-F]{2})/.test(path))throw Error('Invalid path');
+  return path.replace(/%([0-9a-fA-F]{2})/g,(_escape,hex:string)=>{
+    const character=String.fromCharCode(Number.parseInt(hex,16));
+    if(!/^[A-Za-z0-9._~-]$/.test(character))throw Error('Ambiguous path');
+    return character;
+  });
+}
 function scope(request:Request,path:string):'login'|'costly'|'public' {
   if(path.startsWith('/v1/auth/'))return 'login';
   if((request.method==='POST' && (path==='/v1/jobs'||path==='/v1/jobs/preflight'||path==='/v1/assets'||/^\/v1\/assets\/[^/]+\/cover$/.test(path)||path==='/v1/billing/checkout')) ||
@@ -31,7 +41,10 @@ export async function proxyRequest(request:Request,env:Bindings,send:Send=fetch)
   // JWT claims, cookies or caller IDs as limiter keys. Missing edge metadata fails closed.
   const ip=request.headers.get('CF-Connecting-IP');
   if(!ip || !/^[a-fA-F0-9:.]+$/.test(ip))return failure(request,env,503,'configuration_error','Ingress client metadata is unavailable.');
-  const url=new URL(request.url),category=scope(request,url.pathname);
+  const url=new URL(request.url);
+  let path:string;
+  try{path=routingPath(url.pathname);}catch{return failure(request,env,400,'invalid_path','Request path is not allowed.');}
+  const category=scope(request,path);
   try {
     const limiter=category==='login'?env.LOGIN_LIMIT:category==='costly'?env.COSTLY_LIMIT:env.PUBLIC_LIMIT;
     if(!(await limiter.limit({key:category+':'+ip})).success)return failure(request,env,429,'http_error','Too many requests');

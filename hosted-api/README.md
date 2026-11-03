@@ -5,7 +5,9 @@ Node 24.21.0; pinned dependencies and package lock. Run `npm ci`, `npm test`,
 self-contained Node24 ESM Function and standalone artifacts under `dist/function`
 and `dist/standalone`, without runtime node_modules or source maps. The build embeds
 the pinned managed browser SDK asset. The only config, `hosted-api/neon.ts`, uses
-`dist/function` with `bundler: 'none'`; build first. Release configuration requires
+`dist/function` with `bundler: 'none'`. Builds prepare packages; operator deployment
+must restore the reviewed archives/receipt first. Canonical deployment verifies
+that receipt and current runtime hashes, deriving all auth pins from it. Release configuration requires
 an explicit restricted API connection rather than Neon's injected owner URL.
 See [release/ingress preparation](../deploy/neon/README.md) and
 [same-auth rollback](../deploy/neon/rollback.md) for exact archive interfaces,

@@ -52,3 +52,18 @@ it('fails closed on missing IP, binding, secret or invalid origin and sanitizes 
   expect(send).not.toHaveBeenCalled();
   const failed=await proxyRequest(request('/v1/health'),env,async()=>{throw Error('private-secret?query');});expect(failed.status).toBe(502);expect(await failed.text()).not.toContain('private-secret');
 });
+it.each([
+  ['POST','/v1/jobs','/v1/%6Aobs','COSTLY_LIMIT'],
+  ['POST','/v1/jobs/preflight','/%76%31/jobs/%70reflight','COSTLY_LIMIT'],
+  ['GET','/v1/auth/login','/v1/%61uth/%6cogin','LOGIN_LIMIT'],
+] as const)('charges equivalent %s %s spellings to the same scoped limit without rewriting wire paths',async(method,plain,encoded,binding)=>{
+  const {env,request}=setup(),received:string[]=[];
+  const send=async(req:Request)=>{received.push(req.url);return new Response('matched');};
+  for(const path of [plain,encoded])expect((await proxyRequest(request(path,{method}),env,send)).status).toBe(200);
+  expect(env[binding].limit.mock.calls).toEqual([[{key:(binding==='LOGIN_LIMIT'?'login':'costly')+':192.0.2.1'}],[{key:(binding==='LOGIN_LIMIT'?'login':'costly')+':192.0.2.1'}]]);
+  expect(received).toEqual([origin+plain,origin+encoded]);
+});
+it.each(['/v1/%','/v1/%C0/jobs','/v1/%2Fjobs','/v1/%256Aobs'])('rejects ambiguous encoded routing %s before origin fetch',async(path)=>{
+  const {env,request}=setup(),send=vi.fn(async()=>new Response());
+  expect((await proxyRequest(request(path),env,send)).status).toBe(400);expect(send).not.toHaveBeenCalled();
+});

@@ -41,8 +41,10 @@ jobs:
       - run: npm run typecheck
         working-directory: hosted-api
       - name: Relevant ingress and same-runtime contracts
-        run: npm test -- test/standalone.test.ts test/release-environment.test.ts test/catalog.test.ts test/auth.test.ts test/stripe.test.ts test/assets.test.ts test/events.test.ts
+        run: npm test -- test/standalone.test.ts test/release-environment.test.ts test/release-manifest.test.ts test/catalog.test.ts test/auth.test.ts test/stripe.test.ts test/assets.test.ts test/events.test.ts
         working-directory: hosted-api
+      - name: Archive authorization, resource bounds and fallback byte verification
+        run: node --test scripts/neon/test/*.test.mjs
       - run: npm run build
         working-directory: hosted-api
       - run: npm run smoke
@@ -69,7 +71,7 @@ jobs:
           KENKUI_PG_BIN: /usr/lib/postgresql/17/bin
       - run: npm ci
         working-directory: ingress
-      - run: npm run types && npm run typecheck && npm run dry-run && npm test
+      - run: npm run types:check && npm run typecheck && npm test
         working-directory: ingress
   release:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
