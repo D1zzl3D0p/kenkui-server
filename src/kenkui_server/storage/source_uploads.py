@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from uuid import UUID, uuid5
 
 from kenkui_server.jobs.models import Asset
+
+LOGGER = logging.getLogger(__name__)
 
 
 class SourceUploadConflict(ValueError):
@@ -163,10 +166,14 @@ class PostgresSourceUploads:
         """
         if not 1 <= limit <= 100:
             raise ValueError("invalid upload cleanup batch")
+        # A NULL digest is only a generation reservation: begin() must commit
+        # its non-null digest before PUT. Retain this fence, but never spend
+        # recurring object DELETE traffic or bounded batch capacity on it.
         candidates = self.database.execute(
             """SELECT source_id FROM (
                 (SELECT source_id,next_cleanup_at AS due FROM source_upload_intents
-                WHERE next_cleanup_at<=clock_timestamp() AND expires_at<=clock_timestamp()
+                WHERE sha256 IS NOT NULL
+                AND next_cleanup_at<=clock_timestamp() AND expires_at<=clock_timestamp()
                 ORDER BY next_cleanup_at,source_id LIMIT %s)
                 UNION ALL
                 (SELECT id AS source_id,COALESCE(next_source_cleanup_at,deleted_at) AS due
@@ -177,6 +184,7 @@ class PostgresSourceUploads:
             (limit, limit, limit),
         ).fetchall()
         deleted = 0
+        failures = 0
         for candidate in candidates:
             source_id = candidate["source_id"]
             with self.database.transaction():
@@ -221,7 +229,8 @@ class PostgresSourceUploads:
                     claimed = self.database.execute(
                         """UPDATE source_upload_intents SET cleanup_started=TRUE,
                         next_cleanup_at=clock_timestamp()+interval '24 hours'
-                        WHERE source_id=%s AND next_cleanup_at<=clock_timestamp()
+                        WHERE source_id=%s AND sha256 IS NOT NULL
+                        AND next_cleanup_at<=clock_timestamp()
                         AND expires_at<=clock_timestamp() RETURNING source_id""",
                         (source_id,),
                     ).fetchone()
@@ -232,6 +241,9 @@ class PostgresSourceUploads:
                 # idempotent; on failure the durable tombstone remains retryable.
                 objects.delete_source(source_id)
             except Exception:
+                failures += 1
                 continue
             deleted += 1
+        if failures:
+            LOGGER.warning("source_upload_cleanup_failed failure_count=%d", failures)
         return deleted

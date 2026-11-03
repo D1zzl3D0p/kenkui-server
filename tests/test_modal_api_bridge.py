@@ -521,6 +521,101 @@ def test_private_cover_read_preserves_png_and_ownership(bridge):
     assert bridge.client.post("/cover", json=source).status_code == 401
 
 
+@pytest.mark.parametrize("failure", ["malformed", "oversized"])
+def test_rejected_cover_reservations_never_delete_unwritten_keys(bridge, monkeypatch, failure):
+    from kenkui_server.compute.api_bridge import create_bridge_app
+    from kenkui_server.storage.source_uploads import PostgresSourceUploads, SourceUploadConflict
+
+    source_id = bridge.source
+    max_bytes = len(bridge.objects.read_source(source_id))
+    if failure == "malformed":
+        source_id = str(uuid4())
+        payload = b"not an EPUB archive"
+        bridge.objects.put_source(source_id, payload)
+        bridge.repo.assets.put_for_owner(
+            Asset(source_id, source_id, hashlib.sha256(payload).hexdigest(), "epub"), bridge.owner
+        )
+    puts = []
+    deletes = []
+    monkeypatch.setattr(bridge.objects, "put_source", lambda *args: puts.append(args))
+    monkeypatch.setattr(bridge.objects, "delete_source", lambda source: deletes.append(source))
+    app = create_bridge_app(
+        environment="staging",
+        secret="synthetic-bridge-secret",
+        services_factory=lambda: SimpleNamespace(repositories=bridge.repo, assets=bridge.objects),
+        max_upload_bytes=max_bytes,
+    )
+    with TestClient(app) as client:
+        for suffix in [b"one", b"two"]:
+            body = bridge.body | {
+                "sourceId": source_id,
+                "coverBase64": base64.b64encode(PNG + suffix).decode(),
+                "mediaType": "image/png",
+            }
+            response = client.post("/replace_cover", json=body, headers=AUTH)
+            assert response.status_code == (422 if failure == "malformed" else 413)
+    rows = bridge.database.execute("SELECT source_id,sha256 FROM source_upload_intents").fetchall()
+    assert len(rows) == 2 and all(row["sha256"] is None for row in rows)
+    assert puts == []
+    uploads = PostgresSourceUploads(bridge.database)
+    for _ in range(2):
+        bridge.database.execute(
+            "UPDATE source_upload_intents SET expires_at=clock_timestamp()-interval '1 second', "
+            "next_cleanup_at=clock_timestamp()-interval '1 second'"
+        )
+        assert uploads.reap(bridge.objects) == 0
+        assert deletes == []
+    # Retain generation fencing even though an unwritten key never needs DELETE.
+    for row in rows:
+        with pytest.raises(SourceUploadConflict):
+            uploads.complete(row["source_id"], str(bridge.owner))
+    assert (
+        bridge.database.execute("SELECT count(*) AS n FROM source_upload_intents").fetchone()["n"]
+        == 2
+    )
+
+
+def test_upload_cleanup_failures_emit_only_an_aggregate_count_and_keep_retry_tracking(
+    bridge, caplog
+):
+    from kenkui_server.storage.source_uploads import PostgresSourceUploads
+
+    uploads = PostgresSourceUploads(bridge.database)
+    ids = [str(uuid4()), str(uuid4())]
+    for identifier in ids:
+        uploads.begin(Asset(identifier, identifier, "a" * 64, "epub"), str(bridge.owner))
+    bridge.database.execute(
+        "UPDATE source_upload_intents SET expires_at=clock_timestamp()-interval '1 second', "
+        "next_cleanup_at=clock_timestamp()-interval '1 second'"
+    )
+
+    class FailedObjects:
+        def delete_source(self, identifier):
+            assert getattr(bridge.database._state, "connection", None) is None
+            raise RuntimeError(f"private-key:{identifier} owner:{bridge.owner} secret-token")
+
+    with caplog.at_level("WARNING", logger="kenkui_server.storage.source_uploads"):
+        assert uploads.reap(FailedObjects()) == 0
+    events = [
+        record for record in caplog.records if record.name == "kenkui_server.storage.source_uploads"
+    ]
+    assert len(events) == 1
+    assert events[0].getMessage() == "source_upload_cleanup_failed failure_count=2"
+    assert events[0].exc_info is None
+    assert all(
+        value not in caplog.text
+        for value in ids + [str(bridge.owner), "secret-token", "private-key"]
+    )
+    assert (
+        bridge.database.execute(
+            "SELECT count(*) AS n FROM source_upload_intents WHERE cleanup_started"
+        ).fetchone()["n"]
+        == 2
+    )
+    bridge.database.execute("UPDATE source_upload_intents SET next_cleanup_at=clock_timestamp()")
+    assert uploads.reap(bridge.objects) == 2
+
+
 def test_expired_failed_cover_gets_fresh_generation_and_old_cleanup_cannot_delete_it(
     bridge, monkeypatch
 ):

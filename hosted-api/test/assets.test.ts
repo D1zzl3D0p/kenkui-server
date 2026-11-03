@@ -16,7 +16,7 @@ function setup(options:{foreign?:boolean;maxUpload?:number}={}) {
   if(options.maxUpload) config.catalog.capabilities.maxUploadBytes=options.maxUpload;
   const store={requireOwned:vi.fn(async()=>{if(options.foreign) {
     const {ApiError}=await import('../src/types.js');throw new ApiError(403,'http_error','resource is not owned by this user');
-  }return asset;}),beginUpload:vi.fn(async()=>{}),completeUpload:vi.fn(async()=>asset)};
+  }return asset;}),beginUpload:vi.fn(async():Promise<typeof asset|null>=>null),completeUpload:vi.fn(async()=>asset)};
   const objects={putSource:vi.fn(async()=>{}),deleteSource:vi.fn(async()=>{}),artifactUrl:vi.fn(async()=>''),streamArtifact:vi.fn()};
   const bridge={inspect:vi.fn(async()=>({sourceId:id,title:'Tiny',author:'Ada',chapters:[]})),
     cover:vi.fn(async()=>({coverBase64:'iVBORw0KGgo=',mediaType:'image/png'})),
@@ -36,6 +36,15 @@ describe('owned asset public routes',()=>{
     expect(objects.putSource).toHaveBeenCalledWith(id,body,createHash('sha256').update(body).digest('hex'));
     expect(store.completeUpload).toHaveBeenCalledWith(id,owner);
     expect(store.beginUpload.mock.invocationCallOrder[0]).toBeLessThan(objects.putSource.mock.invocationCallOrder[0]!);
+  });
+  it('returns an already completed upload without another object write or finalization',async()=>{
+    const {request,store,objects}=setup();
+    const body=Buffer.from('completed EPUB bytes');
+    const completed={...asset,sha256:createHash('sha256').update(body).digest('hex')};
+    store.beginUpload.mockResolvedValue(completed);
+    const response=await request('/v1/assets',{method:'POST',headers:{'content-type':'application/epub+zip'},body});
+    expect(response.status).toBe(201);expect(await response.json()).toEqual(completed);
+    expect(objects.putSource).not.toHaveBeenCalled();expect(store.completeUpload).not.toHaveBeenCalled();
   });
   it.each([
     ['application/pdf','%PDF',415],['application/octet-stream','bytes',415],['application/epub+zip','',422],

@@ -107,7 +107,11 @@ can publish it while the digest is NULL.
 The existing daily retention pass also makes at most 100 upload/tombstone cleanup
 attempts, selected fairly by indexed next-due time. It commits claims before R2
 DELETE, tolerates missing objects, retains tracking after failures, and rotates
-each attempt to the next day. Completed assets keep their existing durable row:
+each attempt to the next day. NULL-digest cover reservations never reached PUT:
+they retain their generation fence but are excluded from the due index, cleanup
+query and recurring R2 DELETE attempts. Cleanup failures emit only an aggregate
+`source_upload_cleanup_failed failure_count=N` warning, with no IDs, keys or raw
+provider exceptions. Completed assets keep their existing durable row:
 repeat cleanup uses `deleted_at` plus `next_source_cleanup_at`, preserving the
 original live/recent-job guard and normal 24-hour source TTL. Live assets always
 suppress deletion. Tracking rows are retained indefinitely because a lost or

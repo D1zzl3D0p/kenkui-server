@@ -28,6 +28,19 @@ describe.skipIf(!url)('shared source upload lifecycle on actual PostgreSQL',()=>
     store=new AssetStore(()=>pool);
   });
   afterEach(async()=>{await pool?.end();if(admin){if(schema)await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end();}if(directory)await rm(directory,{recursive:true,force:true});});
+  it('indexes only intents that reached the non-null digest write stage',async()=>{
+    const row=(await pool.query(`SELECT pg_get_expr(indpred,indrelid) AS predicate FROM pg_index WHERE indexrelid=$1::regclass`,[schema+'.source_upload_cleanup_idx'])).rows[0];
+    expect(row.predicate).toBe('(sha256 IS NOT NULL)');
+  });
+  it('does not let never-written cover reservations consume the bounded cleanup batch',async()=>{
+    const id=randomUUID();await store.beginUpload({id,format:'epub',sha256},owner);
+    await pool.query(`INSERT INTO source_upload_intents(source_id,owner_id,cover_operation_id,cover_generation)
+      SELECT gen_random_uuid()::text,$1,$2,generation FROM generate_series(0,100) AS generation`,[owner,randomUUID()]);
+    await pool.query(`UPDATE source_upload_intents SET expires_at=clock_timestamp()-interval '1 day',
+      next_cleanup_at=clock_timestamp()-CASE WHEN sha256 IS NULL THEN interval '2 days' ELSE interval '1 day' END`);
+    expect((await python('reap',id)).deleted).toBe(1);
+    expect((await pool.query('SELECT count(*) FROM source_upload_intents WHERE sha256 IS NULL AND NOT cleanup_started')).rows[0].count).toBe('101');
+  });
   it('matches the actual Python private worker key for an owned render attempt',async()=>{
     const identifier=randomUUID()+'.'+randomUUID();
     expect((await python('key',identifier)).key).toBe(objectKey('salt','artifact',identifier));

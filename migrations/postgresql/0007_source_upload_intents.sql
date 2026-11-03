@@ -22,4 +22,5 @@ CREATE TABLE source_upload_intents (
     cleanup_started BOOLEAN NOT NULL DEFAULT FALSE,
     next_cleanup_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp() + interval '24 hours'
 );
-CREATE INDEX source_upload_cleanup_idx ON source_upload_intents (next_cleanup_at, source_id);
+CREATE INDEX source_upload_cleanup_idx ON source_upload_intents (next_cleanup_at, source_id)
+    WHERE sha256 IS NOT NULL;

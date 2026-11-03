@@ -88,7 +88,9 @@ export class ModalBridge {
     requireUuid(ownerId);requireUuid(sourceId);
     const x=await this.call('/cover',{ownerId,sourceId});
     if(!record(x)||!['image/png','image/jpeg'].includes(String(x.mediaType))||typeof x.coverBase64!=='string'||
-      x.coverBase64.length>11_184_812||!x.coverBase64||Buffer.from(x.coverBase64,'base64').toString('base64')!==x.coverBase64)throw invalid();
+      x.coverBase64.length>11_184_812||!x.coverBase64)throw invalid();
+    const bytes=Buffer.from(x.coverBase64,'base64');
+    if(bytes.length>8_388_608||bytes.toString('base64')!==x.coverBase64)throw invalid();
     return x as unknown as CoverResponse;
   }
   async replaceCover(ownerId:string,sourceId:string,bytes:Uint8Array,mediaType:'image/png'|'image/jpeg'):Promise<AssetResponse> {

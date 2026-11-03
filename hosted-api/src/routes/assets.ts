@@ -35,7 +35,8 @@ export function registerAssetRoutes(app:Hono<ApiEnv>,config:ApiConfig,services:(
     const asset:AssetResponse={id:newId(),format:'epub',sha256:createHash('sha256').update(bytes).digest('hex')};
     const owner=c.get('principal').userId;
     const selected=services();
-    await selected.assets.beginUpload(asset,owner);
+    const completed=await selected.assets.beginUpload(asset,owner);
+    if(completed)return c.json(completed,201);
     try{await selected.objects.putSource(asset.id,bytes,asset.sha256);}
     catch{throw new ApiError(503,'storage_unavailable','Upload storage is temporarily unavailable.');}
     // Failures leave durable intent tracking, including lost PUT acknowledgements.

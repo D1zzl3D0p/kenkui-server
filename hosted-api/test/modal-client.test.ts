@@ -43,6 +43,14 @@ describe('authenticated bounded Modal client', () => {
     const bridge=new ModalBridge(config,async()=>new Response('internal SQL/path',{status:409}));
     await expect(bridge.inspect(owner,source)).rejects.toMatchObject({status:409,message:"This book's chapter layout has changed since it was uploaded. Upload the book again and choose chapters from the updated list."});
   });
+  it.each([8_388_608,8_388_609])('enforces decoded cover byte limit at %s bytes with equal encoded lengths',async size=>{
+    const coverBase64=Buffer.alloc(size).toString('base64');
+    expect(coverBase64.length).toBe(11_184_812);
+    const bridge=new ModalBridge(config,async()=>Response.json({coverBase64,mediaType:'image/png'}));
+    const result=await bridge.cover(owner,source).then(value=>Buffer.from(value.coverBase64,'base64').length,error=>error);
+    if(size===8_388_608)expect(result).toBe(size);
+    else expect(result).toMatchObject({status:502,code:'compute_response_invalid'});
+  });
   it('bounds its wait even if transport ignores cancellation', async () => {
     const bridge=new ModalBridge({...config,timeoutMs:5},async()=>new Promise(()=>{}));
     await expect(bridge.inspect(owner,source)).rejects.toMatchObject({status:503,code:'compute_unavailable'});
