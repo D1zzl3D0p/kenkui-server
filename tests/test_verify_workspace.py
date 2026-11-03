@@ -42,10 +42,11 @@ def test_integration_requires_explicit_disposable_database_before_any_command():
         with pytest.raises(ValueError, match="disposable"):
             module.validate_environment("integration", env)
     module.validate_environment("fast", {})
-    module.validate_environment(
-        "integration",
-        {"KENKUI_TEST_DATABASE_URL": "postgresql://postgres@127.0.0.1:55438/postgres"},
-    )
+    with patch("shutil.which", return_value="/fixture/tool"):
+        module.validate_environment(
+            "integration",
+            {"KENKUI_TEST_DATABASE_URL": "postgresql://postgres@127.0.0.1:55438/postgres"},
+        )
 
 
 def test_component_filter_and_command_failure_propagation(tmp_path):
@@ -67,3 +68,12 @@ def test_release_contains_integration_and_artifact_smoke():
     assert all(c in release for c in integration)
     assert any(c.command == ("npm", "run", "smoke") for c in release)
     assert any(c.command == ("npm", "run", "test:e2e") for c in integration)
+
+
+def test_integration_requires_restore_clients_before_checks():
+    module = load()
+    with patch("shutil.which", return_value=None):
+        with pytest.raises(ValueError, match="restore tools"):
+            module.validate_environment(
+                "integration", {"KENKUI_TEST_DATABASE_URL": module.DISPOSABLE_DATABASE}
+            )

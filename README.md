@@ -59,3 +59,9 @@ The `release` tier adds the existing built-artifact smoke. These tiers complemen
 the dedicated Neon workflow's archive, ingress, TLS and release-provenance checks;
 they do not replace real staging acceptance. Integration skips remain visible in
 test output and are not evidence of live provider acceptance.
+
+Integration/release also requires `age`, `age-keygen`, `pg_dump`, and `pg_restore`
+on PATH. Missing clients fail preflight rather than silently skipping the encrypted
+backup/independent-restore check. CI installs age and PostgreSQL 17 clients; local
+clients must be compatible with the disposable PostgreSQL 17 server. Real TTS remains
+a separate opt-in requiring an explicitly provisioned voice.

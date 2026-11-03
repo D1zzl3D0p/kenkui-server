@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -72,6 +73,14 @@ def validate_environment(tier: str, env: Mapping[str, str]) -> None:
             "Integration/release requires the disposable PostgreSQL fixture at "
             + DISPOSABLE_DATABASE
         )
+    if tier != "fast":
+        missing = [
+            tool
+            for tool in ("age", "age-keygen", "pg_dump", "pg_restore")
+            if not shutil.which(tool)
+        ]
+        if missing:
+            raise ValueError("Integration/release requires restore tools: " + ", ".join(missing))
     if tier == "fast" and url:
         raise ValueError(
             "Fast checks must run without a database URL; "

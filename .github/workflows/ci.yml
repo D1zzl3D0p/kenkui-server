@@ -62,6 +62,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24.21.0"
+      - name: Require local encrypted restore tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y age
+          bash scripts/install-postgres-clients.sh
+          test -x /usr/lib/postgresql/17/bin/pg_dump
+          test -x /usr/lib/postgresql/17/bin/pg_restore
+          echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
+          age --version
+          pg_dump --version
       - run: uv sync --frozen --all-groups --extra hosted
         working-directory: kenkui-server
       - run: npm ci

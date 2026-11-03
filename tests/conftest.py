@@ -15,5 +15,11 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
 
 @pytest.fixture(autouse=True)
 def isolated_default_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default local app state must never read or mutate a developer's library."""
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    """Isolate only the app's default state; preserve real voice/model discovery."""
+
+    class AppPath(type(Path())):
+        @classmethod
+        def home(cls):
+            return tmp_path
+
+    monkeypatch.setattr("kenkui_server.app.Path", AppPath)
