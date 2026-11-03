@@ -137,6 +137,30 @@ daily maintenance schedule's coverage of migration 0007. Exercise failed/ambiguo
 PUT and late-completion cleanup with real R2; synthetic tests establish protocol
 behavior, not provider acceptance. No providers or customer prices changed here.
 
+## Hosted credits, checkout and admission
+
+Billing resolves an authenticated internal identity to its existing credit account.
+First use applies the original `beta-allowance:{identity UUID}` reference atomically.
+Before enabling traffic, reconcile imported account IDs, balances, lots, ledger
+references and the actual legacy `KENKUI_BETA_CREDITS` setting (default 1000).
+Use the existing `KENKUI_ESTIMATED_COST_CENTS_PER_MILLION` setting (default 126).
+Job quotes take the normalized count from the Python preflight bridge.
+
+Checkout requires the environment's `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
+`KENKUI_WEB_ORIGIN` and `KENKUI_STRIPE_API_VERSION`. Obtain the API version used
+by the legacy Stripe account and verify managed-payment checkout in Stripe test
+mode before pinning it. Missing version disables checkout. The webhook can still
+fulfill signed existing sessions using its signing secret. Preserve the deployed
+`KENKUI_STRIPE_TAX_CODE` (default `txcd_10105001`), both catalog versions, and the
+checkout session ID in payment and purchase references.
+
+The API arms an empty private R2 marker at
+`operations/recovery/{environment}/{job UUID}` before committing an admission.
+It retains the marker across dispatch acceptance and ambiguous failures. Replay
+rearms the original job before deleting the unused candidate. Match `KENKUI_ENV`
+to Python's `KENKUI_DEPLOYMENT` and verify the existing recovery and daily cleanup
+schedules in staging. Python owns execution leases and terminal credit settlement.
+
 ## Catalog provenance and compatibility
 
 `src/catalog.json` contains 59 VCTK metadata records exported from core

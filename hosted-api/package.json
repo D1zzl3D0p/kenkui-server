@@ -19,7 +19,8 @@
     "@neon/functions": "0.11.0",
     "hono": "4.13.16",
     "jose": "6.2.5",
-    "pg": "8.23.1"
+    "pg": "8.23.1",
+    "stripe": "23.1.0"
   },
   "overrides": {
     "@neon/auth": {

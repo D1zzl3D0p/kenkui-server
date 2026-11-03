@@ -12,6 +12,10 @@ import { ModalBridge } from './compute/modal.js';
 import { R2ObjectStore } from './storage/r2.js';
 import { registerAssetRoutes, type AssetServices } from './routes/assets.js';
 
+import { BillingStore } from './db/billing.js';
+import { Checkout, StripePayments } from './billing/stripe.js';
+import { registerBillingRoutes } from './routes/billing.js';
+
 let app:ReturnType<typeof createApi>|undefined;
 
 /** Neon web fetch entrypoint. No env validation, connections or queries on import. */
@@ -54,6 +58,14 @@ export default {
           },
         };
         registerAssetRoutes(next,config,()=>assetServices);
+        const billing=new BillingStore(getPool);
+        const signingSecret=process.env.STRIPE_WEBHOOK_SECRET;
+        let checkout:Checkout|undefined;
+        registerBillingRoutes(next,{
+          store:billing,checkoutEnabled:Checkout.enabled(process.env),
+          checkout:()=>checkout??=Checkout.fromEnvironment(process.env),
+          ...(signingSecret?{webhook:new StripePayments(signingSecret,(id,account,credits)=>billing.grantPayment(id,account,credits))}:{}),
+        });
         app=next;
       } catch {
         // A failed bootstrap is retryable after configuration is corrected. Never log env.

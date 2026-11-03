@@ -32,6 +32,17 @@ export class R2ObjectStore implements ObjectStore {
       credentials:{accessKeyId:config.accessKeyId,secretAccessKey:config.secretAccessKey},
       requestChecksumCalculation:'WHEN_REQUIRED',responseChecksumValidation:'WHEN_REQUIRED'});
   }
+  recoverySignals(environment:'staging'|'production') {
+    if(environment!=='staging'&&environment!=='production')throw Error('Invalid recovery environment');
+    const marker=(id:string)=>{
+      requireUuid(id);
+      return {Bucket:this.config.bucket,Key:'operations/recovery/'+environment+'/'+id};
+    };
+    return {
+      arm:async(id:string)=>{await this.client.send(new PutObjectCommand({...marker(id),Body:Buffer.alloc(0)}),{abortSignal:AbortSignal.timeout(30_000)});},
+      clear:async(id:string)=>{await this.client.send(new DeleteObjectCommand(marker(id)),{abortSignal:AbortSignal.timeout(30_000)});},
+    };
+  }
   async putSource(id:string,bytes:Uint8Array,sha256:string):Promise<void> {
     const key=objectKey(this.config.keySalt,'source',id);
     if(createHash('sha256').update(bytes).digest('hex')!==sha256)throw new ApiError(422,'http_error','Source digest mismatch.');
