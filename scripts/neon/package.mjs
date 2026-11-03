@@ -24,5 +24,17 @@ for(const [directory,names] of [['function',['index.js','package.json']],['stand
 }
 await mkdir('release',{recursive:true});
 await writeFile('release/manifest.json',JSON.stringify({formatVersion:1,environment,serverSha:git('rev-parse','HEAD'),studioSha:studioRef,coreSha:'97cba6bdb663c15d2d90d6e4e017be23ecdb9c7c',node:'24.21.0',authority,files},null,2)+'\n');
-for(const [directory,names] of [['function',['index.js','package.json']],['standalone',['standalone.js','package.json']]])execFileSync('tar',['-czf','release/'+directory+'.tar.gz','-C','hosted-api/dist/'+directory,...names],{stdio:'inherit'});
+// Construct regular members explicitly. Host tar can silently add macOS AppleDouble
+// metadata, violating the whitelist. Fixed gzip/tar metadata also makes archives repeatable.
+execFileSync('python3',['-c',String.raw`
+import gzip,io,pathlib,tarfile
+for kind,names in (('function',('index.js','package.json')),('standalone',('standalone.js','package.json'))):
+    with open('release/'+kind+'.tar.gz','wb') as target:
+        with gzip.GzipFile(filename='',mode='wb',fileobj=target,mtime=0) as compressed:
+            with tarfile.open(fileobj=compressed,mode='w',format=tarfile.USTAR_FORMAT) as archive:
+                for name in names:
+                    content=(pathlib.Path('hosted-api/dist')/kind/name).read_bytes()
+                    member=tarfile.TarInfo(name); member.size=len(content); member.mode=0o644; member.mtime=0
+                    archive.addfile(member,io.BytesIO(content))
+`],{stdio:'inherit'});
 console.log('Packaged allowlisted Function and same-auth standalone artifacts; provider deployment is a separate gated action.');
