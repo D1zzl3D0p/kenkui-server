@@ -3,17 +3,28 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": "24.21.0" },
+  "engines": {
+    "node": "24.21.0"
+  },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "build": "esbuild src/index.ts --bundle --platform=node --target=node24 --format=esm --packages=external --sourcemap=external --sources-content=false --outfile=dist/index.js"
+    "build": "node build.mjs"
   },
   "dependencies": {
+    "@neon/auth": "0.8.2",
     "@neon/config": "1.10.0",
     "@neon/functions": "0.11.0",
     "hono": "4.13.16",
+    "jose": "6.2.5",
     "pg": "8.23.1"
+  },
+  "overrides": {
+    "@neon/auth": {
+      "better-auth": "1.7.12",
+      "@better-auth/core": "1.7.12",
+      "@better-auth/oauth-provider": "1.7.12"
+    }
   },
   "devDependencies": {
     "@types/node": "24.19.2",

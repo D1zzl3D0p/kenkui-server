@@ -1,4 +1,6 @@
 import { defineConfig } from '@neon/config/v1';
 
 // Declaration only. Applying/deploying this file is an explicit later release step.
-export default defineConfig({functions:{kenkui:{name:'Kenkui API',source:'./src/index.ts'}}});
+// Build first: dist embeds the pinned Managed SDK browser asset. Provider policy is
+// configured per branch using deploy/neon/oauth-setup.md before admitting users.
+export default defineConfig({auth:true,functions:{kenkui:{name:'Kenkui API',source:'./dist/index.js'}}});

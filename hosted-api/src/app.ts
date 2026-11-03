@@ -72,6 +72,12 @@ export function createApi(deps: ApiDeps): Hono<ApiEnv> {
     if (allowed) {c.header('Access-Control-Allow-Origin',origin); c.header('Vary',c.res.headers.get('Vary') ? `${c.res.headers.get('Vary')}, Origin` : 'Origin');}
   });
 
+  // Auth responses (including early failures) carry credentials or recovery state.
+  app.use('/v1/auth/*',async(c,next)=>{
+    c.header('Cache-Control','no-store');c.header('Pragma','no-cache');
+    await next();
+  });
+
   // Match the frozen early-auth request-ID behavior: ignore caller ID on rejection.
   app.use('*',async (c,next) => {
     if (protectedPath(c.req.path)) {

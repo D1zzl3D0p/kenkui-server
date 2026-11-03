@@ -3,8 +3,9 @@
 Node 24.21.0; pinned dependencies and package lock. Run `npm ci`, `npm test`,
 `npm run typecheck` and `npm run build` inside this package. The build emits a
 Node 24 ESM bundle with external runtime packages and a source map without source
-contents. Ship the installed production dependencies with the bundle, or let Neon
-bundle `src/index.ts` from `neon.ts`. No deploy command has been run.
+contents. The build embeds the managed browser SDK asset. `neon.ts` now uses
+`dist/index.js`, so build before deployment and ship/stage the external runtime
+dependencies. No deploy command has been run.
 
 `src/index.ts` exports the Neon web `fetch` handler. It reads configuration on
 the first invocation, constructs the Hono app once, and passes the lazy `getPool`
@@ -27,11 +28,13 @@ Set values separately for staging and production:
 | `KENKUI_ORIGIN_SECRET` | When set, every request must carry matching `X-Kenkui-Origin-Secret`, including OPTIONS; edge ingress injects this, clients never receive it |
 | `DATABASE_URL` | Required only when a database operation first calls `getPool`; use the environment's pooled Neon URL |
 
-The production handler currently binds **no authentication verifier**. Missing
-user credentials receive the frozen 401; supplied credentials on protected routes
-receive explicit 503 until Task 5 binds real authentication. No token is accepted
-as a real identity by this foundation. Real auth routes, CSRF/session lifecycle,
-identity SQL and resource handlers belong to later tasks.
+The handler binds real Neon JWT verification when `NEON_AUTH_BASE_URL`,
+`NEON_AUTH_JWKS_URL`, `KENKUI_AUTH_RESOURCE`, and `KENKUI_NATIVE_CLIENT_ID` are
+configured. Missing configuration fails closed. Unmapped subjects require recovery;
+production new-account admission remains gated on a trusted reconciliation policy.
+Optional `KENKUI_LEGACY_TOKEN_ISSUER` enables the verified legacy-JWT recovery
+consumer after exact-subject backfill. See [auth rollout and client protocol](../deploy/neon/oauth-setup.md)
+for browser/native v2 contracts, provider configuration, and mandatory live gates.
 
 ## Extension boundaries
 
@@ -43,9 +46,9 @@ identity SQL and resource handlers belong to later tasks.
 - `AuthVerifier.verify(Request): Promise<Principal | null>` must validate the
   provider token/session and map it to the stable internal `userId` UUID, `issuer`
   and `subject`. Null means unauthorized. Only the verifier may establish a
-  principal; resource routes read `c.get('principal')`. Task 5 must update credential
-  presence recognition for the chosen Neon session transport; the foundation
-  recognizes Bearer and the frozen `__Host-kenkui-session` cookie.
+  principal; resource routes read `c.get('principal')`. Neon API transport is an
+  explicit Bearer JWT; the old `__Host-kenkui-session` cookie is recognized only
+  to return a one-time-login requirement and is never a Neon identity.
 - `ApiError(status, code, message, details?, headers?)` exposes a safe canonical
   `{error:{code,message,details,requestId}}` response. For 429, use the existing
   `http_error` envelope and explicit `Retry-After`; no in-memory rate limiter is
