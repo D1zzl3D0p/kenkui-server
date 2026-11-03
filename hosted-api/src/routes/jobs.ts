@@ -8,7 +8,7 @@ import { submitJob,type AdmissionResult,type JobStore,type RecoverySignals } fro
 import { artifactFilename,type ObjectStore } from '../storage/r2.js';
 import { ApiError,type ApiConfig,type ApiEnv } from '../types.js';
 import { getOnly } from './get-only.js';
-import { bridgeLimits,jobRequest,rawInteger } from './job-request.js';
+import { bridgeLimits,jobRequest,rawInteger,selectedCastingLimits } from './job-request.js';
 
 export interface JobServices {
   jobs:Pick<JobStore,'admitJob'|'getOwned'|'listOwned'|'cancelOwned'|'artifactForJob'>;
@@ -26,7 +26,9 @@ export function jobResponse(job:Snapshot,includeFailure=false):Record<string,unk
 export function registerJobRoutes(app:Hono<ApiEnv>,config:ApiConfig,services:()=>JobServices,maxSpeechCharacters=10000000):void {
   if(!Number.isSafeInteger(maxSpeechCharacters)||maxSpeechCharacters<1)throw Error('Invalid speech size limit');
   const preflight=async(raw:string,contentType:string|undefined,owner:string)=>{
-    const job=jobRequest(raw,contentType),spec=jobSpec(job,config.catalog.capabilities.casting.models);
+    const job=jobRequest(raw,contentType);
+    selectedCastingLimits(job);
+    const spec=jobSpec(job,config.catalog.capabilities.casting.models);
     const selected=services();
     await selected.assets.requireOwned(spec.source_id,owner);
     const c=spec.casting;
@@ -44,10 +46,13 @@ export function registerJobRoutes(app:Hono<ApiEnv>,config:ApiConfig,services:()=
     const account=await selected.billing.accountForOwner(owner),credits=creditsForCharacters(characters,c.kind==='characters');
     return {selected,spec,characters,account,credits};
   };
+  const methodNotAllowed=()=>{throw new ApiError(405,'method_not_allowed','Method not allowed');};
   app.post('/v1/jobs/preflight',async c=>{
     const x=await preflight(await c.req.text(),c.req.header('Content-Type'),c.get('principal').userId);
     return c.json({sourceId:x.spec.source_id,normalizedCharacters:x.characters,valid:BigInt(x.account.availableCredits)>=x.credits,estimatedCredits:rawInteger(x.credits),availableCredits:rawInteger(x.account.availableCredits)});
   });
+  // Static POST-only resources must precede the dynamic GET /:id in Hono.
+  app.all('/v1/jobs/preflight',methodNotAllowed);
   app.post('/v1/jobs',async c=>{
     const owner=c.get('principal').userId,x=await preflight(await c.req.text(),c.req.header('Content-Type'),owner);
     const admitted=await submitJob(x.selected.jobs,x.selected.signals,id=>x.selected.bridge.dispatch(id),{
@@ -66,6 +71,5 @@ export function registerJobRoutes(app:Hono<ApiEnv>,config:ApiConfig,services:()=
     if(suffix==='artifact')return new Response(null,{status:303,headers:{Location:url,'Cache-Control':'no-store'}});
     return c.json({url},200,{'Cache-Control':'no-store'});
   });
-  const methodNotAllowed=()=>{throw new ApiError(405,'method_not_allowed','Method not allowed');};
-  for(const path of ['/v1/jobs','/v1/jobs/preflight','/v1/jobs/:id','/v1/jobs/:id/cancel','/v1/jobs/:id/artifact','/v1/jobs/:id/artifact-url'])app.all(path,methodNotAllowed);
+  for(const path of ['/v1/jobs','/v1/jobs/:id','/v1/jobs/:id/cancel','/v1/jobs/:id/artifact','/v1/jobs/:id/artifact-url'])app.all(path,methodNotAllowed);
 }

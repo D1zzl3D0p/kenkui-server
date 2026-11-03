@@ -24,7 +24,7 @@ export function publicBody(raw:string,contentType:string|undefined):unknown {
     if(error instanceof ApiError)throw error;
     if(error instanceof JsonIntegerTooLong)throw new ApiError(400,'http_error','There was an error parsing the body');
     const match=error instanceof SyntaxError?/^(.+) at position (\d+) \(line \d+ column \d+\)$/.exec(error.message):null;
-    const reasons:Record<string,string>={"Expected property name or '}' in JSON":'Expecting property name enclosed in double quotes','Expected double-quoted property name in JSON':'Expecting property name enclosed in double quotes',"Expected ':' after property name in JSON":"Expecting ':' delimiter",'Unexpected non-whitespace character after JSON':'Extra data'};
+    const reasons:Record<string,string>={"Expected property name or '}' in JSON":'Expecting property name enclosed in double quotes','Expected double-quoted property name in JSON':'Expecting property name enclosed in double quotes',"Expected ':' after property name in JSON":"Expecting ':' delimiter",'Unexpected non-whitespace character after JSON':'Extra data',"Expected ',' or ']' after array element in JSON":"Expecting ',' delimiter"};
     const reason=match&&reasons[match[1]!];
     throw validation([{type:'json_invalid',loc:['body',reason?Array.from(raw.slice(0,Number(match![2]))).length:0],msg:'JSON decode error',input:{},ctx:{error:reason||'Expecting value'}}]);
   }
@@ -52,7 +52,10 @@ function parseModel(value:unknown,fields:Record<string,Field>,loc:(string|number
         const text=typeof selected==='string'?selected.toLowerCase():selected===0n||selected===1n||selected===0||selected===1?String(selected):'';
         if(['1','true','t','yes','y','on'].includes(text))selected=true;
         else if(['0','false','f','no','n','off'].includes(text))selected=false;
-        else {fail(typeof selected==='string'?'bool_parsing':'bool_type',typeof selected==='string'?'Input should be a valid boolean, unable to interpret input':'Input should be a valid boolean');continue;}
+        else {
+          const parsing=typeof selected==='string'||typeof selected==='bigint'||(typeof selected==='number'&&Number.isInteger(selected));
+          fail(parsing?'bool_parsing':'bool_type',parsing?'Input should be a valid boolean, unable to interpret input':'Input should be a valid boolean');continue;
+        }
       }
     }else if(field.type==='integer'){
       if(typeof selected!=='bigint'){fail('int_type','Input should be a valid integer');continue;}
@@ -91,9 +94,17 @@ export function jobRequest(raw:string,contentType:string|undefined):StrictJob {
   return job as unknown as StrictJob;
 }
 
+const resourceLimit=(field:(string|number)[],maximum:number)=>{throw new ApiError(422,'resource_limit','Job options exceed document processing limits.',{field,maximum});};
+/** Count selected pairs before the bridge object can collapse normalized duplicate names. */
+export function selectedCastingLimits(job:StrictJob):void {
+  if(job.casting.modelId===null||job.casting.modelId===undefined)return;
+  const model=job.casting.modelId.replace(/^[\p{White_Space}\x1c-\x1f]+|[\p{White_Space}\x1c-\x1f]+$/gu,'');
+  if(Array.from(model).length>512)resourceLimit(['casting','modelId'],512);
+  if(Object.keys(job.casting.cast??{}).length>1000)resourceLimit(['casting','cast'],1000);
+}
 /** Public migration bounds intentionally match the existing private Python bridge. */
 export function bridgeLimits(job:StrictJob,owner:string,environment:string):void {
-  const limit=(field:(string|number)[],maximum:number)=>{throw new ApiError(422,'resource_limit','Job options exceed document processing limits.',{field,maximum});};
+  const limit=resourceLimit;
   const short=(value:string|undefined|null,field:(string|number)[])=>{if(value!==undefined&&value!==null&&Array.from(value).length>512)limit(field,512);};
   if(job.chapters.length>10000)limit(['chapters'],10000);
   job.chapters.forEach((chapter,index)=>short(chapter,['chapters',index]));

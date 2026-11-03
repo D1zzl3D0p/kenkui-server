@@ -126,3 +126,29 @@ it('returns method 405 for PATCH known jobs and GET cancel with auth preceding r
   }
   expect(s.jobs.getOwned).not.toHaveBeenCalled();expect(s.jobs.cancelOwned).not.toHaveBeenCalled();expect(s.jobs.admitJob).not.toHaveBeenCalled();
 });
+
+it('rejects authenticated GET static preflight before dynamic job lookup or any dependency',async()=>{
+  const s=setup();
+  expect((await s.app.request('/v1/jobs/preflight')).status).toBe(401);
+  const res=await s.app.request('/v1/jobs/preflight',{headers});
+  expect(res.status).toBe(405);expect((await res.json()).error.code).toBe('method_not_allowed');
+  expect(s.jobs.getOwned).not.toHaveBeenCalled();expect(s.assets.requireOwned).not.toHaveBeenCalled();expect(s.billing.accountForOwner).not.toHaveBeenCalled();expect(s.bridge.preflight).not.toHaveBeenCalled();
+});
+it('counts all normalized selected cast pairs before collapsing whitespace variants into the private object',async()=>{
+  const s=setup(),model=config.catalog.capabilities.casting.models[0]!;
+  const cast={...Object.fromEntries(Array.from({length:1000},(_,i)=>['character'+i,voice])),' character0 ':voice};
+  const res=await s.post('/v1/jobs',{...payload,casting:{voiceId:voice,modelId:model,cast}});
+  expect(res.status).toBe(422);expect((await res.json()).error).toMatchObject({code:'resource_limit',details:{field:['casting','cast'],maximum:1000}});
+  expect(s.bridge.preflight).not.toHaveBeenCalled();expect(s.jobs.admitJob).not.toHaveBeenCalled();
+});
+it('reports overlong selected model before allowlist checking and retains ordinary model errors',async()=>{
+  for(const modelId of ['x'.repeat(513),'😀'.repeat(513),'  '+'😀'.repeat(513)+'  ']){
+    const s=setup(),res=await s.post('/v1/jobs',{...payload,casting:{voiceId:voice,modelId}});
+    expect(res.status).toBe(422);expect((await res.json()).error).toMatchObject({code:'resource_limit',details:{field:['casting','modelId'],maximum:512}});
+    expect(s.bridge.preflight).not.toHaveBeenCalled();expect(s.jobs.admitJob).not.toHaveBeenCalled();
+  }
+  for(const modelId of ['unavailable','x'.repeat(512),'😀'.repeat(512),'  '+'😀'.repeat(512)+'  ']){
+    const s=setup(),res=await s.post('/v1/jobs',{...payload,casting:{voiceId:voice,modelId}});
+    expect(res.status).toBe(422);expect((await res.json()).error.message).toBe('model_not_allowed');expect(s.bridge.preflight).not.toHaveBeenCalled();
+  }
+});
