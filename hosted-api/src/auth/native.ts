@@ -15,6 +15,7 @@ const base64url=(bytes:Uint8Array)=>btoa(String.fromCharCode(...bytes)).replaceA
 /** Client-side protocol. Never instantiate on a shared API server for user credentials. */
 export class NativeAuthClient {
   private attempt:{state:string;verifier:string;expiresAt:number}|undefined;
+  private attemptGeneration=0;
   private metadata:{value:Metadata;expiresAt:number}|undefined;
   private discovery:Promise<Metadata>|undefined;
   constructor(private config:NativeConfig,private storage:NativeCredentialStore,private verifyToken:TokenVerifier,private fetcher:typeof fetch=fetch) {
@@ -38,18 +39,41 @@ export class NativeAuthClient {
   }
   /** Call only after the native adapter has bound the exact loopback listener. */
   async start():Promise<string> {
+    const generation=++this.attemptGeneration;
     this.attempt=undefined;
-    const metadata=await this.discover(),state=random(),verifier=random();
-    const challenge=base64url(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));
+    const metadata=await this.discover();
+    if(generation!==this.attemptGeneration) {
+      throw new Error('Login attempt cancelled');
+    }
+    const state=random();
+    const verifier=random();
+    const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier));
+    if(generation!==this.attemptGeneration) {
+      throw new Error('Login attempt cancelled');
+    }
+    const challenge=base64url(new Uint8Array(digest));
     this.attempt={state,verifier,expiresAt:Date.now()+300_000};
     const url=new URL(metadata.authorization_endpoint);
     url.search=new URLSearchParams({response_type:'code',client_id:this.config.clientId,redirect_uri:NATIVE_REDIRECT_URI,scope:'openid profile email offline_access',state,code_challenge:challenge,code_challenge_method:'S256',resource:this.config.resource}).toString();
     return url.href;
   }
   async finish(callback:string):Promise<void> {
-    const attempt=this.attempt;this.attempt=undefined;
-    const url=new URL(callback),p=url.searchParams;
-    if(!attempt||attempt.expiresAt<=Date.now()||url.origin+url.pathname!==NATIVE_REDIRECT_URI||url.username||url.password||url.hash||p.has('error')||p.getAll('state').length!==1||p.get('state')!==attempt.state||p.getAll('iss').length!==1||p.get('iss')!==this.config.issuer||p.getAll('code').length!==1||!p.get('code')) throw new Error('Invalid login callback');
+    const attempt=this.attempt;
+    this.attempt=undefined;
+    const url=new URL(callback);
+    const p=url.searchParams;
+    if(
+      !attempt ||
+      attempt.expiresAt<=Date.now() ||
+      url.origin+url.pathname!==NATIVE_REDIRECT_URI ||
+      url.username || url.password || url.hash ||
+      p.has('error') ||
+      p.getAll('state').length!==1 || p.get('state')!==attempt.state ||
+      p.getAll('iss').length!==1 || p.get('iss')!==this.config.issuer ||
+      p.getAll('code').length!==1 || !p.get('code')
+    ) {
+      throw new Error('Invalid login callback');
+    }
     await this.storage.exclusive(async()=>{
       const credentials=await this.tokens({grant_type:'authorization_code',code:p.get('code')!,code_verifier:attempt.verifier,redirect_uri:NATIVE_REDIRECT_URI});
       await this.storage.save(credentials);
@@ -79,6 +103,7 @@ export class NativeAuthClient {
     });
   }
   async logout():Promise<{revoked:boolean}> {
+    ++this.attemptGeneration;
     this.attempt=undefined;
     return this.storage.exclusive(async()=>{
       let revoked=false;

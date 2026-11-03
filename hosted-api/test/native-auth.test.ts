@@ -16,7 +16,71 @@ function setup() {
  return {client,storage,fetcher,verify};
 }
 async function callback(client:NativeAuthClient) {const url=new URL(await client.start());return `${NATIVE_REDIRECT_URI}?code=code&state=${url.searchParams.get('state')}&iss=${encodeURIComponent(issuer)}`;}
+function deferred<T>() {
+ let resolve!:(value:T)=>void;
+ const promise=new Promise<T>(done=>{resolve=done;});
+ return {promise,resolve};
+}
+const metadataResponse=()=>Response.json({issuer,authorization_endpoint:issuer+'/oauth2/authorize',token_endpoint:issuer+'/oauth2/token',revocation_endpoint:issuer+'/oauth2/revoke'});
+const callbackFor=(authorizationUrl:string)=>`${NATIVE_REDIRECT_URI}?code=code&state=${new URL(authorizationUrl).searchParams.get('state')}&iss=${encodeURIComponent(issuer)}`;
+
 describe('native protocol v2',()=>{
+ it('logout cancels a start waiting for discovery before it can install an attempt',async()=>{
+   const s=setup();
+   const discovery=deferred<Response>();
+   s.fetcher.mockImplementationOnce(()=>discovery.promise);
+   const outcome=s.client.start().then(url=>({url}),error=>({error}));
+   expect(s.fetcher).toHaveBeenCalledOnce();
+   expect(await s.client.logout()).toEqual({revoked:true});
+   discovery.resolve(metadataResponse());
+   const result=await outcome;
+   // Reproduce the harmful callback too if the obsolete start erroneously succeeds.
+   if('url' in result) await s.client.finish(callbackFor(result.url));
+   expect(result).toMatchObject({error:expect.objectContaining({message:'Login attempt cancelled'})});
+   expect(await s.storage.load()).toBeNull();
+   expect(s.storage.save).not.toHaveBeenCalled();
+ });
+ it('logout cancels a start waiting for PKCE hashing',async()=>{
+   const s=setup();
+   const entered=deferred<void>();
+   const digest=deferred<ArrayBuffer>();
+   const spy=vi.spyOn(crypto.subtle,'digest').mockImplementationOnce(()=>{entered.resolve();return digest.promise;});
+   try {
+     const outcome=s.client.start().then(url=>({url}),error=>({error}));
+     await entered.promise;
+     await s.client.logout();
+     digest.resolve(new ArrayBuffer(32));
+     expect(await outcome).toMatchObject({error:expect.objectContaining({message:'Login attempt cancelled'})});
+     expect(await s.storage.load()).toBeNull();
+     expect(s.storage.save).not.toHaveBeenCalled();
+   } finally{spy.mockRestore();}
+ });
+ it('overlapping starts sharing discovery keep only the newest attempt',async()=>{
+   const s=setup();
+   const discovery=deferred<Response>();
+   s.fetcher.mockImplementationOnce(()=>discovery.promise);
+   const older=s.client.start().then(url=>({url}),error=>({error}));
+   const newer=s.client.start();
+   discovery.resolve(metadataResponse());
+   expect(await older).toMatchObject({error:expect.objectContaining({message:'Login attempt cancelled'})});
+   await s.client.finish(callbackFor(await newer));
+   expect(await s.storage.load()).toMatchObject({accessToken:'signed.jwt.token',subject:'neon-user'});
+ });
+ it('an older pending PKCE hash cannot overwrite a newer completed start',async()=>{
+   const s=setup();
+   const entered=deferred<void>();
+   const digest=deferred<ArrayBuffer>();
+   const spy=vi.spyOn(crypto.subtle,'digest').mockImplementationOnce(()=>{entered.resolve();return digest.promise;});
+   try {
+     const older=s.client.start().then(url=>({url}),error=>({error}));
+     await entered.promise;
+     const newer=await s.client.start();
+     digest.resolve(new ArrayBuffer(32));
+     expect(await older).toMatchObject({error:expect.objectContaining({message:'Login attempt cancelled'})});
+     await s.client.finish(callbackFor(newer));
+     expect(await s.storage.load()).toMatchObject({accessToken:'signed.jwt.token',subject:'neon-user'});
+   } finally{spy.mockRestore();}
+ });
  it('never sends refresh if uncertainty persistence fails, and never replays after an ambiguous POST',async()=>{
    const s=setup();const old={accessToken:'old.jwt.token',refreshToken:'old-refresh',expiresAt:1,subject:'neon-user'};await s.storage.save(old);
    s.storage.save.mockRejectedValueOnce(new Error('keychain locked'));
