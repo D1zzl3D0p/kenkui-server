@@ -76,25 +76,96 @@ def daily_maintenance(
     write_backup()
 
 
-def write_logical_backup(
-    client: Any,
-    *,
-    bucket: str,
-    environment: str,
-    database_url: str,
-    now: datetime,
-) -> None:
-    """Upload a consistent compressed pg_dump archive, then retain seven daily copies."""
+def _backup_parameters(database_url: str) -> dict[str, str]:
     from psycopg import ProgrammingError
     from psycopg.conninfo import conninfo_to_dict
 
-    prefix = operations_prefix("backups", environment)
     try:
         parameters = {key: str(value) for key, value in conninfo_to_dict(database_url).items()}
     except ProgrammingError:
         raise ValueError("invalid logical backup connection") from None
     if not parameters.get("host") or "-pooler" in parameters["host"].lower():
         raise ValueError("logical backup requires an unpooled database host")
+    allowed = {
+        "host",
+        "port",
+        "dbname",
+        "user",
+        "password",
+        "options",
+        "channel_binding",
+        "target_session_attrs",
+        "application_name",
+        "connect_timeout",
+        "sslmode",
+        "sslrootcert",
+    }
+    if parameters.keys() - allowed:
+        raise ValueError("unsupported logical backup connection options")
+    return parameters
+
+
+def validate_backup_configuration(
+    database_url: str, age_recipient: str, *, runtime_database_url: str | None = None
+) -> None:
+    """Validate direct backup authority and the offline public recipient before daily work."""
+    import re
+
+    from psycopg import ProgrammingError
+    from psycopg.conninfo import conninfo_to_dict
+
+    parameters = _backup_parameters(database_url)
+    if runtime_database_url is not None:
+        try:
+            runtime = {
+                key: str(value) for key, value in conninfo_to_dict(runtime_database_url).items()
+            }
+        except ProgrammingError:
+            raise ValueError("invalid runtime database connection") from None
+        if (
+            not parameters.get("user")
+            or not runtime.get("user")
+            or parameters["user"] == runtime["user"]
+        ):
+            raise ValueError("logical backup requires a distinct database role")
+        if (
+            parameters["host"] != runtime.get("host", "").replace("-pooler", "")
+            or not parameters.get("dbname")
+            or parameters["dbname"] != runtime.get("dbname")
+            or parameters.get("port", "5432") != runtime.get("port", "5432")
+        ):
+            raise ValueError("logical backup must target the runtime database")
+    # Only native public X25519 recipients: no passphrase, private identity, SSH or plugins.
+    if not re.fullmatch(r"age1[023456789acdefghjklmnpqrstuvwxyz]{58}", age_recipient):
+        raise ValueError("invalid backup age recipient")
+    try:
+        # The vetted CLI verifies the recipient checksum and availability before any DB wake.
+        subprocess.run(
+            ["age", "--encrypt", "--recipient", age_recipient],
+            input=b"",
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            env={"PATH": os.environ.get("PATH", "")},
+            check=True,
+            timeout=30,
+        )
+    except (subprocess.SubprocessError, OSError):
+        raise ValueError("invalid or unavailable backup age recipient") from None
+
+
+def write_logical_backup(
+    client: Any,
+    *,
+    bucket: str,
+    environment: str,
+    database_url: str,
+    age_recipient: str,
+    now: datetime,
+) -> None:
+    """Encrypt a full pg_dump to an offline recipient, then retain seven encrypted copies."""
+    prefix = operations_prefix("backups", environment)
+    validate_backup_configuration(database_url, age_recipient)
+    parameters = _backup_parameters(database_url)
     # Keep credentials out of argv and errors. Use the image's system CA bundle
     # and hostname validation even if the application URL requests weaker TLS.
     pg_variables = {
@@ -122,7 +193,7 @@ def write_logical_backup(
         PGSSLROOTCERT="/etc/ssl/certs/ca-certificates.crt",
         PGCONNECT_TIMEOUT="30",
     )
-    key = f"{prefix}{now.astimezone(UTC).date().isoformat()}.dump"
+    key = f"{prefix}{now.astimezone(UTC).date().isoformat()}.dump.age"
     with TemporaryDirectory(prefix="kenkui-backup-") as directory:
         archive = Path(directory) / "database.dump"
         try:
@@ -143,20 +214,40 @@ def write_logical_backup(
             )
         except (subprocess.SubprocessError, OSError):
             raise RuntimeError("logical backup failed") from None
-        client.upload_file(str(archive), bucket, key)
+        encrypted = Path(directory) / "database.dump.age"
+        try:
+            subprocess.run(
+                [
+                    "age",
+                    "--encrypt",
+                    "--recipient",
+                    age_recipient,
+                    "--output",
+                    str(encrypted),
+                    str(archive),
+                ],
+                env={"PATH": os.environ.get("PATH", "")},
+                check=True,
+                capture_output=True,
+                timeout=600,
+            )
+        except (subprocess.SubprocessError, OSError):
+            raise RuntimeError("logical backup encryption failed") from None
+        archive.unlink()
+        client.upload_file(str(encrypted), bucket, key)
     backups = []
     for page in client.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=prefix):
         for item in page.get("Contents", []):
             object_key = str(item["Key"])
             name = object_key.removeprefix(prefix)
             # Delete only date-named archives owned by this backup routine.
-            if not object_key.startswith(prefix) or not name.endswith(".dump"):
+            if not object_key.startswith(prefix) or not name.endswith(".dump.age"):
                 continue
             try:
-                day = date.fromisoformat(name[:-5])
+                day = date.fromisoformat(name[:-9])
             except ValueError:
                 continue
-            if name == f"{day.isoformat()}.dump":
+            if name == f"{day.isoformat()}.dump.age":
                 backups.append(object_key)
     for expired in sorted(backups, reverse=True)[7:]:
         client.delete_object(Bucket=bucket, Key=expired)

@@ -11,6 +11,7 @@ import pytest
 class Image:
     def __init__(self, base):
         self.base = base
+        self.packages = []
 
     @classmethod
     def debian_slim(cls, **kwargs):
@@ -20,6 +21,10 @@ class Image:
     def from_registry(cls, registry, **kwargs):
         assert kwargs == {"add_python": "3.12"}
         return cls(registry)
+
+    def apt_install(self, *packages):
+        self.packages.extend(packages)
+        return self
 
     def __getattr__(self, name):
         return lambda *args, **kwargs: self
@@ -75,6 +80,9 @@ def test_deployment_keeps_two_schedules_and_uses_backup_image_only_for_daily(mon
         "postgres:17-bookworm" if idle else "debian"
     )
     assert registered["render_job"][1]["image"].base == "debian"
+    assert ("age" in schedules["retain_objects"]["image"].packages) is idle
+    for name in ("recover_jobs", "render_job", "api_bridge", "provision"):
+        assert "age" not in registered[name][1]["image"].packages
     from kenkui_server import hosted
 
     called = []
@@ -134,4 +142,9 @@ def test_deployment_secrets_preserve_existing_secrets_with_idle_database_overlay
         bridge_secret = (
             [(f"kenkui-{deployment}-bridge", deployment)] if name == "api_bridge" else []
         )
-        assert options["secrets"] == bridge_secret + expected_secrets
+        backup_secret = (
+            [(f"kenkui-{deployment}-database-backup", deployment)]
+            if idle and name == "retain_objects"
+            else []
+        )
+        assert options["secrets"] == bridge_secret + expected_secrets + backup_secret

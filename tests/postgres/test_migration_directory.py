@@ -292,6 +292,159 @@ def test_prune_removes_only_expired_entries_within_a_shared_budget(database):
         )
 
 
+@pytest.mark.parametrize("fail_prune", [False, True])
+def test_daily_maintenance_prunes_one_bounded_batch_and_preserves_release_evidence(
+    database, monkeypatch, fail_prune
+):
+    from types import SimpleNamespace
+
+    from psycopg.pq import TransactionStatus
+
+    from kenkui_server import hosted, maintenance
+
+    raw, evidence = sample(captured=(datetime.now(UTC) - timedelta(days=3)).isoformat())
+    evidence.update(
+        mode="final",
+        finalDigest=evidence["sourceDigest"],
+        finalWatermark=evidence["watermark"],
+        admissionsFrozen=True,
+        writesFrozen=True,
+    )
+    tables = (
+        "migration_directory_runs",
+        "migration_directory_active",
+        "migration_directory_rows",
+        "migration_directory_aliases",
+        "migration_directory_quarantines",
+    )
+    with database.connection() as conn:
+        owner = seed_owner(conn, 10, "user_old")
+        records = fixture_records(conn, "staging", 1)
+        quarantine = manifest(conn, evidence, records)
+        import_directory(conn, "staging", raw, evidence, activate=True, quarantine=quarantine)
+        before = {table: conn.execute("SELECT * FROM " + table).fetchall() for table in tables}
+        run = conn.execute("SELECT run_id FROM migration_directory_active").fetchone()["run_id"]
+        conn.execute(
+            """INSERT INTO migration_challenges
+               (id,run_id,issuer,subject,old_subject,owner_id,digest,expires_at)
+               SELECT gen_random_uuid(),%s,'fixture','new','user_old',%s,%s,
+               clock_timestamp()-interval '1 second' FROM generate_series(1,101)""",
+            (run, owner, bytes(32)),
+        )
+        conn.execute(
+            """INSERT INTO migration_challenges
+               (id,run_id,issuer,subject,old_subject,owner_id,digest,expires_at)
+               VALUES (gen_random_uuid(),%s,'fixture','live','user_old',%s,%s,
+                       clock_timestamp()+interval '1 hour')""",
+            (run, owner, bytes(32)),
+        )
+        conn.execute(
+            """INSERT INTO migration_rate_events(kind,rate_key,created_at)
+               SELECT 'issue','old',clock_timestamp()-interval '25 hours'
+               FROM generate_series(1,4)"""
+        )
+        conn.execute("INSERT INTO migration_rate_events(kind,rate_key) VALUES ('verify','recent')")
+        conn.execute(
+            """INSERT INTO source_upload_intents
+               (source_id,owner_id,sha256,expires_at,next_cleanup_at)
+               VALUES ('unsubmitted-source',%s,repeat('a',64),
+                       now()-interval '1 day',now()-interval '1 day')""",
+            (owner,),
+        )
+        conn.execute(
+            """INSERT INTO assets(id,owner_id,path,sha256,format,created_at,deleted_at)
+               VALUES ('active-source',%s,'src',repeat('a',64),'epub',now()-interval '2 days',NULL),
+                      ('late-source',%s,'src',repeat('a',64),'epub',now()-interval '2 days',
+                       now()-interval '2 days')""",
+            (owner, owner),
+        )
+        conn.execute(
+            """INSERT INTO jobs VALUES
+               ('active-job','{"source_id":"active-source"}','running',1,'{}',%s,NULL)""",
+            (owner,),
+        )
+
+    def outside_transaction(*args, **kwargs):
+        with database.connection() as conn:
+            assert conn.info.transaction_status == TransactionStatus.IDLE
+
+    backups = []
+    deleted_sources = []
+
+    def delete_source(source_id):
+        outside_transaction()
+        assert getattr(database._state, "connection", None) is None
+        deleted_sources.append(source_id)
+
+    def backup(*args, **kwargs):
+        outside_transaction()
+        backups.append(True)
+        # Exactly one shared batch of 100, not a loop draining the queue.
+        assert database.execute("SELECT count(*) n FROM migration_challenges").fetchone()["n"] == 2
+        assert database.execute("SELECT count(*) n FROM migration_rate_events").fetchone()["n"] == 5
+        with database.connection() as conn:
+            assert before == {
+                table: conn.execute("SELECT * FROM " + table).fetchall() for table in tables
+            }
+
+    monkeypatch.setenv("KENKUI_DATABASE_IDLE", "1")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://worker:private@db-pooler.example/db")
+    monkeypatch.setenv("DATABASE_URL_UNPOOLED", "postgresql://backup:private@db.example/db")
+    monkeypatch.setenv(
+        "KENKUI_BACKUP_AGE_RECIPIENT",
+        "age1wdwys0mm9w3px2w23av5edn6prdy5d80axvu3m52tnu9g08f4u4svmn5mx",
+    )
+    monkeypatch.setenv("KENKUI_DEPLOYMENT", "staging")
+    monkeypatch.setenv("R2_BUCKET", "fixture")
+    monkeypatch.setattr(hosted, "_recovery_database", lambda: database)
+    monkeypatch.setattr(hosted, "_run_recovery", outside_transaction)
+    monkeypatch.setattr(
+        hosted, "object_store", lambda: SimpleNamespace(delete_source=delete_source)
+    )
+    monkeypatch.setattr(hosted, "r2_client", lambda: object())
+    monkeypatch.setattr(
+        hosted,
+        "recovery_signals",
+        lambda: SimpleNamespace(list_records=lambda: (), arm=outside_transaction),
+    )
+    monkeypatch.setattr(maintenance, "write_logical_backup", backup)
+
+    def age_probe(command, **kwargs):
+        assert command[:3] == ["age", "--encrypt", "--recipient"]
+        assert kwargs["input"] == b""
+
+    # The external CLI has its own real full-roundtrip test; this test isolates daily SQL.
+    monkeypatch.setattr(maintenance.subprocess, "run", age_probe)
+    # Keep the borrowed fixture open to verify failure; teardown restores close().
+    monkeypatch.setattr(database, "close", lambda: None)
+    if fail_prune:
+        database.execute("""CREATE FUNCTION fail_prune() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN RAISE EXCEPTION 'synthetic prune failure'; END $$""")
+        database.execute("""CREATE TRIGGER fail_prune AFTER DELETE ON migration_challenges
+            FOR EACH STATEMENT EXECUTE FUNCTION fail_prune()""")
+        with pytest.raises(psycopg.errors.RaiseException, match="synthetic prune failure"):
+            hosted.retain_objects()
+        assert backups == []
+        assert (
+            database.execute("SELECT count(*) n FROM migration_challenges").fetchone()["n"] == 102
+        )
+        assert database.execute("SELECT count(*) n FROM migration_rate_events").fetchone()["n"] == 5
+        outside_transaction()
+    else:
+        hosted.retain_objects()
+        assert backups == [True]
+    assert sorted(deleted_sources) == ["late-source", "unsubmitted-source"]
+    assert (
+        database.execute("SELECT deleted_at FROM assets WHERE id='active-source'").fetchone()[
+            "deleted_at"
+        ]
+        is None
+    )
+    assert database.execute(
+        "SELECT cleanup_started FROM source_upload_intents WHERE source_id='unsubmitted-source'"
+    ).fetchone()["cleanup_started"]
+
+
 def source_rows():
     return [
         {

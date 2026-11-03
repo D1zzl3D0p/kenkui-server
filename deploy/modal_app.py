@@ -97,7 +97,9 @@ image = code_image(modal.Image.debian_slim(python_version="3.12"))
 # Backup tools stay out of the API/render image. The official PostgreSQL image
 # includes pg_dump 17 and Debian's system CA bundle for verified Neon TLS.
 maintenance_image = (
-    code_image(modal.Image.from_registry("postgres:17-bookworm", add_python="3.12"))
+    code_image(
+        modal.Image.from_registry("postgres:17-bookworm", add_python="3.12").apt_install("age")
+    )
     if idle_mode
     else image
 )
@@ -113,6 +115,13 @@ secrets = [
 if idle_mode:
     # Later secrets override duplicate keys without rewriting worker credentials.
     secrets.append(modal.Secret.from_name(f"{app_name}-database-idle", environment_name=deployment))
+
+# Full-database read authority and public encryption recipient exist only on daily maintenance.
+maintenance_secrets = secrets + (
+    [modal.Secret.from_name(f"{app_name}-database-backup", environment_name=deployment)]
+    if idle_mode
+    else []
+)
 
 
 def configure_model_manifest() -> None:
@@ -195,7 +204,7 @@ def recover_jobs() -> None:
 
 @app.function(
     image=maintenance_image,
-    secrets=secrets,
+    secrets=maintenance_secrets,
     schedule=modal.Period(hours=24 if idle_mode else 1),
     timeout=1800 if idle_mode else 300,
     max_containers=1,

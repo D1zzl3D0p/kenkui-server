@@ -18,6 +18,74 @@ repo = PostgresHostedRepository(db)
 try:
     if operation == "response":
         print(_response(repo.jobs.get(args[0])).model_dump_json(by_alias=True, exclude_none=True))
+    elif operation == "recover":
+        import subprocess
+        from datetime import UTC, datetime
+        from pathlib import Path
+
+        from kenkui_server.jobs.dispatcher import HostedDispatcher
+        from kenkui_server.maintenance import recover_with_signals
+        from kenkui_server.storage.recovery_signals import R2RecoverySignals
+
+        markers = json.loads(args[0])
+        assert all(marker["Bucket"] == "fixture" and marker["Body"] == [] for marker in markers)
+        keys = {marker["Key"] for marker in markers}
+        opened = []
+        launched = []
+
+        class Client:
+            def get_paginator(self, operation):
+                assert operation == "list_objects_v2"
+                return self
+
+            def paginate(self, *, Bucket, Prefix):
+                assert Bucket == "fixture"
+                yield {
+                    "Contents": [
+                        {"Key": key, "LastModified": datetime.now(UTC)}
+                        for key in keys
+                        if key.startswith(Prefix)
+                    ]
+                }
+
+            def delete_object(self, *, Bucket, Key):
+                assert Bucket == "fixture"
+                keys.remove(Key)
+
+        signals = R2RecoverySignals(Client(), bucket="fixture", environment="staging")
+
+        class Runner:
+            def start(self, dispatch_id):
+                launched.append(dispatch_id)
+                job_id = repo.dispatches.get(dispatch_id).job_id
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(Path(__file__).with_name("billing_database.py")),
+                        schema,
+                        "settle",
+                        job_id,
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
+
+        class BorrowedDatabase:
+            def execute(self, *args):
+                return db.execute(*args)
+
+            def close(self):
+                pass
+
+        def open_database():
+            opened.append(True)
+            return BorrowedDatabase()
+
+        for _ in range(2):
+            recover_with_signals(
+                signals, open_database, lambda _: HostedDispatcher(repo, Runner()).recover()
+            )
+        print(json.dumps({"keys": sorted(keys), "opened": len(opened), "launched": len(launched)}))
     elif operation == "claim":
         print(json.dumps(repo.claim_execution(args[0], limit=1)))
     elif operation == "preferences":

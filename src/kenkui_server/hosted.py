@@ -95,20 +95,33 @@ def recover_jobs() -> None:
 
 
 def retain_objects() -> None:
-    from kenkui_server.maintenance import daily_maintenance, write_logical_backup
+    from kenkui_server.maintenance import (
+        daily_maintenance,
+        validate_backup_configuration,
+        write_logical_backup,
+    )
+    from kenkui_server.storage.migration_challenges import prune_migration_recovery
     from kenkui_server.storage.retention import PostgresRetention
 
+    idle_mode = os.environ.get("KENKUI_DATABASE_IDLE") == "1"
+    if idle_mode:
+        backup_url = required("DATABASE_URL_UNPOOLED")
+        age_recipient = required("KENKUI_BACKUP_AGE_RECIPIENT")
+        validate_backup_configuration(
+            backup_url, age_recipient, runtime_database_url=required("DATABASE_URL")
+        )
     database = _recovery_database()
     try:
         retention = PostgresRetention(database, object_store())
 
         def run_retention() -> None:
             retention.run()
+            # One shared bounded batch in the daily idle path, never the minute tick.
+            with database.connection() as connection:
+                prune_migration_recovery(connection, batch_size=100)
 
-        if os.environ.get("KENKUI_DATABASE_IDLE") == "1":
+        if idle_mode:
             now = datetime.now(UTC)
-            # Validate the required unpooled URL before starting daily work.
-            backup_url = required("DATABASE_URL_UNPOOLED")
             daily_maintenance(
                 recovery_signals(),
                 database,
@@ -119,6 +132,7 @@ def retain_objects() -> None:
                     bucket=required("R2_BUCKET"),
                     environment=required("KENKUI_DEPLOYMENT"),
                     database_url=backup_url,
+                    age_recipient=age_recipient,
                     now=now,
                 ),
                 now=now,

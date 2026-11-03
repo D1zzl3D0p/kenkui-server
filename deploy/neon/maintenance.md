@@ -1,0 +1,60 @@
+# Neon sleeping workers and daily maintenance
+
+Task 11 implements and locally verifies this contract. **Task 13 owns live deployment and acceptance**, after restore/API/client readiness. No deploy or secret mutation follows merely from merging this code. The existing staging website/API may be reused for Neon; production follows successful acceptance. Do not add a permanent preview or paid service.
+
+## Coordinated staging transfer (Task 13)
+
+1. Pin the reviewed server, core, Studio and Modal revisions. Restore current staging into the approved empty Neon target, apply the reviewed migrations/grants and compare full table digests/credits/payment/R2 references. Have the new API and clients ready. Preserve the existing staging app, worker/mail secrets, buckets, keys, salts, models and concurrency.
+2. Privately prepare the two overlays below. Verify effective roles, actual fields/mounts and the same target branch/database; never print URLs/credentials or replace write-only worker/mail secrets with a partial/stale map. Audit any inherited `DATABASE_URL_UNPOOLED` already present in base secrets. An overlay cannot delete an unknown inherited key: remove only the specifically verified leaked backup value through authorized secret management, or establish that the old value cannot access new full backup authority. Never place the new backup credential in a common secret.
+3. Freeze staging admission/writes, drain active jobs and pause old writers/schedules. Transfer the existing staging API and **all** Modal consumers together to the same verified Neon authority. Never attach the Neon worker overlay while the old staging API still writes Render. In idle mode set `KENKUI_DEPLOYMENT` and `KENKUI_DATABASE_IDLE=1` in the matching Modal deployment. Do not connect production to staging.
+4. Reopen staging only after consumer/role/auth readiness. Run an interrupted multi-chapter canary: reuse checkpoints, renew live leases, settle once, keep active data, and clear terminal recovery markers. Check real Neon suspend/reconnect and overnight idle using control-plane observation without keepalive SQL. Task 13 records exact revisions, metadata and costs, plus encrypted independent restore and owner acceptance. Local tests are not live evidence.
+
+## Configuration and privilege boundary
+
+| Overlay | Mount | Exact new fields |
+|---|---|---|
+| `kenkui-{environment}-database-idle` | Render job, bridge, provision, minute recovery, daily maintenance; after unchanged worker/mail secrets | `DATABASE_URL`: restricted worker connection to the matching Neon database |
+| `kenkui-{environment}-database-backup` | **Only** daily `retain_objects`, after runtime overlay | `DATABASE_URL_UNPOOLED`: same direct host/database, distinct full-read backup role; `KENKUI_BACKUP_AGE_RECIPIENT`: native public X25519 age recipient |
+
+Legacy mode attaches neither overlay. The bridge additionally retains its reviewed bridge secret. The API uses its separate restricted API role and never receives backup authority or a private age identity. The full-read backup role must not be inherited by runtime roles. Verify actual effective access, all schemas/tables/sequence state and RLS in Task 13. Managed auth private signing/session/account data and private release evidence are included in the full dump; restricted worker credentials cannot produce that backup. Do not exclude schemas or grant those reads to runtime to make pg_dump pass. Provider-owned schema permissions may require provider-supported restore procedures; inability to produce and independently restore the full required evidence blocks acceptance.
+
+The code rejects missing config, pooled backup hosts, same runtime/backup user, wrong host/database/port, unsupported backup URL options and non-native/private/plugin/SSH recipient forms. It runs an empty-input age probe to validate the real recipient checksum and installed executable **before** opening maintenance DB or retaining objects. URL errors hide values. The direct and pooled Neon hosts must match after removing `-pooler`. Production TLS is always `verify-full` with the image CA bundle. This local validation does not establish effective provider grants or role isolation.
+
+Encryption uses the vetted [age CLI](https://github.com/FiloSottile/age); no custom cryptography is implemented. The daily image uses official `postgres:17-bookworm` tooling plus Debian's `age` package; render/bridge/recovery images do not gain age or the new backup overlay. Record actual deployed pg_dump/age versions and verify provider compatibility in Task 13. Never rewrite existing worker/mail secrets to add backup credentials. Shared artifact R2 credentials can read the encrypted archive but must never obtain the age private identity.
+
+## Recovery and bounded cleanup
+
+Minute recovery lists `operations/recovery/{environment}/{canonical-job-uuid}`. TypeScript and Python write identical **empty, unsalted** objects. With no hints it opens no recovery database. Admission arms before its atomic job/dispatch/credit reservation; dispatch happens after commit. A lost HTTP/dispatch response leaves recovery coverage. Existing dispatcher, lease fencing, checkpoints and bounded attempts remain authoritative; hint presence never grants a second lease or settlement. Active work continues normal lease renewal, without keepalive timers for empty systems.
+
+Daily maintenance repairs lost nonterminal hints from authoritative job rows, runs lease-protected recovery, clears terminal hints and deletes missing-job hints only when their object timestamp is **strictly older than 24 hours**. A crash before admission can leave an orphan hint that wakes the DB each minute for roughly 24–48 hours until a successful daily pass (longer if daily maintenance fails). This is an explicit reliability/cost tradeoff; do not delete a possibly pending admission hint based on assumption. No new minute DB pruning was added.
+
+The existing retention path calls source-upload cleanup once with a 100-item bound, durable late-PUT tombstones, shared finalization locks and active/recent-job safety. Tombstones rotate after attempts, including failures; provider DELETE for this upload pass occurs outside its SQL transaction. A late PUT can require another daily pass. Tombstones are intentionally durable, not a finite retention promise: with more due candidates than batch capacity, cleanup latency grows, and steady arrival above daily capacity is not guaranteed to drain. Generation-only reservations do not spend DELETE capacity. Monitor failures/backlog privately rather than adding a new wake timer.
+
+New admission/preflight/dispatch/marker operations, source-upload tombstone provider DELETE, backup and age orchestration hold no SQL transaction across external work and add no idle timer. The existing asset/artifact/checkpoint retention loops deliberately retain row locks across R2 deletion to prevent admission/deletion races. Preserve those reviewed critical sections: their cost is bounded scheduled connection/lock time during external deletes. They are an explicit existing exception, not a claim that all historical retention network calls are outside SQL transactions.
+
+After retention and before backup, one `prune_migration_recovery(connection, batch_size=100)` transaction removes expired challenges, then rate events older than one day within the **same total 100-row budget**. It does not loop to drain the queue; a large challenge backlog can delay rate cleanup. Failed pruning rolls back and aborts that daily backup attempt. No release directory, alias, quarantine, final evidence, proof or active pointer is pruned. Active final evidence remains valid beyond 24 hours; inactive release evidence needs a separate approved retention decision. Existing hourly legacy retention does not run this new prune.
+
+## Encrypted full backup and independent restore
+
+Daily pg_dump produces a consistent full custom compressed archive with `--no-owner --no-acl` in a private temporary directory, then vetted age CLI encrypts it to the configured offline public recipient. Only successful ciphertext uploads to `operations/backups/{environment}/YYYY-MM-DD.dump.age`; plaintext is unlinked before upload and the temporary directory is removed on exit. Failed dump or encryption performs no upload, listing or pruning. After successful upload retain the latest seven date-named `.dump.age` archives in that environment; ignore plaintext `.dump`, malformed names, other prefixes and unrelated objects. Existing plaintext archives are **not** silently deleted: Task 13 audits access, retention and any separately approved removal.
+
+Before enabling real backups, the owner generates and securely retains an offline native age identity using vetted age tooling. Publish only its public recipient to the maintenance overlay. Keep the identity and independent recovery copy in approved offline storage; test recovery access/custody. Losing that identity loses recoverability. Recipient rotation requires preserving identities for retained archives and an explicit retention/custody decision. No private identity belongs in Modal, Neon, the API, R2, Git, CI logs or this runbook.
+
+On an authorized isolated recovery machine, with private file paths and destination credentials loaded through a private environment/pgpass file:
+
+```sh
+age --decrypt --identity /private/path/offline-identity.txt \
+  --output /private/path/database.dump /private/path/YYYY-MM-DD.dump.age
+pg_restore --no-owner --no-acl --exit-on-error \
+  --dbname "$RESTORE_DATABASE_URL" /private/path/database.dump
+```
+
+Use an **empty, independently approved** target; never clean/drop an occupied target. Protect decrypted temporary files and remove them through the approved recovery procedure. Compare every schema/table row digest, migrations, ownership, balances/lots/allocations/ledger, payment deduplication, release evidence, managed-auth credential/state data and R2 references. Deliberately restore provider auth configuration/mapping and verify service behavior; pg_dump does not recreate external provider configuration, OAuth secrets, ownership or role grants. Actual Neon full-read permissions, provider restore limitations and effective runtime denial remain Task 13 gates.
+
+The local synthetic test runs real dump -> age encryption -> offline decrypt -> independent PostgreSQL restore and compares every ordinary table in the application and synthetic `neon_auth` schemas. It uses generated test keys and no real provider data; its loopback-only trust server disables TLS in the test transport adapter only. Local PostgreSQL 18.6 clients against PostgreSQL 17 prove this test roundtrip, not the actual maintenance image/provider restore. Task 13 repeats with deployed versions and actual private evidence.
+
+Backups are daily, so recovery point loss can approach 24 hours after a successful run, and more after failures; seven copies do not prove any copy is restorable. Monitor maintenance failures and backup age through existing operational controls. No new paid resource, scheduler or keepalive is authorized here.
+
+## Rollback boundary
+
+Before new writes, restore coordinated API/worker consumers to the preserved authority. After writes reopen, never point at an old snapshot: use the same-auth fallback against current Neon, or freeze/drain/reconcile all writes before any database change. Removing the idle overlay can expose an old URL from a base worker secret; verify that exact target before resuming consumers. Preserve old images, encrypted backups/offline identity and private evidence until the separate retention decision. Task 13 owns staging evidence; Task 14 owns controlled production cutover/retirement.

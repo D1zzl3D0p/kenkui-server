@@ -10,6 +10,8 @@ import { createApi } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { AssetStore } from '../src/db/assets.js';
 import { BillingStore } from '../src/db/billing.js';
+import { R2ObjectStore } from '../src/storage/r2.js';
+import { PutObjectCommand,DeleteObjectCommand,type S3Client } from '@aws-sdk/client-s3';
 const connectionString=process.env.KENKUI_TEST_DATABASE_URL;
 const source='00000000-0000-0000-0000-000000000001',owner='00000000-0000-0000-0000-000000000002',account='00000000-0000-0000-0000-000000000003';
 const spec=jobSpec({sourceId:source,chapters:['chapter'],casting:{voiceId:'narrator'}});
@@ -69,6 +71,39 @@ describe.skipIf(!connectionString)('hosted job lifecycle on real PostgreSQL',()=
     expect((await pool.query('SELECT count(*) FROM credit_authorizations')).rows[0].count).toBe('1');
     expect((await pool.query("SELECT status FROM credit_authorizations")).rows[0].status).toBe('settled');
     expect((await pool.query('SELECT attempts FROM execution_leases')).rows[0].attempts).toBe(1);
+  });
+  it('recovers committed HTTP admission once through the exact TS R2 marker after dispatch delivery fails',async()=>{
+    const config=loadConfig({KENKUI_ENV:'staging'});
+    config.catalog.voices=[{id:'narrator',name:'Fixture',language:null,licenseId:null,voiceRights:null}];
+    const app=createApi({config,getPool:()=>pool,auth:{async verify(){return {userId:owner,issuer:'fixture',subject:'fixture'};}}});
+    const markers=new Map<string,{Bucket:string;Key:string;Body:number[]}>();
+    const outsideTransaction=async()=>expect((await admin.query("SELECT count(*) FROM pg_stat_activity WHERE application_name=$1 AND state='idle in transaction'",[schema])).rows[0].count).toBe('0');
+    const client={async send(command:PutObjectCommand|DeleteObjectCommand){
+      await outsideTransaction();
+      const input=command.input;
+      if(command instanceof PutObjectCommand)markers.set(input.Key!,{Bucket:input.Bucket!,Key:input.Key!,Body:Array.from(command.input.Body as Uint8Array)});
+      else markers.delete(input.Key!);
+      return {};
+    }} as unknown as S3Client;
+    const objects=new R2ObjectStore({endpoint:'https://r2.invalid',bucket:'fixture',keySalt:'must-not-salt-recovery',accessKeyId:'fixture',secretAccessKey:'fixture'},client);
+    registerJobRoutes(app,config,()=>({
+      jobs,assets:new AssetStore(()=>pool),billing:new BillingStore(()=>pool),
+      signals:objects.recoverySignals('staging'),objects,
+      bridge:{
+        async preflight(){await outsideTransaction();return {sourceId:source,normalizedCharacters:25000,valid:true,availableCredits:null,estimatedCredits:null};},
+        async dispatch(){await outsideTransaction();throw Error('synthetic lost dispatch response');},
+      },
+    }));
+    const response=await app.request('/v1/jobs',{method:'POST',headers:{Authorization:'Bearer fixture','Content-Type':'application/json','Idempotency-Key':'lost-response'},body:JSON.stringify({sourceId:source,chapters:['chapter'],casting:{voiceId:'narrator'}})});
+    expect(response.status).toBe(500);
+    const [{id}]=(await pool.query('SELECT id FROM jobs')).rows;
+    expect([...markers.values()]).toEqual([{Bucket:'fixture',Key:'operations/recovery/staging/'+id,Body:[]}]);
+    expect((await pool.query('SELECT status FROM credit_authorizations')).rows).toEqual([{status:'reserved'}]);
+    // The real Python signal reader, dispatcher, lease claim and fixture worker consume TS wire data.
+    expect(JSON.parse(oracle('recover',JSON.stringify([...markers.values()])))).toEqual({keys:[],opened:1,launched:1});
+    expect((await jobs.getOwned(id,owner)).status).toBe('succeeded');
+    expect((await pool.query('SELECT attempts FROM execution_leases')).rows[0].attempts).toBe(1);
+    expect((await pool.query("SELECT count(*) FROM credit_ledger_entries WHERE kind='settlement'")).rows[0].count).toBe('1');
   });
   it('ports exact queued cancellation release/events and prevents later worker claim',async()=>{
     const candidate=await admit(),before=JSON.parse(python('snapshot'));

@@ -1,5 +1,7 @@
 # Sleeping API and database hosting
 
+Historical Render Free/WorkOS runbook. The current Neon Functions/Managed Auth migration uses [Neon maintenance](neon/maintenance.md) and the canonical migration plan. In particular, do not use the shared unencrypted backup/secret configuration below for Managed Auth, and do not create a new Render replacement service from this historical procedure. Task 13 owns coordinated reuse of existing staging; Task 11 is code/local verification only.
+
 This opt-in release uses Render Free APIs and separate Neon Free PostgreSQL 17
 projects for staging and production. Preserve the existing R2 buckets, key salts,
 Modal environments/apps/volumes, and job concurrency. Never stop queued or running

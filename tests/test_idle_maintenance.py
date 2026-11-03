@@ -5,6 +5,9 @@ import pytest
 from kenkui_server.maintenance import daily_maintenance, recover_with_signals
 from kenkui_server.storage.recovery_signals import RecoverySignal
 
+# Generated synthetic public X25519 recipient; no private identity is committed.
+RECIPIENT = "age1wdwys0mm9w3px2w23av5edn6prdy5d80axvu3m52tnu9g08f4u4svmn5mx"
+
 
 class Signals:
     def __init__(self, records=()):
@@ -126,6 +129,14 @@ def test_backup_uploads_compressed_dump_before_pruning_to_seven_days(monkeypatch
     events = []
 
     def dump(command, **kwargs):
+        if command[0] == "age":
+            if len(command) == 4:
+                return
+            assert command[1:4] == ["--encrypt", "--recipient", RECIPIENT]
+            assert Path(command[-1]).read_bytes() == b"compressed archive"
+            Path(command[command.index("--output") + 1]).write_bytes(b"encrypted archive")
+            events.append("encrypt")
+            return
         assert command[0] == "pg_dump"
         assert "--format=custom" in command and "--compress=6" in command
         assert not any("password" in arg for arg in command)
@@ -138,8 +149,8 @@ def test_backup_uploads_compressed_dump_before_pruning_to_seven_days(monkeypatch
     class Client:
         def upload_file(self, path, bucket, key):
             assert bucket == "private"
-            assert key == "operations/backups/staging/2026-11-02.dump"
-            assert Path(path).read_bytes() == b"compressed archive"
+            assert key == "operations/backups/staging/2026-11-02.dump.age"
+            assert Path(path).read_bytes() == b"encrypted archive"
             events.append("upload")
 
         def get_paginator(self, operation):
@@ -147,10 +158,17 @@ def test_backup_uploads_compressed_dump_before_pruning_to_seven_days(monkeypatch
 
         def paginate(self, **kwargs):
             assert kwargs == {"Bucket": "private", "Prefix": "operations/backups/staging/"}
-            yield {"Contents": [{"Key": "operations/backups/staging/2026-10-01.dump"}]}
             yield {
                 "Contents": [
-                    {"Key": f"operations/backups/staging/2026-11-{day:02}.dump"}
+                    {"Key": "operations/backups/staging/2026-10-01.dump.age"},
+                    {"Key": "operations/backups/staging/2026-09-01.dump"},
+                    {"Key": "operations/backups/staging/invalid.dump.age"},
+                    {"Key": "operations/backups/production/2026-09-01.dump.age"},
+                ]
+            }
+            yield {
+                "Contents": [
+                    {"Key": f"operations/backups/staging/2026-11-{day:02}.dump.age"}
                     for day in range(1, 10)
                 ]
             }
@@ -164,13 +182,14 @@ def test_backup_uploads_compressed_dump_before_pruning_to_seven_days(monkeypatch
         bucket="private",
         environment="staging",
         database_url="postgresql://owner:password@db.example/db?sslmode=require",
+        age_recipient=RECIPIENT,
         now=datetime(2026, 11, 2, tzinfo=UTC),
     )
-    assert events[:2] == ["dump", "upload"]
-    assert set(events[2:]) == {
-        "operations/backups/staging/2026-10-01.dump",
-        "operations/backups/staging/2026-11-01.dump",
-        "operations/backups/staging/2026-11-02.dump",
+    assert events[:3] == ["dump", "encrypt", "upload"]
+    assert set(events[3:]) == {
+        "operations/backups/staging/2026-10-01.dump.age",
+        "operations/backups/staging/2026-11-01.dump.age",
+        "operations/backups/staging/2026-11-02.dump.age",
     }
 
 
@@ -179,7 +198,9 @@ def test_failed_dump_never_uploads_or_prunes_and_hides_subprocess_details(monkey
 
     from kenkui_server.maintenance import write_logical_backup
 
-    def fail(*args, **kwargs):
+    def fail(command, **kwargs):
+        if command[0] == "age":
+            return
         raise subprocess.CalledProcessError(1, ["secret"], stderr=b"password")
 
     monkeypatch.setattr("kenkui_server.maintenance.subprocess.run", fail)
@@ -189,6 +210,7 @@ def test_failed_dump_never_uploads_or_prunes_and_hides_subprocess_details(monkey
             bucket="private",
             environment="staging",
             database_url="postgresql://owner:password@db.example/db",
+            age_recipient=RECIPIENT,
             now=datetime.now(UTC),
         )
     assert "password" not in str(raised.value)
@@ -204,6 +226,7 @@ def test_backup_rejects_pooled_endpoint_before_running_dump():
             bucket="private",
             environment="staging",
             database_url="postgresql://owner:password@db-pooler.example/db",
+            age_recipient=RECIPIENT,
             now=datetime.now(UTC),
         )
 
@@ -230,7 +253,115 @@ def test_invalid_backup_url_error_hides_credentials():
             bucket="private",
             environment="staging",
             database_url="password-secret",
+            age_recipient=RECIPIENT,
             now=datetime.now(UTC),
         )
     assert "password-secret" not in str(raised.value)
     assert raised.value.__suppress_context__
+
+
+@pytest.mark.parametrize(
+    "backup_url",
+    [
+        None,
+        "postgresql://backup:private@db-pooler.example/db",
+        "postgresql://worker:private@db.example/db",
+        "postgresql://backup:private@other.example/db",
+        "postgresql://backup:private@db.example/other",
+        "postgresql://backup:private@db.example:5433/db",
+        "postgresql://db.example/db",
+        "postgresql://backup:private@db.example/db?unsupported=private",
+    ],
+)
+def test_daily_invalid_backup_configuration_fails_before_database_or_retention(
+    monkeypatch, backup_url
+):
+    from kenkui_server import hosted
+
+    monkeypatch.setenv("KENKUI_DATABASE_IDLE", "1")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://worker:private@db-pooler.example/db")
+    monkeypatch.setenv("KENKUI_BACKUP_AGE_RECIPIENT", RECIPIENT)
+    monkeypatch.delenv("DATABASE_URL_UNPOOLED", raising=False)
+    if backup_url is not None:
+        monkeypatch.setenv("DATABASE_URL_UNPOOLED", backup_url)
+
+    def forbidden():
+        pytest.fail("invalid backup configuration must fail before opening maintenance")
+
+    monkeypatch.setattr(hosted, "_recovery_database", forbidden)
+    with pytest.raises(ValueError) as error:
+        hosted.retain_objects()
+    assert "private" not in str(error.value)
+
+
+@pytest.mark.parametrize(
+    "recipient",
+    [
+        None,
+        "",
+        "AGE-SECRET-KEY-1private",
+        "ssh-ed25519 private",
+        "age1" + "q" * 58,
+        RECIPIENT[:-1] + "q",
+    ],
+)
+def test_invalid_recipient_fails_before_daily_database_work(monkeypatch, recipient):
+    from kenkui_server import hosted
+
+    monkeypatch.setenv("KENKUI_DATABASE_IDLE", "1")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://worker:private@db-pooler.example/db")
+    monkeypatch.setenv("DATABASE_URL_UNPOOLED", "postgresql://backup:private@db.example/db")
+    monkeypatch.delenv("KENKUI_BACKUP_AGE_RECIPIENT", raising=False)
+    if recipient is not None:
+        monkeypatch.setenv("KENKUI_BACKUP_AGE_RECIPIENT", recipient)
+    monkeypatch.setattr(
+        hosted,
+        "_recovery_database",
+        lambda: pytest.fail("invalid recipient opened maintenance database"),
+    )
+    with pytest.raises(ValueError) as error:
+        hosted.retain_objects()
+    assert "private" not in str(error.value)
+
+
+def test_missing_age_executable_fails_before_daily_database_work(monkeypatch):
+    from kenkui_server import hosted
+
+    monkeypatch.setenv("KENKUI_DATABASE_IDLE", "1")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://worker:private@db-pooler.example/db")
+    monkeypatch.setenv("DATABASE_URL_UNPOOLED", "postgresql://backup:private@db.example/db")
+    monkeypatch.setenv("KENKUI_BACKUP_AGE_RECIPIENT", RECIPIENT)
+    monkeypatch.setenv("PATH", "/no-such-age-directory")
+    monkeypatch.setattr(
+        hosted,
+        "_recovery_database",
+        lambda: pytest.fail("missing age executable opened maintenance database"),
+    )
+    with pytest.raises(ValueError, match="invalid or unavailable backup age recipient"):
+        hosted.retain_objects()
+
+
+def test_failed_encryption_never_uploads_or_prunes(monkeypatch):
+    import subprocess
+    from pathlib import Path
+
+    from kenkui_server.maintenance import write_logical_backup
+
+    def run(command, **kwargs):
+        if command[0] == "pg_dump":
+            Path(command[command.index("--file") + 1]).write_bytes(b"private plaintext")
+        elif len(command) > 4:
+            raise subprocess.CalledProcessError(1, ["private"], stderr=b"private")
+
+    monkeypatch.setattr("kenkui_server.maintenance.subprocess.run", run)
+    with pytest.raises(RuntimeError, match="logical backup encryption failed") as error:
+        write_logical_backup(
+            object(),
+            bucket="private",
+            environment="staging",
+            database_url="postgresql://backup:private@db.example/db",
+            age_recipient=RECIPIENT,
+            now=datetime.now(UTC),
+        )
+    assert "private" not in str(error.value)
+    assert error.value.__suppress_context__

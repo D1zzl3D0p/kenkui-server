@@ -488,6 +488,7 @@ def test_daily_signal_reconciliation_preserves_leases_and_cannot_finalize_credit
         )
     assert signals.list_job_ids() == (second,)
     assert len(leases) == 1  # repeated recovery cannot exceed the live database lease
+    assert repo.renew_execution(*leases[0])  # active work still renews after daily reconciliation
     assert repo.billing.account(account).available_credits == 9
     repo.release_execution(*leases[0])
     repo.request_cancellation(second)
