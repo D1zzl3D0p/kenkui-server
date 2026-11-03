@@ -3,8 +3,11 @@
 -- Clear direct grants inherited from table-creation defaults before adding read-only access.
 REVOKE ALL ON migration_directory_quarantines FROM PUBLIC, :"api_role", :"worker_role";
 REVOKE ALL ON migration_directory_active,migration_directory_runs,
-    migration_directory_rows,migration_directory_aliases FROM :"api_role", :"worker_role";
-GRANT SELECT ON migration_directory_active,migration_directory_runs,
+    migration_directory_rows,migration_directory_aliases FROM PUBLIC, :"api_role", :"worker_role";
+GRANT SELECT (id,issuer,environment,invited_emails,mode,frozen,valid_until)
+    ON migration_directory_runs TO :"api_role";
+GRANT SELECT (id,issuer,mode,frozen,valid_until) ON migration_directory_runs TO :"worker_role";
+GRANT SELECT ON migration_directory_active,
     migration_directory_rows,migration_directory_aliases TO :"api_role", :"worker_role";
 GRANT SELECT,INSERT,UPDATE ON migration_challenges TO :"api_role";
 GRANT SELECT,INSERT ON migration_rate_events TO :"api_role";

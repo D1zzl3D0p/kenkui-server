@@ -191,6 +191,16 @@ def test_runtime_grants_prevent_directory_activation(database):
                     api, worker
                 )
             )
+            conn.execute(
+                sql.SQL("GRANT SELECT ON migration_directory_runs TO {},{},PUBLIC").format(
+                    api, worker
+                )
+            )
+            conn.execute(
+                sql.SQL("GRANT SELECT (approval_ref) ON migration_directory_runs TO {}").format(api)
+            )
+            raw, ev = sample()
+            import_directory(conn, "staging", raw, ev, activate=True)
             grants = Path("deploy/neon/migration-runtime-grants.sql").read_text()
             for statement in "\n".join(
                 line for line in grants.splitlines() if not line.startswith("--")
@@ -208,6 +218,36 @@ def test_runtime_grants_prevent_directory_activation(database):
             for role in (api, worker):
                 conn.execute(sql.SQL("SET LOCAL ROLE {}").format(role))
                 conn.execute("SELECT * FROM migration_directory_rows")
+                if role == api:
+                    ready = conn.execute("""SELECT r.id,r.issuer,r.invited_emails
+                        FROM migration_directory_active a JOIN migration_directory_runs r
+                        ON r.id=a.run_id AND r.environment=a.environment
+                        WHERE a.environment='staging'
+                        AND (r.mode='final' AND r.frozen OR r.valid_until>clock_timestamp())""")
+                else:
+                    ready = conn.execute("""SELECT d.issuer FROM migration_directory_active a
+                        JOIN migration_directory_runs d ON d.id=a.run_id
+                        WHERE a.environment='staging'
+                        AND (d.mode='final' AND d.frozen OR d.valid_until>clock_timestamp())""")
+                assert ready.fetchone()["issuer"] == LEGACY_ISSUER
+                for column in (
+                    "approval_ref",
+                    "attested_by",
+                    "approval_artifact_digest",
+                    "attested_at",
+                    "restored_snapshot_digest",
+                    "quarantine_digest",
+                    "quarantine_version",
+                    "matched_restored_owners",
+                    "quarantined_owners",
+                    "digest",
+                ):
+                    with pytest.raises(InsufficientPrivilege), conn.transaction():
+                        conn.execute(
+                            sql.SQL("SELECT {} FROM migration_directory_runs").format(
+                                sql.Identifier(column)
+                            )
+                        )
                 with pytest.raises(InsufficientPrivilege), conn.transaction():
                     conn.execute("DELETE FROM migration_directory_active")
                 for denied in (
@@ -304,7 +344,7 @@ def seed_owner(conn, n, subject):
     return owner
 
 
-def manifest(conn, evidence, records):
+def manifest(conn, evidence, records, *, approval_ref="fixture-review/1"):
     from kenkui_server.storage.migration_fixture_quarantine import restored_snapshot_digest
 
     snapshot = restored_snapshot_digest(conn)
@@ -316,7 +356,7 @@ def manifest(conn, evidence, records):
         version=1,
         restoredSnapshotDigest=snapshot,
         approvalArtifactDigest="1" * 64,
-        approvalRef="fixture-review/1",
+        approvalRef=approval_ref,
         attestedBy="synthetic-release",
         attestedAt=datetime.now(UTC).isoformat(),
         assertion="owner-approved-synthetic-fixtures-preserve-all-exclude-recovery",
@@ -849,14 +889,74 @@ def test_release_history_prevents_omission_source_reappearance_or_silent_reclass
         assert conn.execute("SELECT * FROM migration_directory_active").fetchall() == previous
         assert conn.execute("SELECT count(*) n FROM migration_directory_runs").fetchone()["n"] == 1
         # Exact renewed owner classification has a fresh durable approval reference.
-        payload = json.loads(q)
-        payload["approvalRef"] = "fixture-review/2"
-        q = json.dumps(payload).encode()
-        ev["quarantineApproval"]["approvalRef"] = payload["approvalRef"]
-        ev["quarantineManifestDigest"] = hashlib.sha256(q).hexdigest()
+        q = manifest(conn, ev, changed, approval_ref="fixture-review/2")
         import_directory(conn, "staging", raw, ev, activate=True, quarantine=q)
+        with conn.transaction(force_rollback=True):
+            conn.execute("DELETE FROM migration_directory_active")
+            with pytest.raises(ValueError):
+                import_directory(conn, "staging", raw, ev, activate=True, quarantine=q)
+            renewed = manifest(conn, ev, changed, approval_ref="fixture-review/3")
+            import_directory(conn, "staging", raw, ev, activate=True, quarantine=renewed)
         # Returning to an old fingerprint is another change, even if its old approval is replayed.
         conn.execute("UPDATE jobs SET status='succeeded'")
         q = manifest(conn, ev, records)
         with pytest.raises(ValueError):
             import_directory(conn, "staging", raw, ev, activate=True, quarantine=q)
+
+
+@pytest.mark.parametrize(
+    "case", ["legacy", "no-lots", "unexplained", "no-grant-ledger", "extra-ledger"]
+)
+def test_uncorroborated_fixture_credits_fail_first_capture(database, case):
+    from kenkui_server.storage.migration_fixture_quarantine import fixture_fingerprint
+
+    with database.connection() as conn:
+        raw, ev = sample()
+        records = fixture_records(conn, "staging", 1)
+        if case == "unexplained":
+            conn.execute("UPDATE credit_accounts SET available_credits=18")
+        elif case == "extra-ledger":
+            conn.execute("""INSERT INTO credit_ledger_entries(id,account_id,kind,credits,reference)
+                            SELECT gen_random_uuid(),id,'release',2,'unexplained'
+                            FROM credit_accounts""")
+        else:
+            conn.execute("DELETE FROM credit_ledger_entries")
+            if case == "legacy":
+                conn.execute("UPDATE credit_lots SET kind='legacy',reference='old-carryover'")
+            elif case == "no-lots":
+                conn.execute("DELETE FROM credit_allocations")
+                conn.execute("DELETE FROM credit_lots")
+        records[0]["fixtureFingerprint"] = fixture_fingerprint(conn, "staging", UUID(int=100))
+        q = manifest(conn, ev, records)
+        for activate in (False, True):
+            with pytest.raises(ValueError):
+                import_directory(conn, "staging", raw, ev, activate=activate, quarantine=q)
+        assert not conn.execute("SELECT * FROM migration_directory_runs").fetchall()
+
+
+def test_selective_object_ownership_uses_kind_and_resource(database):
+    from kenkui_server.storage.migration_fixture_quarantine import fixture_fingerprint
+
+    with database.connection() as conn:
+        records = fixture_records(conn, "staging", 1)
+
+        def insert(kind, resource):
+            conn.execute(
+                """INSERT INTO stored_objects(id,object_kind,opaque_object_key,
+                        resource_id,terminal_at) VALUES (%s,%s,%s,%s,now())""",
+                (uuid4(), kind, uuid4().hex, resource),
+            )
+
+        for kind, resource in [
+            ("artifact", "book-0"),
+            ("source", "sample.m4b"),
+            ("temporary", "book-0"),
+        ]:
+            insert(kind, resource)
+        before = records[0]["fixtureFingerprint"]
+        assert fixture_fingerprint(conn, "staging", UUID(int=100)) == before
+        for kind, resource in [("source", "book-0"), ("artifact", "sample.m4b")]:
+            insert(kind, resource)
+            current = fixture_fingerprint(conn, "staging", UUID(int=100))
+            assert current != before
+            before = current

@@ -118,9 +118,10 @@ SELECTORS = {
     "objects": """WITH owner_key AS (SELECT %s::uuid AS id)
                   SELECT o.id,o.object_kind,o.opaque_object_key,o.resource_id,
                          o.deleted_at IS NOT NULL AS deleted
-                  FROM stored_objects o WHERE o.resource_id IN (
-                      SELECT a.id FROM assets a,owner_key WHERE a.owner_id=owner_key.id
-                      UNION SELECT a.path FROM artifacts a JOIN jobs j ON j.id=a.job_id,owner_key
+                  FROM stored_objects o WHERE (o.object_kind,o.resource_id) IN (
+                      SELECT 'source',a.id FROM assets a,owner_key WHERE a.owner_id=owner_key.id
+                      UNION SELECT 'artifact',a.path FROM artifacts a
+                      JOIN jobs j ON j.id=a.job_id,owner_key
                         WHERE j.owner_id=owner_key.id)
                   ORDER BY o.id""",
     "intents": """SELECT source_id,owner_id,sha256,cover_operation_id,cover_generation
@@ -184,10 +185,18 @@ def _validate_owner(conn: Any, environment: str, owner: UUID, fingerprint: str) 
     require(len(data["identity"]) == 1 and data["identity"][0]["email"] is None)
     require(len(data["bindings"]) == 1 and not data["payments"])
     require(all(j["status"] in ("succeeded", "failed", "cancelled") for j in data["jobs"]))
-    accounts = {a["id"] for a in data["accounts"]}
+    balances = {a["id"]: int(a["available_credits"]) for a in data["accounts"]}
+    available_from_lots = dict.fromkeys(balances, 0)
+    ledger_balances = dict.fromkeys(balances, 0)
     grants = set()
     for lot in data["lots"]:
         require(lot["kind"] != "purchase" and not lot["reference"].startswith("stripe:"))
+        credited = int(lot["credited"])
+        # The 0004 carryover aggregates pre-lot balances with unknown origin.
+        require(lot["kind"] != "legacy" or credited == 0)
+        available_from_lots[lot["account_id"]] += (
+            credited - int(lot["reserved"]) - int(lot["consumed"])
+        )
         if lot["kind"] == "grant":
             grants.add((lot["account_id"], lot["reference"], lot["credited"]))
     authorizations = {}
@@ -196,12 +205,16 @@ def _validate_owner(conn: Any, environment: str, owner: UUID, fingerprint: str) 
         authorizations[auth["id"]] = auth["account_id"]
     for entry in data["ledger"]:
         account = entry["account_id"]
-        require(account in accounts and not entry["reference"].startswith("stripe:"))
+        require(account in balances and not entry["reference"].startswith("stripe:"))
+        ledger_balances[account] += int(entry["credits"])
         if entry["authorization_id"] is not None:
             require(authorizations.get(entry["authorization_id"]) == account)
         # Ordinary grants also produce purchase-kind ledger entries.
         if entry["kind"] == "purchase":
-            require((account, entry["reference"], entry["credits"]) in grants)
+            origin = (account, entry["reference"], entry["credits"])
+            require(entry["authorization_id"] is None and origin in grants)
+            grants.remove(origin)
+    require(not grants and balances == available_from_lots == ledger_balances)
     blocked = conn.execute(
         """
         SELECT 1 FROM identity_link_proofs WHERE identity_id=%s AND consumed_at IS NULL
