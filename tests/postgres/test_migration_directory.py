@@ -146,37 +146,74 @@ def test_final_run_survives_rehearsal_window_and_cli_hides_private_input(databas
         )
 
 
+def test_activation_expiring_while_inserting_rows_preserves_usable_pointer(database):
+    with database.connection() as conn:
+        source, evidence = sample()
+        import_directory(conn, "staging", source, evidence, activate=True)
+        previous = conn.execute("SELECT run_id FROM migration_directory_active").fetchone()
+        conn.execute("""CREATE FUNCTION wait_until_expiry() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN PERFORM pg_sleep_until(valid_until) FROM migration_directory_runs
+            WHERE id=NEW.run_id; RETURN NEW; END $$""")
+        conn.execute("""CREATE TRIGGER pause_activation AFTER INSERT ON migration_directory_rows
+            FOR EACH ROW EXECUTE FUNCTION wait_until_expiry()""")
+        captured = (datetime.now(UTC) - timedelta(hours=24) + timedelta(seconds=1)).isoformat()
+        source, evidence = sample(captured=captured)
+        with pytest.raises(ValueError):
+            import_directory(conn, "staging", source, evidence, activate=True)
+        assert conn.execute("""SELECT a.run_id FROM migration_directory_active a
+            JOIN migration_directory_runs r ON r.id=a.run_id
+            WHERE r.valid_until>clock_timestamp()""").fetchone() == previous
+        assert conn.execute("SELECT count(*) n FROM migration_directory_runs").fetchone()["n"] == 1
+
+
 def test_runtime_grants_prevent_directory_activation(database):
     from psycopg.errors import InsufficientPrivilege
 
     with database.connection() as conn:
-        role = sql.Identifier("migration_runtime_" + uuid4().hex)
+        api = sql.Identifier("migration_api_" + uuid4().hex)
+        worker = sql.Identifier("migration_worker_" + uuid4().hex)
         with conn.transaction(force_rollback=True):
-            conn.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(role))
             schema = conn.execute("SELECT current_schema() AS s").fetchone()["s"]
-            conn.execute(
-                sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(sql.Identifier(schema), role)
-            )
+            for role in (api, worker):
+                conn.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(role))
+                conn.execute(
+                    sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(sql.Identifier(schema), role)
+                )
             grants = Path("deploy/neon/migration-runtime-grants.sql").read_text()
             for statement in "\n".join(
                 line for line in grants.splitlines() if not line.startswith("--")
             ).split(";"):
                 if statement.strip() and "neon_auth" not in statement:
                     conn.execute(
-                        statement.replace(':"api_role"', role.as_string(conn)).replace(
-                            ':"worker_role"', role.as_string(conn)
+                        statement.replace(':"api_role"', api.as_string(conn)).replace(
+                            ':"worker_role"', worker.as_string(conn)
                         )
                     )
-            conn.execute(sql.SQL("SET LOCAL ROLE {}").format(role))
-            conn.execute("SELECT * FROM migration_directory_rows")
-            conn.execute(
-                "INSERT INTO migration_rate_events(kind,rate_key) VALUES ('issue','synthetic')"
+            insert_event = "INSERT INTO migration_rate_events(kind,rate_key) VALUES ('issue','key')"
+            insert_challenge = (
+                "INSERT INTO migration_challenges SELECT * FROM migration_challenges WHERE false"
             )
-            with pytest.raises(InsufficientPrivilege), conn.transaction():
-                conn.execute("DELETE FROM migration_directory_active")
-            source, evidence = sample()
-            with pytest.raises(ValueError):
-                import_directory(conn, "staging", source, evidence, activate=True)
+            for role in (api, worker):
+                conn.execute(sql.SQL("SET LOCAL ROLE {}").format(role))
+                conn.execute("SELECT * FROM migration_directory_rows")
+                with pytest.raises(InsufficientPrivilege), conn.transaction():
+                    conn.execute("DELETE FROM migration_directory_active")
+                source, evidence = sample()
+                with pytest.raises(ValueError):
+                    import_directory(conn, "staging", source, evidence, activate=True)
+                if role == api:
+                    conn.execute(insert_event)
+                    conn.execute(insert_challenge)
+                    with pytest.raises(InsufficientPrivilege), conn.transaction():
+                        conn.execute("DELETE FROM migration_rate_events")
+                else:
+                    conn.execute("UPDATE migration_challenges SET claimed_at=clock_timestamp()")
+                    conn.execute("DELETE FROM migration_rate_events")
+                    with pytest.raises(InsufficientPrivilege), conn.transaction():
+                        conn.execute(insert_event)
+                    with pytest.raises(InsufficientPrivilege), conn.transaction():
+                        conn.execute(insert_challenge)
+                conn.execute("RESET ROLE")
 
 
 def test_prune_removes_only_expired_entries_within_a_shared_budget(database):

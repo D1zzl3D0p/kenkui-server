@@ -12,7 +12,7 @@ describe.skipIf(!testUrl)('authenticated migration against real PostgreSQL',()=>
    const f=await fixture();
    const {pool}=f;
    try {
-     const store=new IdentityStore(()=>pool);
+     const store=new IdentityStore(()=>pool,'staging');
      const before={identities:(await pool.query('SELECT * FROM identities')).rows,credits:(await pool.query('SELECT * FROM credit_accounts')).rows,jobs:(await pool.query('SELECT * FROM jobs')).rows};
      const neonKeys=await generateKeyPair('EdDSA'),legacyKeys=await generateKeyPair('RS256');
      const issuer='https://branch.invalid/db/auth',origin=new URL(issuer).origin;

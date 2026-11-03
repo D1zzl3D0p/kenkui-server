@@ -156,9 +156,13 @@ def import_directory(
                     "VALUES (%s,%s,%s)",
                     [(run, owner, key) for owner, key in aliases],
                 )
-            connection.execute(
-                """INSERT INTO migration_directory_active(environment,run_id) VALUES (%s,%s)
-                   ON CONFLICT (environment) DO UPDATE SET run_id=excluded.run_id""",
-                (environment, run),
-            )
+            published = connection.execute(
+                """INSERT INTO migration_directory_active(environment,run_id)
+                   SELECT environment,id FROM migration_directory_runs
+                   WHERE id=%s AND (mode='final' OR valid_until>clock_timestamp())
+                   ON CONFLICT (environment) DO UPDATE SET run_id=excluded.run_id
+                   RETURNING (%s::timestamptz IS NULL OR clock_timestamp()<%s) AS fresh""",
+                (run, valid_until, valid_until),
+            ).fetchone()
+            checked(bool(published and published["fresh"]))
         return result

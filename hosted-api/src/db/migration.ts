@@ -1,7 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
 import type { VerifiedToken } from '../auth/neon.js';
 import { ApiError } from '../types.js';
-import { lockIdentity, IdentityError } from './identities.js';
+import { lockDirectory, lockIdentity, IdentityError } from './identities.js';
 
 export const blocked=()=>new ApiError(409,'recovery_required','Verify your existing account before continuing.');
 export const unavailable=()=>new ApiError(503,'migration_unavailable','Account migration is temporarily unavailable.');
@@ -30,7 +30,10 @@ export async function activeRun(client:PoolClient,environment:Environment):Promi
 }
 
 export async function currentProfile(client:PoolClient,who:VerifiedToken,issuer:string):Promise<Profile>{
-  if(who.issuer!==issuer||who.expiresAt<=Date.now()/1000||!/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(who.subject)) throw blocked();
+  if(who.issuer!==issuer||who.expiresAt<=Date.now()/1000) {
+    throw new ApiError(401,'unauthenticated','Sign in to continue.');
+  }
+  if(!/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(who.subject)) throw blocked();
   const result=await client.query<Profile>(`SELECT email,"emailVerified" FROM neon_auth."user"
     WHERE id=$1::uuid AND banned IS NOT TRUE`,[who.subject]);
   if(!result.rows[0]) throw blocked();
@@ -38,13 +41,14 @@ export async function currentProfile(client:PoolClient,who:VerifiedToken,issuer:
 }
 
 export async function guarded<T>(pool:()=>Pool,env:Environment,issuer:string,who:VerifiedToken,
-  work:(client:PoolClient,run:Run,profile:Profile)=>Promise<T>):Promise<T>{
+  work:(client:PoolClient,run:Run,profile:Profile)=>Promise<T>,
+  validateLatest?:(profile:Profile)=>void):Promise<T>{
   let client:PoolClient|undefined;
   let discard=false;
   try {
     client=await pool().connect();
     await client.query('BEGIN');
-    await client.query('SELECT pg_advisory_xact_lock_shared(915001,hashtext($1))',[env]);
+    await lockDirectory(client,env);
     await lockIdentity(client,who.issuer,who.subject);
     const run=await activeRun(client,env);
     const profile=await currentProfile(client,who,issuer);
@@ -52,7 +56,7 @@ export async function guarded<T>(pool:()=>Pool,env:Environment,issuer:string,who
     // Decisions may have waited on an owner, proof or binding; recheck before commit.
     await activeRun(client,env);
     const latest=await currentProfile(client,who,issuer);
-    if(profile.email!==latest.email||profile.emailVerified!==latest.emailVerified) throw blocked();
+    validateLatest?.(latest);
     await client.query('COMMIT');
     return result;
   } catch(error) {

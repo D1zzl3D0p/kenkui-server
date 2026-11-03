@@ -3,20 +3,24 @@ import type { Pool } from 'pg';
 import { ApiError } from '../types.js';
 import { blocked,guarded,type Environment } from '../db/migration.js';
 import { mintAndLink } from './migration-challenge.js';
-import { httpsUrl,type NeonAuth } from './neon.js';
+import { checkedSigningKeys,httpsUrl,type NeonAuth } from './neon.js';
 
 export const LEGACY_SOURCE={environmentId:'environment_01M0Y347Z9N6FYNTGVY3725X1Y',clientId:'client_01M0Y37EQMGD270AW5W7NZC1E0'} as const;
 const legacyAuthority=`urn:kenkui:workos:${LEGACY_SOURCE.environmentId}:${LEGACY_SOURCE.clientId}`;
 /** Explicit issuer obtained from the source client configuration, never from HTTP claims. */
 export function createLegacyVerifier(issuer:string,keySet:JWTVerifyGetKey=createRemoteJWKSet(new URL(`https://api.workos.com/sso/jwks/${LEGACY_SOURCE.clientId}`),{timeoutDuration:5000})) {
   httpsUrl(issuer);
+  const signingKey=checkedSigningKeys(keySet);
   return async(token:string):Promise<string|null>=>{
     if(token.length>16_384) return null;
     try {
-      const {payload}=await jwtVerify(token,keySet,{issuer,algorithms:['RS256'],requiredClaims:['iss','sub','exp','iat','sid','client_id']});
+      const {payload}=await jwtVerify(token,signingKey,{issuer,algorithms:['RS256'],requiredClaims:['iss','sub','exp','iat','sid','client_id']});
       if(payload.client_id!==LEGACY_SOURCE.clientId||!payload.sub?.startsWith('user_')||typeof payload.sid!=='string'||!payload.sid.startsWith('session_')||payload.act) return null;
       return payload.sub;
-    } catch{return null;}
+    } catch(error) {
+      if(error instanceof ApiError) throw error;
+      return null;
+    }
   };
 }
 

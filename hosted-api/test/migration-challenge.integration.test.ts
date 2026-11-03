@@ -41,7 +41,7 @@ it.skipIf(!process.env.KENKUI_TEST_DATABASE_URL)('suppresses owner limits across
   let elapsed=0;
   let ready=true;
   let readinessChecks=0;
-  const mail={ready:async()=>{readinessChecks++;if(!ready)throw Error();},deliver:async(id:string,code:string)=>{
+  const mail={ready:async()=>{elapsed+=1200;readinessChecks++;if(!ready)throw Error();},deliver:async(id:string,code:string)=>{
     sent.push({id,code});elapsed+=1500;throw Error('uncertain delivery');
   }};
   const service=new MigrationChallenges(()=>f.pool,'staging',issuer,()=>mail,()=>elapsed,async(ms:number)=>{sleeps.push(ms);elapsed+=ms;});
@@ -54,6 +54,7 @@ it.skipIf(!process.env.KENKUI_TEST_DATABASE_URL)('suppresses owner limits across
     await age();
     const second=await service.issue(who,'legacy@old.test');
     expect(sleeps).toEqual([500,2000,500]);
+    expect(elapsed).toBe(3*(1200+2000));
     expect(sent.map(c=>c.id)).toEqual([first.challengeId,second.challengeId]);
     await expect(service.verify(who,first.challengeId,sent[0]!.code)).rejects.toMatchObject({status:409});
     const ttl=(await f.pool.query('SELECT extract(epoch from expires_at-created_at)::float8 n FROM migration_challenges WHERE id=$1',[second.challengeId])).rows[0].n;
@@ -154,5 +155,24 @@ it.skipIf(!process.env.KENKUI_TEST_DATABASE_URL)('suppresses per-owner hourly an
      await service.issue(await f.profile(),'legacy@old.test');
    }
    expect(sent).toHaveLength(10);
+ } finally {await f.close();}
+});
+
+it.skipIf(!process.env.KENKUI_TEST_DATABASE_URL)('commits wrong guesses and correct legacy proof across a current email change',async()=>{
+ const f=await fixture();
+ let code='';
+ const service=new MigrationChallenges(()=>f.pool,'staging',issuer,
+   ()=>({ready:async()=>{},deliver:async(_id:string,value:string)=>{code=value;}}),()=>0,async()=>{});
+ try {
+   const who=await f.profile();
+   const {challengeId}=await service.issue(who,'legacy@old.test');
+   await f.pool.query(`CREATE FUNCTION change_email() RETURNS trigger LANGUAGE plpgsql AS $$
+     BEGIN UPDATE neon_auth."user" SET email='changed@relay.test',"emailVerified"=NOT "emailVerified" WHERE id=NEW.subject::uuid;
+     RETURN NEW; END $$`);
+   await f.pool.query('CREATE TRIGGER change_email AFTER UPDATE ON migration_challenges FOR EACH ROW EXECUTE FUNCTION change_email()');
+   await expect(service.verify(who,challengeId,'0000000000000000')).rejects.toMatchObject({status:409});
+   expect((await f.pool.query('SELECT attempts FROM migration_challenges')).rows[0].attempts).toBe(1);
+   expect((await f.pool.query("SELECT count(*)::int n FROM migration_rate_events WHERE kind='verify'")).rows[0].n).toBe(1);
+   expect(await service.verify(who,challengeId,code)).toEqual({userId:owner});
  } finally {await f.close();}
 });

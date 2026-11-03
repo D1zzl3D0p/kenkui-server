@@ -1,5 +1,6 @@
 import type { Pool,PoolClient } from 'pg';
-import { findIdentity, lockIdentity, IdentityError, validateProviderIdentity } from '../db/identities.js';
+import type { Environment } from '../db/migration.js';
+import { findIdentity, lockDirectory, lockIdentity, IdentityError, validateProviderIdentity } from '../db/identities.js';
 
 export interface LinkIdentityInput {
   issuer: string;
@@ -49,12 +50,13 @@ export async function linkOnClient(client:PoolClient,input:LinkIdentityInput,con
  * No caller-controlled internalUserId can mint a proof or transfer an account.
  */
 export class IdentityLinker {
-  constructor(private readonly getPool: () => Pool) {}
+  constructor(private readonly getPool: () => Pool, private readonly environment:Environment) {}
 
   async linkIdentity(input: LinkIdentityInput): Promise<string> {
     const client=await this.getPool().connect();
     try {
       await client.query('BEGIN');
+      await lockDirectory(client,this.environment);
       const owner=await linkOnClient(client,input);
       await client.query('COMMIT');
       return owner;

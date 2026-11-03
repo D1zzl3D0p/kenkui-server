@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { MigrationChallenges } from '../src/auth/migration-challenge.js';
 import { Admission } from '../src/auth/admission.js';
@@ -93,4 +93,48 @@ it.skipIf(!process.env.KENKUI_TEST_DATABASE_URL)('reads the committed replacemen
    expect(await pending).toBe(409);
    expect((await f.pool.query('SELECT count(*)::int n FROM identities')).rows[0].n).toBe(1);
  } finally {await conn.query('ROLLBACK');conn.release();await f.close();}
+});
+
+it.skipIf(!process.env.KENKUI_TEST_DATABASE_URL)('keeps the admission verified address stable through the binding write',async()=>{
+ const f=await fixture();
+ try {
+   const who=await f.profile();
+   await f.pool.query(`CREATE FUNCTION revoke_email() RETURNS trigger LANGUAGE plpgsql AS $$
+     BEGIN UPDATE neon_auth."user" SET "emailVerified"=false; RETURN NEW; END $$`);
+   await f.pool.query('CREATE TRIGGER revoke_email AFTER INSERT ON identities FOR EACH ROW EXECUTE FUNCTION revoke_email()');
+   await expect(new Admission(()=>f.pool,'staging',issuer).onboard(who)).rejects.toMatchObject({status:409});
+   expect((await f.pool.query('SELECT count(*)::int n FROM identities')).rows[0].n).toBe(1);
+ } finally {await f.close();}
+});
+
+it.skipIf(!process.env.KENKUI_TEST_DATABASE_URL)('rejects token expiry during preflight as unauthenticated',async()=>{
+ const f=await fixture();
+ try {
+   const who=await f.profile();
+   who.expiresAt=Date.now()/1000+0.1;
+   const service=new MigrationChallenges(()=>f.pool,'staging',issuer,
+     ()=>({ready:async()=>{await new Promise(r=>setTimeout(r,150));},deliver:async()=>{throw Error();}}),()=>0,async()=>{});
+   await expect(service.issue(who,'legacy@old.test')).rejects.toMatchObject({status:401});
+   expect((await f.pool.query('SELECT count(*)::int n FROM migration_rate_events')).rows[0].n).toBe(0);
+ } finally {await f.close();}
+});
+
+it.skipIf(!process.env.KENKUI_TEST_DATABASE_URL)('rejects a credential expiring behind the directory guard before binding',async()=>{
+ const f=await fixture();
+ const conn=await f.pool.connect();
+ const clock=vi.spyOn(Date,'now');
+ try {
+   const who=await f.profile();
+   await conn.query('BEGIN');
+   await conn.query("SELECT pg_advisory_xact_lock(915001,hashtext('staging'))");
+   const pending=new Admission(()=>f.pool,'staging',issuer).onboard(who)
+     .then(()=>0,(error:{status:number})=>error.status);
+   await expect.poll(async()=>Number((await conn.query(`SELECT count(*) n FROM pg_locks
+     WHERE locktype='advisory' AND classid=915001 AND NOT granted
+       AND database=(SELECT oid FROM pg_database WHERE datname=current_database())`)).rows[0].n)).toBe(1);
+   clock.mockReturnValue(1000*who.expiresAt);
+   await conn.query('COMMIT');
+   expect(await pending).toBe(401);
+   expect((await f.pool.query('SELECT count(*)::int n FROM identities')).rows[0].n).toBe(1);
+ } finally {clock.mockRestore();await conn.query('ROLLBACK');conn.release();await f.close();}
 });

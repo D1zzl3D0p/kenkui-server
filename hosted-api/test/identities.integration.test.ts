@@ -25,7 +25,7 @@ describe.skipIf(!testUrl)('durable provider identity mapping on real PostgreSQL'
     });
   }
   async function services() {
-    return { store: new IdentityStore(() => pool), linker: new IdentityLinker(() => pool) };
+    return { store: new IdentityStore(() => pool,'production'), linker: new IdentityLinker(() => pool,'production') };
   }
   async function proof(idOwner = owner, idSubject = subject, idIssuer = issuer) {
     const id = randomUUID();
@@ -45,6 +45,21 @@ describe.skipIf(!testUrl)('durable provider identity mapping on real PostgreSQL'
     await pool.query('INSERT INTO identities (id,workos_subject,email) VALUES ($1,$2,$3)',
       [other, 'other-legacy', 'old@example.invalid']);
   }
+  it('standalone creation and linking wait for the configured target activation guard',async()=>{
+    const {store,linker}=await services();
+    const proofId=await proof();
+    const guard=await pool.connect();
+    await guard.query('BEGIN');
+    await guard.query("SELECT pg_advisory_xact_lock(915001,hashtext('production'))");
+    const pending=Promise.all([
+      store.createNewIdentity({issuer,subject:'new-subject',legacyAccountCheck:'confirmed-new'}),
+      linker.linkIdentity({issuer,subject,internalUserId:owner,proofId}),
+    ]);
+    try {
+      await expect.poll(async()=>Number((await admin.query(`SELECT count(*) n FROM pg_stat_activity
+        WHERE application_name=$1 AND wait_event='advisory'`,[schema])).rows[0].n),{timeout:1000}).toBe(2);
+    } finally {await guard.query('ROLLBACK');guard.release();await pending;}
+  });
   // Force actual overlapping database statements behind a held table lock. Seeing
   // both backend waiters avoids the false confidence of Promise.all alone.
   async function overlap<T>(table: string, actions: (() => Promise<T>)[], whileBlocked?: () => Promise<void>) {

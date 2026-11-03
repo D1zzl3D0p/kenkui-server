@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
+import type { Environment } from './migration.js';
 
 export type IdentityErrorCode = 'invalid_identity' | 'unknown_identity' | 'invalid_proof'
   | 'identity_conflict' | 'legacy_recovery_required' | 'source_authority_mismatch' | 'ambiguous_source';
@@ -25,6 +26,10 @@ export async function findIdentity(client: Pool | PoolClient, issuer: string, su
   const result = await client.query<{identity_id: string}>(
     'SELECT identity_id FROM provider_identities WHERE issuer=$1 AND subject=$2', [issuer, subject]);
   return result.rows[0]?.identity_id ?? null;
+}
+
+export async function lockDirectory(client:PoolClient,environment:Environment):Promise<void> {
+  await client.query('SELECT pg_advisory_xact_lock_shared(915001,hashtext($1))',[environment]);
 }
 
 export async function lockIdentity(client:PoolClient,issuer:string,subject:string):Promise<void> {
@@ -66,7 +71,7 @@ export interface WorkosBackfillResult {
 
 /** Server-internal SQL primitives. No lookup miss creates an account. */
 export class IdentityStore {
-  constructor(private readonly getPool: () => Pool) {}
+  constructor(private readonly getPool: () => Pool, private readonly environment:Environment) {}
 
   async resolveIdentity(issuer: string, subject: string): Promise<string | null> {
     validateProviderIdentity(issuer, subject);
@@ -85,6 +90,7 @@ export class IdentityStore {
     const client = await this.getPool().connect();
     try {
       await client.query('BEGIN');
+      await lockDirectory(client,this.environment);
       const owner=await createIdentity(client,input.issuer,input.subject,null);
       await client.query('COMMIT');
       return owner;

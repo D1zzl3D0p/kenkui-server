@@ -6,6 +6,7 @@ import type { VerifiedToken } from './neon.js';
 export class Admission {
   constructor(private pool:()=>Pool,private environment:Environment,private issuer:string){}
   onboard(who:VerifiedToken):Promise<{userId:string}> {
+    let enrollmentEmail:string|undefined;
     return guarded(this.pool,this.environment,this.issuer,who,async(client,run,profile)=>{
       const existing=await findIdentity(client,who.issuer,who.subject);
       if(existing) return {userId:existing};
@@ -14,7 +15,10 @@ export class Admission {
       if(run.invited_emails.length&&!run.invited_emails.includes(key)) throw blocked();
       const matches=await candidates(client,run.id,key);
       if(matches.length>1||matches.some(row=>row.owner_id!==null||!row.verified)) throw blocked();
+      enrollmentEmail=profile.email;
       return {userId:await createIdentity(client,who.issuer,who.subject,profile.email.trim())};
+    },latest=>{
+      if(enrollmentEmail!==undefined&&(!latest.emailVerified||latest.email!==enrollmentEmail)) throw blocked();
     });
   }
 }

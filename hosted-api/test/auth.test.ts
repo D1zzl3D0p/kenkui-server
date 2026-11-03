@@ -69,3 +69,21 @@ describe('Neon authentication boundary',()=>{
    await expect(auth.verify(new Request('https://api.example.invalid/v1/auth/logout',{method:'POST',headers:{Authorization:`Bearer ${await token()}`,Origin:'https://evil.invalid'}}))).rejects.toMatchObject({code:'invalid_origin'});
  });
 });
+
+it('distinguishes unusable remote signing keys from an invalid signed credential',async()=>{
+ const signed=await token();
+ const repository={resolveIdentity:vi.fn(async()=>null)};
+ const check=()=>createNeonAuth(config,repository).verify(req(signed));
+ try {
+   for(const fetcher of [async()=>new Response('private error',{status:500}),
+     async()=>{throw new DOMException('private timeout','TimeoutError');},
+     async()=>Response.json({keys:'private malformation'})]){
+     vi.stubGlobal('fetch',fetcher);
+     await expect(check()).rejects.toMatchObject({status:503,message:'Authentication is temporarily unavailable.'});
+   }
+   const wrong=await generateKeyPair('EdDSA');
+   vi.stubGlobal('fetch',async()=>Response.json({keys:[{...await exportJWK(wrong.publicKey),kid:'one'}]}));
+   expect(await check()).toBeNull();
+   expect(repository.resolveIdentity).not.toHaveBeenCalled();
+ } finally {vi.unstubAllGlobals();}
+});

@@ -47,7 +47,6 @@ export class MigrationChallenges {
   async issue(who:VerifiedToken,address:string):Promise<{challengeId:string}> {
     const key=mailboxKey(address);
     if(!key) throw new ApiError(422,'validation_error','Request validation failed');
-    const start=this.now();
     let sender:MigrationMail;
     try {sender=this.mail();await sender.ready();} catch {throw unavailable();}
     const challengeId=randomUUID();
@@ -72,6 +71,7 @@ export class MigrationChallenges {
         [challengeId,run.id,who.issuer,who.subject,candidate.subject,owner,digest(challengeId,code)]);
       return true;
     });
+    const start=this.now();
     if(deliver) {
       try {await sender.deliver(challengeId,code);} catch { /* A timed out dispatch may have sent. */ }
     }

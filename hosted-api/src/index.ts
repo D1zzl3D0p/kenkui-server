@@ -32,7 +32,7 @@ export default {
       try {
         const config=loadConfig(process.env);
         const authConfig=loadNeonAuthConfig(process.env,config.allowedOrigins);
-        const identities=new IdentityStore(getPool);
+        const identities=new IdentityStore(getPool,config.environment);
         const auth=authConfig?createNeonAuth(authConfig,identities):undefined;
         const next=createApi({config,getPool,...(auth?{auth}:{}),log:event => console.info(JSON.stringify(event))});
         let objects:R2ObjectStore|undefined;

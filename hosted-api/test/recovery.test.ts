@@ -14,6 +14,14 @@ describe('migration proof issuance',()=>{
    for(const claims of [{iss:'https://api.workos.com'},{client_id:'wrong'},{sid:undefined},{sub:'agent_123'},{act:{sub:'admin'}},{exp:1}]) expect(await verify(await legacy(claims))).toBeNull();
    expect(await verify('Fe26.2*sealed')).toBeNull();
  });
+ it('reports an unavailable legacy signing-key service as a dependency failure',async()=>{
+   vi.stubGlobal('fetch',async()=>new Response('private content',{status:503}));
+   try {
+     await expect(createLegacyVerifier(legacyIssuer)(await legacy())).rejects.toMatchObject({
+       status:503,message:'Authentication is temporarily unavailable.',
+     });
+   } finally {vi.unstubAllGlobals();}
+ });
  it('does not acquire a database connection until both credentials verify',async()=>{
    const pool=vi.fn(()=>{throw Error('database should be idle');});
    const auth={authenticateRequest:vi.fn(async()=>null)} as unknown as NeonAuth;
