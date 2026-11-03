@@ -1,71 +1,106 @@
-name: Beta integration
+name: Rehearse reviewed Neon verification on Linux
 on:
-  pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
-  workflow_call:
     inputs:
-      core_ref:
-        description: Immutable core commit override for a calling release
+      environment:
+        description: Protected release target (packages only; no provider writes)
+        type: choice
+        required: true
+        options: [staging, production]
+      studio_ref:
+        description: Reviewed immutable Studio commit
         type: string
-        required: false
-      web_ref:
-        description: Immutable Studio commit override for a calling release
-        type: string
-        required: false
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: isolated-neon-rehearsal-${{ inputs.environment || github.ref }}
+  cancel-in-progress: false
+env:
+  NODE_VERSION: 24.21.0
+  WRANGLER_SEND_METRICS: 'false'
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: kenkui-server
     services:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_PASSWORD: beta-test-only
-          POSTGRES_DB: kenkui_beta_test
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd pg_isready --health-interval 5s
-          --health-timeout 5s --health-retries 10
-    env:
-      KENKUI_TEST_DATABASE_URL: postgresql://postgres:beta-test-only@localhost:5432/kenkui_beta_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['55438:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: 4017e16ae8c4ce2d104f1534fdab7dd79830d740
           path: kenkui-server
-      - name: Require compatible sibling revisions
-        env:
-          CORE_REPOSITORY: ${{ vars.KENKUI_CORE_REPOSITORY }}
-          CORE_REF: ${{ inputs.core_ref || vars.KENKUI_CORE_REF }}
-          WEB_REPOSITORY: ${{ vars.KENKUI_WEB_REPOSITORY }}
-          WEB_REF: ${{ inputs.web_ref || vars.KENKUI_WEB_REF }}
-        run: |
-          test -n "$CORE_REPOSITORY" && test -n "$CORE_REF"
-          test -n "$WEB_REPOSITORY" && test -n "$WEB_REF"
-          [[ "$CORE_REF" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$WEB_REF" =~ ^[0-9a-f]{40}$ ]]
       - uses: actions/checkout@v4
         with:
-          repository: ${{ vars.KENKUI_CORE_REPOSITORY }}
-          ref: ${{ inputs.core_ref || vars.KENKUI_CORE_REF }}
+          repository: D1zzl3D0p/kenkui
+          ref: 97cba6bdb663c15d2d90d6e4e017be23ecdb9c7c
           path: kenkui
-          token: ${{ secrets.KENKUI_REPO_READ_TOKEN || github.token }}
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ vars.KENKUI_WEB_REPOSITORY }}
-          ref: ${{ inputs.web_ref || vars.KENKUI_WEB_REF }}
-          path: kenkui-studio
-          token: ${{ secrets.KENKUI_REPO_READ_TOKEN || github.token }}
+          persist-credentials: false
       - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.12"
+          python-version: '3.12'
+      - run: uv sync --frozen --all-groups --extra hosted
+      - name: Ensure independent PostgreSQL 17 fixture binaries
+        run: |
+          if [ ! -x /usr/lib/postgresql/17/bin/initdb ]; then
+            sudo apt-get update
+            sudo apt-get install -y curl ca-certificates gpg
+            sudo install -d /usr/share/postgresql-common/pgdg
+            sudo curl --fail --silent --show-error -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+            test "$(gpg --show-keys --with-colons /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc | awk -F: '$1=="fpr"{print $10;exit}')" = B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
+            . /etc/os-release
+            printf 'Types: deb\nURIs: https://apt.postgresql.org/pub/repos/apt\nSuites: %s-pgdg\nComponents: main\nSigned-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc\n' "$VERSION_CODENAME" | sudo tee /etc/apt/sources.list.d/pgdg.sources
+            sudo apt-get update
+            sudo apt-get install -y postgresql-17
+          fi
+          test -x /usr/lib/postgresql/17/bin/pg_dump
+          test -x /usr/lib/postgresql/17/bin/pg_restore
       - uses: actions/setup-node@v4
         with:
-          node-version: "24.21.0"
-      - run: uv sync --frozen --all-groups --extra hosted
-        working-directory: kenkui-server
+          node-version: ${{ env.NODE_VERSION }}
       - run: npm ci
-        working-directory: kenkui-studio
-      - run: npx playwright install --with-deps chromium
-        working-directory: kenkui-studio
-      - run: python kenkui-server/scripts/verify-workspace.py
+        working-directory: kenkui-server/hosted-api
+      - run: npm run typecheck
+        working-directory: kenkui-server/hosted-api
+      - name: Relevant ingress and same-runtime contracts
+        run: npm test -- test/standalone.test.ts test/release-environment.test.ts test/release-manifest.test.ts test/catalog.test.ts test/auth.test.ts test/stripe.test.ts test/assets.test.ts test/events.test.ts
+        working-directory: kenkui-server/hosted-api
+      - run: npm run build
+        working-directory: kenkui-server/hosted-api
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Reviewed Docker context with the actual Moby matcher
+        run: go test -mod=readonly ./...
+        working-directory: kenkui-server/scripts/neon/docker-context
+      - name: Archive authorization, resource bounds and guarded fallback verification
+        env:
+          KENKUI_PG_BIN: /usr/lib/postgresql/17/bin
+          KENKUI_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:55438/postgres
+        run: node --test --test-timeout=240000 scripts/neon/test/*.test.mjs
+      - name: Verify owner-only import and locked directory history
+        env:
+          KENKUI_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:55438/postgres
+        run: .venv/bin/python -m pytest -q tests/postgres/test_migration_directory.py
+      - run: npm run smoke
+        working-directory: kenkui-server/hosted-api
+        env:
+          KENKUI_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:55438/postgres
+      - name: Exact production artifacts with independently verified TLS
+        run: node test/production-artifact.mjs
+        working-directory: kenkui-server/hosted-api
+        env:
+          KENKUI_PG_BIN: /usr/lib/postgresql/17/bin
+      - run: npm ci
+        working-directory: kenkui-server/ingress
+      - run: npm run types:check && npm run typecheck && npm test
+        working-directory: kenkui-server/ingress
