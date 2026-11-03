@@ -1,0 +1,227 @@
+# Kenkui Neon Migration Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Replace Render database/API hosting and WorkOS login with Neon Postgres, TypeScript Functions, and Managed Better Auth using Google/GitHub, preserving Kenkui customer data and reducing idle consumption.
+
+**Architecture:** A Hono API handles identity, credits, and durable job admission near Neon Postgres. Narrow authenticated Modal endpoints retain Python document processing and worker execution; R2 retains private files. Staging proves behavior and idle cost before a controlled production cutover; authentication cutover is a separately validated stage.
+
+**Tech Stack:** Node.js 24, TypeScript, Hono, node-postgres, Neon Functions/Managed Better Auth, Vitest, existing Python/pytest/Postgres 17/Modal, React/Tauri Studio, Cloudflare Worker ingress and R2, Stripe.
+
+**Spec:** [Approved design and auth amendment](../specs/2026-11-02-neon-migration-design.md). Both documents travel together. User decisions recorded November 2, 2026: Google/GitHub only, Apple deferred, one-time verified sign-in accepted, $5/month Neon alert.
+
+## Global Constraints
+
+- Keep production/staging isolated. Reuse Neon projects `mute-unit-91304892` / `divine-boat-06396016` in `aws-us-east-1` after verifying current state.
+- No customer price changes, lost balances, duplicate payment credits, overlapping fenced workers, or deletion of active-job checkpoints.
+- Preserve internal `identities.id` UUIDs and all existing ownership/payment references. New provider identity is `(issuer, subject)`, never a GitHub username.
+- No email/password, ordinary email-code login, or Apple sign-in. `team@kenkui.fm` remains the candidate sender for verification/migration/notifications.
+- API and database must idle without artificial keep-alives. Minimum database 0.25 CU; proposed initial maximum 1 CU on paid production; tune only from evidence.
+- $5/month is an organization spending-alert threshold, not a hard cap. Native notifications are at $4/$5, check every 15 minutes, require Launch/Scale, and do not suspend compute. Do not claim it is configured without read-back evidence.
+- Keep account secrets, dumps, and real user exports outside Git and tool output. Use verified TLS and parameterized SQL. Keep migrations out of request handlers.
+- Preserve Python local mode, existing worker lease/recovery semantics, and R2 keys/salts. No new background queue service unless the existing durable dispatch/recovery demonstrably cannot meet requirements.
+- Every shell command starts with `rtk`; commands below use `rtk proxy` when raw output matters.
+- Existing sibling checkouts are references, not the execution workspace. At execution, follow the worktree skill, preserve prior migration work, record exact base/core/Studio SHAs and scoped changes. Do not message another chat without the user's explicit authorization.
+
+## Review Focus
+
+1. Google/GitHub accounts with private, changed, duplicate, or unverified emails must never gain another user's credits; Task 4/5 tests pin this.
+2. A crash after reservation but before Modal acknowledgment must not strand work or cause a second charge; Task 7/8 tests pin this.
+3. Evicted Functions, expired sessions, and stale workers must not break resumable progress or lease fencing; Tasks 5/8/9 pin this.
+4. Completed/hidden browser tabs and empty recovery schedules must not keep Postgres awake; Tasks 9/10/11 pin this.
+5. Rollback after new accounts or payments must retain those writes and support Neon login; Tasks 12/14 pin this.
+
+## Execution locations and file map
+
+At execution select isolated server and Studio workspaces. Paths below are relative to the indicated repository root. The reference server checkout is `/Users/dizzler/Documents/Codex/2026-11-02/i-m-seeing-a-bill-from/kenkui-server`; Studio is its sibling `kenkui-studio`. Core remains a matching sibling dependency for Python tests. Do not assume a local path source in pyproject resolves in a new checkout; provision the pinned core checkout during setup.
+
+| Area | Files and responsibility |
+| --- | --- |
+| Contract baseline | Server `contracts/neon/baseline.json`, `contracts/neon/route-matrix.md`, `tests/test_neon_contract_export.py`; pinned synthetic HTTP/database fixtures, no real account export |
+| TS API package | Server `hosted-api/package.json`, lockfile, `tsconfig.json`, `vitest.config.ts`, `src/{index,app,config,types}.ts`; runtime/build and injected service boundaries |
+| Database | `hosted-api/src/db/{pool,identities,assets,billing,jobs,events,notifications}.ts`; SQL ports; server `migrations/postgresql/0006_external_identities.sql` only if still the next unused version at baseline freeze |
+| Auth | `hosted-api/src/auth/{neon,linking,browser,native}.ts`; verified claims, internal mapping, one-time migration and PKCE/native contract |
+| Resource routes | `hosted-api/src/routes/{catalog,assets,billing,jobs,events,notifications}.ts`; current `/v1` behavior and ownership |
+| Python bridge | Server `src/kenkui_server/compute/api_bridge.py`, `deploy/modal_app.py`, `tests/test_modal_api_bridge.py`; inspect/preflight/covers/dispatch without moving synthesis to Neon |
+| Modal client | `hosted-api/src/compute/modal.ts`; strict typed HTTP client, credentials, timeouts, trace IDs and bounded responses |
+| R2 | `hosted-api/src/storage/r2.ts`; existing private-key derivation, streaming and signed URLs where compatible |
+| Studio | `src/api/{client,events}.ts`, new `src/auth/neon.ts`, `src/host/native-auth.ts`, `src/components/native-auth-action.tsx`, `src/studio/job-view.tsx`; native Rust auth files only where required by verified flow |
+| Infrastructure | Server `neon.ts`, `ingress/{wrangler.jsonc,src/index.ts}`, `.github/workflows/neon.yml`, `deploy/neon/{README.md,acceptance.md,rollback.md}`, `scripts/neon/{inventory,restore-verify,billing-alert}.mjs` |
+
+Use dependency injection at `createApi(deps: ApiDeps): Hono`. `ApiDeps` in `src/types.ts` names database services, `AuthVerifier`, `ModalBridge`, `ObjectStore`, clock and configuration. Tests construct dependency fakes; integration tests exercise actual SQL against disposable Postgres. Production `src/index.ts` binds lazily and exports `fetch`. No route initializes provider resources or runs migrations on import.
+
+## Task 1: Freeze the working baseline and contract
+
+**Files:** Create the three contract files above and `deploy/neon/baseline.md`; reuse server OpenAPI and existing tests. No production changes.
+
+**Interfaces:** Produces a baseline manifest containing repository SHAs, deployed image digests, schema migration IDs, API route matrix and synthetic contract fixtures. All later compatibility work consumes this manifest.
+
+- [ ] Inventory current deployments, pending PDF/other feature work, linked worktrees, CI configuration and current Neon project state. Reconcile the actual WorkOS client ID with the connector before exporting users; the connected project previously reported zero production users. Record unsupported/access-blocked reads without treating an empty result as proof.
+- [ ] Write `test_contract_export_covers_auth_webhook_and_v1`: assert every observed route is represented, including browser/native auth and Stripe webhook outside the 16 OpenAPI resource paths. Use existing local-hosted fixture setup, synthetic ownership/credits and a deterministic clock; capture camelCase fields, status/errors, headers and SSE event IDs.
+- [ ] Run `rtk proxy uv run pytest tests/test_neon_contract_export.py -q`; expect missing exporter/fixture coverage failure. Implement deterministic synthetic export; rerun to pass. Freeze the immutable matching core version rather than accidentally upgrading synthesis.
+- [ ] Run server baseline suite using the existing `KENKUI_TEST_DATABASE_URL` disposable-database convention, plus Studio `rtk proxy npm ci` / `rtk proxy npm test` / `rtk proxy npm run build:web` in its isolated workspace. Record existing failures before attributing regressions to the port.
+- [ ] Commit only baseline/docs/test harness paths with `rtk git add <explicit paths>` and `rtk git commit -m 'test: freeze hosted migration contracts'`.
+
+## Task 2: Authenticated Python operations on Modal
+
+**Files:** Create `src/kenkui_server/compute/api_bridge.py`, `tests/test_modal_api_bridge.py`; modify `deploy/modal_app.py`.
+
+**Interfaces:** Internal POST operations `inspect`, `preflight`, `replace_cover`, `dispatch`. Input schemas carry explicit environment, server-owned asset/dispatch IDs and semantic options. Outputs reuse current API inspection/count/asset shapes or `{accepted: boolean}`. Credential headers are `Modal-Key`/`Modal-Secret`; endpoints set `requires_proxy_auth=True`.
+
+- [ ] Write bridge tests asserting: missing auth cannot start processing; foreign-environment/object IDs are rejected; EPUB and baseline-supported PDF fixtures match current inspection/counts; cover change returns a new immutable asset; repeated dispatch uses existing lease/concurrency rules; an ambiguous spawn does not immediately free its lease. Assert no arbitrary URL/path/function-name inputs are accepted.
+- [ ] Run `rtk proxy uv run pytest tests/test_modal_api_bridge.py -q` and confirm behavior fails before implementation.
+- [ ] Implement a narrow bridge around the existing Python pipeline and `ModalProcessRunner`, with bounded schemas and timeouts, no open DB transaction during processing/R2 transfer, and existing recovery signals. Limit document operations to request/response; synthesis stays a durable independently running job.
+- [ ] Rerun bridge, cover, pipeline reconstruction and lease tests; run `rtk proxy uv run ruff check src tests` and `rtk proxy uv run mypy` against changed Python surfaces. Validate missing proxy credentials against a staging endpoint later, not only local fakes.
+- [ ] Commit bridge files, deployment wiring and meaningful tests.
+
+## Task 3: Lazy TypeScript API, pool and static routes
+
+**Files:** Create `hosted-api` package/config and `src/{index,app,config,types}.ts`, `src/db/pool.ts`, `src/routes/catalog.ts`, `test/catalog.test.ts`, `test/pool.test.ts`. Fold package scaffolding into this functional deliverable.
+
+**Interfaces:** `createApi(deps: ApiDeps): Hono`; `getPool(): Pool`; `AuthVerifier.verify(request: Request): Promise<Principal | null>` where `Principal` contains internal UUID, issuer and subject. Config is explicit per environment. Package scripts `test` = `vitest run`, `typecheck` = `tsc --noEmit`, `build` = pinned esbuild Node24 ESM bundle.
+
+- [ ] Write `health_and_catalog_do_not_connect` with an injected connection factory that throws: `/v1/health`, static capabilities and voices still return baseline shapes. Write pool tests asserting lazy construction, `max: 3`, bounded idle timeout, verified TLS, explicit close/recovery behavior and no query on import.
+- [ ] Run `rtk proxy npm test -- test/catalog.test.ts test/pool.test.ts` in hosted-api; confirm expected missing implementation failure after dependencies are installed. Implement minimal Hono routes and attachDatabasePool integration; pin direct dependency versions and lockfile.
+- [ ] Port request ID/error/CORS behavior using contract fixtures, including 401/429 responses and unauthenticated OPTIONS. Reject bad origin credentials before body parsing/database work when ingress protection is enabled.
+- [ ] Rerun target tests, `rtk proxy npm run typecheck`, and `rtk proxy npm run build`; confirm source maps/logging do not embed configuration secrets. Commit this package and catalog deliverable.
+
+## Task 4: Provider-qualified identities without account replacement
+
+**Files:** Server additive SQL migration and its real-Postgres tests; `hosted-api/src/db/identities.ts`, `src/auth/linking.ts`, `test/identities.integration.test.ts`.
+
+**Interfaces:** `resolveIdentity(issuer: string, subject: string): Promise<string | null>` and `linkIdentity(input: {issuer: string; subject: string; internalUserId: string; proofId: string}): Promise<string>`. `proofId` references a one-use, expiring, server-verified migration proof—not a client-provided assertion of ownership. Persist issuer+subject unique mapping to `identities.id`.
+
+- [ ] Write integration tests proving existing UUID/balances/ownership unchanged after linking; repeated linking is idempotent; concurrent conflicting links cannot attach one provider identity to two users; same username/unverified email is not linkage; expired/replayed proof fails; a new user can be created without fabricating a WorkOS ID.
+- [ ] Run failing tests against disposable Postgres. Add provider mapping/proof storage and make `identities.workos_subject` nullable for Neon-only accounts while retaining the old unique constraint and all existing values. Use only additive tables/compatible alteration; do not renumber applied migrations.
+- [ ] Backfill existing WorkOS mappings from the reconciled authoritative source. Linking requires both authenticated Neon identity and old-account proof: a verified legacy session or a single-use challenge to a verified legacy address obtained server-side. Ambiguous or unmatched identities enter explicit recovery; never silently create an empty replacement for a potentially existing paid account. Migration challenges are not a new public email-code login option.
+- [ ] Rerun real-Postgres tests and Python repository/checkpoint suites against the migrated schema. Test exact BIGINT/string/UUID/JSON round trips across both languages. Commit mapping migration, services and tests.
+
+## Task 5: Neon browser/native login and provider configuration
+
+**Files:** `hosted-api/src/auth/{neon,browser,native}.ts`, `test/auth.test.ts`, `test/native-auth.test.ts`; `neon.ts`; `deploy/neon/oauth-setup.md`.
+
+**Interfaces:** `AuthVerifier` from Task 3, linked `Principal` from Task 4. Preserve public auth route shapes from the route matrix wherever meaningful; explicitly version/update native clients where token semantics change. Browser uses Managed SDK sessions/JWTs. Native uses OAuth-provider authorization code with PKCE and protected API audience.
+
+- [ ] Write tests asserting bad signature/issuer/audience/expiry cannot reach repositories; missing claims do not become anonymous account ownership; OAuth state/PKCE/redirect mismatches fail; refresh/logout work; WorkOS tokens prompt one-time re-login; Google/GitHub resolve to the same linked internal account only after verified linking.
+- [ ] Run failing tests, then implement using Neon SDK/JWKS validation. Auth configuration is per project/branch and only Google/GitHub are enabled. Read current Neon docs for native OAuth-provider requirements, login/consent pages, loopback redirect acceptance and token types; prove the actual Tauri redirect end to end before claiming native parity. Do not reinterpret WorkOS sealed tokens as Neon tokens.
+- [ ] Enable staging Auth through reviewed `neon.ts`; print only exact callback URLs and non-secret provider setup instructions. Have the owner complete Google/GitHub credential/consent setup only where account access requires them; keep credentials in protected settings. Do not enable an unused login method to bypass a migration issue.
+- [ ] Configure `team@kenkui.fm` only after authorized SMTP access and sender ownership are verified. Ask for a fresh app-specific password in provider settings only if the authorized existing one cannot be reused. No primary Apple password, unsolicited test emails, Apple OAuth, or live purchases. User-driven staging sign-in exercises email delivery if a challenge is needed.
+- [ ] Run auth/native/linking tests, then real staging Google/GitHub login and logout with owner participation. Record private-email GitHub behavior, issuer/audience and refreshed token evidence without retaining tokens. Commit auth/config/setup documentation.
+
+## Task 6: Owned assets, document operations and private transfers
+
+**Files:** `hosted-api/src/db/assets.ts`, `src/routes/assets.ts`, `src/storage/r2.ts`, `src/compute/modal.ts`; `test/assets.test.ts`, `test/modal-client.test.ts`, `test/assets.integration.test.ts`.
+
+**Interfaces:** `ModalBridge.inspect`, `.preflight`, `.replaceCover`, `.dispatch` consume Task 2 wire schemas. `ObjectStore` resolves only server-owned opaque keys. Routes preserve baseline uploads, source hash/format, inspection and cover responses.
+
+- [ ] Write failing tests for cross-user access, truncated/oversized/mislabeled/empty upload, immutable cover source, digest mismatch, private R2 access, Modal timeout and duplicate operation handling. Include all baseline-supported formats; don't regress pending PDF work accidentally.
+- [ ] Implement bounded uploads, SHA256, transactional metadata writes and exact existing key derivation. Never buffer arbitrary full audiobook downloads in Function memory. Hold no DB transaction while awaiting Modal/R2. Port baseline artifact MIME/filename/range behavior; add signed transfers only with compatible web/native tests.
+- [ ] Run `rtk proxy npm test -- test/assets.test.ts test/modal-client.test.ts test/assets.integration.test.ts`, typecheck/build, and staging upload/inspection/cover/download checks. Verify abandoned uploads do not remain billable forever; existing retention handles orphans. Commit.
+
+## Task 7: Credit accounting, Stripe and job admission transactions
+
+**Files:** `hosted-api/src/db/{billing,jobs}.ts`, `src/routes/billing.ts`; `test/billing.integration.test.ts`, `test/stripe.test.ts`; reference existing Python billing tests/SQL rather than changing their semantics.
+
+**Interfaces:** `admitJob(input: AdmissionInput): Promise<AdmissionResult>` atomically reserves credits and persists job/dispatch/idempotency. `processStripeEvent(rawBody: Uint8Array, signature: string): Promise<void>` verifies and deduplicates events using existing provider IDs; worker-side settlement remains Python.
+
+- [ ] Write real concurrent-transaction tests: two requests cannot overdraw; duplicate same admission returns existing result; changed request under same key matches baseline conflict behavior; expired lots allocate correctly; simultaneous Stripe redelivery grants once; invalid raw-body signature grants nothing; Python worker settlement releases/finalizes once after TS admission.
+- [ ] Run failing integration tests. Port current SQL/locking/integer rounding/lot order and exact pricing; use BigInt or decimal-safe conversions, not JS floating-point credit arithmetic. Stripe customer/payment references remain associated with internal account IDs.
+- [ ] Verify database+recovery-signal ordering with injected crashes before commit, after commit and before/after HTTP dispatch. A stale external intent is acceptable; a committed reservation without recoverable dispatch is not. Never acknowledge a webhook before its durable payment transaction succeeds.
+- [ ] Run billing integration/Stripe fixtures and existing Python ledger/lifecycle/pack-usage tests against the same migrated schema; compare full synthetic ledger rows rather than just available balance. Commit.
+
+## Task 8: Job lifecycle API, dispatch and notifications
+
+**Files:** `hosted-api/src/routes/{jobs,notifications}.ts`, `src/db/notifications.ts`; `test/jobs.integration.test.ts`, `test/notifications.test.ts`.
+
+**Interfaces:** Task 7 admission output includes job/dispatch IDs, authorization and idempotency result. Task 6 Modal client submits committed dispatch IDs; Python owns execution claims and eventual settlement. Preserve `/preflight`, create/list/get/cancel and notification-preference response shapes.
+
+- [ ] Write failures for cross-user job access, stale inspection, invalid voice/chapter options, speech-size limits, duplicate dispatch, cancelled-before-spawn, and cancellation versus completion race. Assert no retries replay partially completed payment or admission transactions.
+- [ ] Implement ownership checks and metadata validation. Server-authoritative preflight counts come from the Python bridge using exact execution options. Trigger dispatch after commit without depending on waitUntil for delivery; existing durable recovery covers crashes. Preserve max concurrent jobs and fenced leases.
+- [ ] Run jobs/billing/bridge integration and existing Python durability tests with TS admission -> Python worker completion. Check notification preferences and completion email claims stay intact. Commit.
+
+## Task 9: Resumable progress with bounded database work
+
+**Files:** `hosted-api/src/db/events.ts`, `src/routes/events.ts`, `test/events.test.ts`, `test/events.integration.test.ts`.
+
+**Interfaces:** `readEvents(jobId: string, afterSequence: number, limit: number): Promise<JobEvent[]>` uses indexed keyset lookup; route consumes Last-Event-ID and preserves ordered SSE IDs, baseline event shapes and terminal snapshot behavior.
+
+- [ ] Write fake-clock tests asserting an active viewer starts at 1-second polling, backs off to at most 5 seconds without new events, reads only events after cursor, disconnects release resources, and terminal state closes the stream. Reconnect must neither omit nor reorder durable events. Unauthorized callers cannot open a DB polling loop.
+- [ ] Run failing tests. Implement bounded batch size 100, per-viewer cursor, abort-aware timers, terminal checks and safe keepalive bytes only during actual open streams. No permanent LISTEN connection or 50 ms loop. No open DB connection/transaction during timer waits.
+- [ ] Add a Postgres query-plan/integration check that event retrieval uses `(job_id, sequence)` and does not read full history per poll. Test Function eviction and client resume on staging; record viewer/query counts. Commit.
+
+## Task 10: Studio web/native auth and terminal polling
+
+**Files:** Studio `src/auth/neon.ts`, relevant existing login UI discovered in Task 1, `src/api/client.ts`, `src/host/native-auth.ts`, `src/components/native-auth-action.tsx`, `src/studio/job-view.tsx`, `src/api/events.ts`; tests `neon-auth.test.tsx`, `native-auth.test.tsx`, `job-idle.test.tsx`, existing native Rust tests as needed.
+
+**Interfaces:** Task 5 browser/native contract, Task 9 SSE replay; preserve local sidecar mode without Neon credentials. Hosted clients show Google/GitHub and a clear one-time re-login message, not Apple/password/email-code buttons.
+
+- [ ] Write component/fake-clock tests asserting completed/failed/cancelled views stop fallback polling, hidden tabs pause requests, visibility restore refreshes once, auth expiry prompts login, and account linking returns existing book/credit data. Keep bounded payment confirmation behavior.
+- [ ] Run `rtk proxy npm test -- tests/neon-auth.test.tsx tests/native-auth.test.tsx tests/job-idle.test.tsx`; confirm failures before changing UI/client state handling.
+- [ ] Implement using the Managed Auth wrapper; native credentials stay in the existing approved secure/in-memory handling. Preserve cancellation, reconnect, file saves and local-only mode. Update Tauri loopback validation only if Task 5 proof requires it; never broaden to arbitrary redirect URLs.
+- [ ] Run Studio targeted/full tests, `rtk proxy npm run check:api`, `rtk proxy npm run build:web`, `rtk proxy npm run build:native`, `rtk proxy npm run test:native`. Test both providers in real browser/native builds. Commit scoped Studio changes.
+
+## Task 11: Sleeping workers and daily maintenance on Neon
+
+**Files:** Existing server `hosted.py`, `maintenance.py`, `storage/postgres_database.py`, `deploy/modal_app.py`, `tests/test_idle_maintenance.py`, `tests/test_idle_schedules.py`, `tests/storage/test_postgres_idle.py`; change only if new API integration exposes a demonstrated gap.
+
+**Interfaces:** Existing `KENKUI_DATABASE_IDLE=1`, per-job recovery intents, database-overlay secret, minute signal check and daily maintenance. TS admission signals conform to Python wire format; retain reviewed backup/recovery semantics.
+
+- [ ] Add cross-language/crash fixtures proving empty signals cause zero DB connects, a committed TS admission remains discoverable after HTTP failure, stale signals reconcile safely, active leases renew and finished jobs clear intents. Test idle pool reconnect against real Neon suspension.
+- [ ] Run these tests and observe failing integration cases before changing existing reviewed Python behavior. Reuse code already present; do not rewrite tests that merely mirror unchanged implementation.
+- [ ] Deploy staging worker overlay without overwriting write-only existing secrets; run interrupted multi-chapter canary and confirm checkpoint reuse, one settlement, active retention safety and daily independently restorable backup.
+- [ ] Record exact deployment/core revisions and test results; commit only required compatibility changes and runbook updates.
+
+## Task 12: Public ingress, releases and an auth-compatible rollback artifact
+
+**Files:** `ingress/{wrangler.jsonc,src/index.ts}`, its tests, `.github/workflows/neon.yml`, `neon.ts`, `deploy/neon/rollback.md`, `hosted-api/src/standalone.ts`, `deploy/neon/Dockerfile`.
+
+**Interfaces:** Cloudflare owns the API hostname and forwards raw requests to native Function URL with a server-only origin secret. Same TypeScript API can run as a Node24 standalone fallback using a Hono Node adapter; it must validate Neon identities and use the current Neon DB. No permanent Render dependency after retirement.
+
+- [ ] Write ingress tests for server-side secret replacement, no credential forwarding on external redirect, preserved raw Stripe bytes, CORS/errors, cookies, SSE and streaming downloads. Add smoke tests running the same synthetic contracts against standalone and Function entry points with identical auth/DB dependencies.
+- [ ] Implement the minimal ingress and Node fallback adapter. Use scoped edge limits for login/public endpoints and authenticated expensive actions; no in-memory global budget guarantees. Pin builds to the baseline/approved changes and use CI protected environment secrets.
+- [ ] Validate provider deploy config before applying it. Deploy staging at a temporary hostname first; test missing/wrong origin secret on native Function, auth refresh, upload limits and SSE reconnection through the edge. Never proxy a Neon-registered CNAME; Worker owns its hostname.
+- [ ] Build and rehearse the same-auth fallback artifact on a disposable/local target. Record how to deploy it to an existing retained Render instance in an emergency, with current Neon DB and identical provider mapping. Do not provision extra paid services merely to hold it warm. WorkOS-only legacy images are not an acceptable rollback after Neon-only users exist.
+- [ ] Commit ingress, CI, fallback and rollback instructions. Verify no automatic production deploy occurs just from merging documentation or a feature branch.
+
+## Task 13: Data rehearsal, budget setup and staging acceptance
+
+**Files:** `scripts/neon/{inventory,restore-verify,billing-alert}.mjs`, tests for calculation/verification logic, `deploy/neon/{README.md,acceptance.md}`, `deploy/neon/evidence/README.md` explaining private evidence storage.
+
+**Interfaces:** Private restore manifest includes migration IDs/table counts/digests/credit invariants/R2 references; user exports include only verified authoritative mapping evidence. Billing helper `setSpendingAlert(orgId: string, cents: number): Promise<number>` uses documented organization API and read-back; selected `cents = 500`.
+
+- [ ] Write restore-verifier tests that fail on a missing row, altered credit entry, duplicate payment event, orphan owner/R2 reference or wrong environment; verify it never drops an occupied target or prints secrets. Run failing tests; implement inventory/restore comparison against disposable fixtures.
+- [ ] Rehearse a fresh staging export/restore into an empty approved target. Check all tables and independent backup restore, then synthetic account/credit/payment invariants. Back up `neon_auth` and provider mapping deliberately; rehearse branch auth configuration and data restoration rather than assuming pg_dump alone recreates service config.
+- [ ] Create a reviewable billing change showing current Free state, proposed Launch usage rates, min/max CU and $5 notification. Only enable paid billing through the reviewed provider step; do not imply Free limits carry into paid usage. Confirm organization contents. At Launch, set `spending_limit_cents: 500` with the allowed org-admin API/Console and read it back. Document admin recipients, $4/$5 alerts, 15-minute checks and organization-wide scope; no automatic shutdown. If access is unavailable, leave an exact owner action rather than claiming configuration.
+- [ ] Run staging acceptance: both auth providers + one-time link to existing data; browser/native session refresh/logout; upload/inspect/cover/preflight; book success/cancel; duplicate webhook; interrupted recovery; artifact download; notification settings; cold API/DB wake; native Function and bridge rejection. Owner checks their visible books and credits without a live purchase.
+- [ ] Observe at least one real suspend/wake and an overnight idle window. Use control-plane state/usage; do not send probes that keep services awake. Show daily maintenance as the only intended empty-system DB activity. Record database/function/ingress/Modal/R2 costs separately and explain if spending is projected to exceed $5; don't silently enlarge budgets or reduce reliability.
+- [ ] Commit runbooks/helpers/synthetic tests; keep evidence dumps/exports private. Produce a staging acceptance report including unresolved findings and exact production changes. No production switch with failed correctness/native/auth acceptance.
+
+## Task 14: Controlled production cutover and retirement
+
+**Files:** Update `deploy/neon/{acceptance.md,rollback.md}` and private deployment evidence. Operational steps; do not invent implementation unit tests for DNS or account-console changes.
+
+**Interfaces:** Signed-off staging report, immutable API/core/Studio/bridge/fallback builds, verified independent backup, owner account access, valid scoped DNS permissions, maintenance window, and current job inventory. User has accepted one-time sign-in, not lost data or arbitrary downtime.
+
+- [ ] Prepare exact named-resource changes and rollback commands. Resolve the previously invalid DNS credential only through the authorized current source or owner-entered scoped credential; do not search unrelated secret backups. Confirm no other chat/operator is switching the same resources.
+- [ ] Agree the short maintenance window when actual staging results are ready. Stop new writes/admission and relevant recovery schedules; allow active work to finish. Preserve Stripe retries/idempotency during pause. Take a final consistent export and restore/verify production Neon before connecting consumers.
+- [ ] Cut database consumers and API first with a compatibility path as rehearsed; activate Neon Auth only after existing-account link records and both client builds are ready. Never point API and workers at different authoritative writable databases. Validate internal UUID/balances/job states and signed Stripe replay before reopening admission.
+- [ ] Route existing hostnames to validated ingress and finish provider callback configuration. Verify owner Google/GitHub login, existing credits/books, native refresh, signed download and one small authorized canary. Resume schedules/admission; record latency and usage. Apply no unrelated customer pricing changes.
+- [ ] If rollback is necessary before new writes, restore prior coordinated consumers. After new writes/auth adoption, deploy the rehearsed same-auth API fallback against the current Neon database or reconcile all writes before changing databases. Never revert ledger/auth state to an old export. Keep all Neon-only identities usable; do not point users at a WorkOS-only build.
+- [ ] Suspend old paid API services after acceptance; verify residual database/storage billing separately. Present exact old database names/IDs and independent restore evidence for final deletion approval. Do not delete on the strength of this implementation plan alone.
+- [ ] Complete final operating report: live providers/plans, $5 alert read-back or precise remaining owner action, cold-start/idle evidence, auth/data/payment/job acceptance, costs still accruing, known limits and rollback instructions. Remove temporary access/secrets only after rollback-retention decision.
+
+## Owner participation (only when the relevant step is ready)
+
+1. Provider account sign-in/2FA when existing tools lack access; reconcile WorkOS project if the deployed client differs from the connector.
+2. Google/GitHub OAuth app creation/owner consent if not already available; exact callbacks and field values come from Task 5. Apple Developer enrollment is unnecessary.
+3. Existing iCloud app-specific SMTP credential or a new owner-created credential, entered directly in protected settings if needed.
+4. Paid-plan billing/organization-admin access for the reviewed Launch/$5 alert step. This plan does not promise a hard $5 ceiling.
+5. Real Google/GitHub browser/native acceptance and existing account checks; short maintenance-window choice; named old database deletion approval after verification.
+
+## Self-review and execution gate
+
+Spec coverage: Tasks 1/3/6/7/8 cover route parity; 4/5/10 cover auth and stable ownership; 2/8/11 cover Python/Modal durability; 9/10/11 cover idle cost; 12 covers ingress/fallback; 13/14 cover data, billing and cutover. User decisions have exact values and appear in both design/plan. All cross-task interfaces have an owning task. No execution has happened merely because a step is listed here.
+
+Choose execution method after plan review: **subagent-driven** provides per-task implementation/review and is recommended because cross-language credit/auth/dispatch defects can affect customer balances; **native** keeps implementation in this chat with final independent whole-branch review. Separate chats are not created by either approach. Do not begin implementation before the required plan review.
+
+Verified notification reference: https://neon.com/docs/introduction/spending-notifications . Other provider references travel with the design; recheck runtime/auth/provider SDK details during implementation.
