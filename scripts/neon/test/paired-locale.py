@@ -497,6 +497,8 @@ def exercise(url: str, side: str) -> dict:
 
 
 def main() -> None:
+    if not __debug__:
+        raise SystemExit("This rehearsal requires Python assertions")
     os.chdir(ROOT)
     names = ["kenkui-neon-locale-source-20261103", "kenkui-neon-locale-target-20261103"]
     created = []
