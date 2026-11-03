@@ -119,10 +119,31 @@ def capture(d):
         require(
             c.execute("SELECT 1 FROM pg_catalog.pg_largeobject_metadata LIMIT 1").fetchone() is None
         )
-        # Fail closed for user-created catalog classes the inventory does not project.
-        # FirstNormalObjectId (16384) separates initdb objects from independently created ones.
+        # Inspect the PG17 definition catalogs themselves: dependencies on pinned built-ins
+        # (including the bootstrap owner) need no pg_depend or pg_shdepend row.
+        # FirstNormalObjectId (16384) separates initdb definitions from user-created ones.
         unsupported = c.execute("""
             SELECT 1 FROM (
+                SELECT oid FROM pg_catalog.pg_cast
+                UNION ALL SELECT oid FROM pg_catalog.pg_transform
+                UNION ALL SELECT oid FROM pg_catalog.pg_am
+                UNION ALL SELECT oid FROM pg_catalog.pg_default_acl
+                UNION ALL SELECT oid FROM pg_catalog.pg_language
+                UNION ALL SELECT oid FROM pg_catalog.pg_event_trigger
+                UNION ALL SELECT oid FROM pg_catalog.pg_collation
+                UNION ALL SELECT oid FROM pg_catalog.pg_conversion
+                UNION ALL SELECT oid FROM pg_catalog.pg_operator
+                UNION ALL SELECT oid FROM pg_catalog.pg_opclass
+                UNION ALL SELECT oid FROM pg_catalog.pg_opfamily
+                UNION ALL SELECT oid FROM pg_catalog.pg_amop
+                UNION ALL SELECT oid FROM pg_catalog.pg_amproc
+                UNION ALL SELECT oid FROM pg_catalog.pg_ts_parser
+                UNION ALL SELECT oid FROM pg_catalog.pg_ts_template
+                UNION ALL SELECT oid FROM pg_catalog.pg_ts_dict
+                UNION ALL SELECT oid FROM pg_catalog.pg_ts_config
+                UNION ALL SELECT oid FROM pg_catalog.pg_statistic_ext
+            ) definitions WHERE oid >= 16384
+            UNION ALL SELECT 1 FROM (
                 SELECT objid,classid FROM pg_catalog.pg_depend
                 UNION ALL SELECT objid,classid FROM pg_catalog.pg_shdepend
                     WHERE dbid=(SELECT oid FROM pg_catalog.pg_database

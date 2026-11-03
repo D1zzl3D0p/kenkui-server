@@ -49,6 +49,39 @@ test('enum-only destination is occupied and enum-label drift changes exact-copy 
     await assert.rejects(()=>captureInventory(config(dbs[1],'restored-copy')),/schema/);
   } finally {for(const n of dbs)sql(base,'DROP DATABASE IF EXISTS '+n+' WITH (FORCE)');}
 });
+test('dependency-free dumpable objects block both empty and full certificates', {skip:process.env.KENKUI_TEST_DATABASE_URL!==base},async t=>{
+  const [empty,full]=names(),dbs=[empty,full],pg=process.env.KENKUI_PG_BIN;
+  assert(pg?.startsWith('/'),'Set KENKUI_PG_BIN to the vetted PostgreSQL 17+ clients');
+  const cases=[
+    ['pg_cast','CREATE CAST (integer AS date) WITHOUT FUNCTION','DROP CAST (integer AS date)',/CREATE CAST \(integer AS date\) WITHOUT FUNCTION/i],
+    ['pg_am','CREATE ACCESS METHOD synthetic_heap TYPE TABLE HANDLER heap_tableam_handler','DROP ACCESS METHOD synthetic_heap',/CREATE ACCESS METHOD synthetic_heap/i],
+    ['pg_transform','CREATE TRANSFORM FOR integer LANGUAGE sql (TO SQL WITH FUNCTION int4recv(internal))','DROP TRANSFORM FOR integer LANGUAGE sql',/CREATE TRANSFORM FOR integer LANGUAGE sql/i],
+    ['pg_default_acl','ALTER DEFAULT PRIVILEGES GRANT SELECT ON TABLES TO PUBLIC','ALTER DEFAULT PRIVILEGES REVOKE SELECT ON TABLES FROM PUBLIC',/ALTER DEFAULT PRIVILEGES .*GRANT SELECT ON TABLES\s+TO PUBLIC/i],
+  ];
+  const created=[];
+  try {
+    for(const name of dbs){sql(base,'CREATE DATABASE '+name);created.push(name);}
+    migrate(url(full));
+    await assertEmptyTarget(config(empty,'restored-copy'));
+    const baseline=await captureInventory(config(full,'restored-copy'));
+    for(const [catalog,create,drop,dumped] of cases)await t.test(catalog,async t=>{
+      for(const name of dbs)sql(url(name),create);
+      try {
+        const counts=sql(url(empty),`SELECT
+          (SELECT count(*) FROM pg_depend WHERE classid='${catalog}'::regclass AND objid=obj.oid)::int,
+          (SELECT count(*) FROM pg_shdepend WHERE classid='${catalog}'::regclass AND objid=obj.oid)::int
+          FROM pg_catalog.${catalog} obj WHERE obj.oid>=16384`);
+        assert.deepEqual(counts,[[0,0]]);
+        const dump=execFileSync(resolve(pg,'pg_dump'),['--schema-only',url(empty)],{encoding:'utf8'});
+        assert.match(dump,dumped);
+        await t.test('empty target',()=>assert.rejects(()=>assertEmptyTarget(config(empty,'restored-copy')),/occupied|unreadable/));
+        await t.test('full inventory',()=>assert.rejects(()=>captureInventory(config(full,'restored-copy')),/schema/));
+      } finally {for(const name of dbs)sql(url(name),drop);}
+    });
+    await assertEmptyTarget(config(empty,'restored-copy'));
+    assert.equal((await captureInventory(config(full,'restored-copy'))).fullDigest,baseline.fullDigest);
+  } finally {for(const name of created)sql(base,'DROP DATABASE '+name+' WITH (FORCE)');}
+});
 test('large objects, standalone collations and schemas cannot be certified empty or omitted from a full capture',{skip:process.env.KENKUI_TEST_DATABASE_URL!==base},async()=>{
   const [name]=names(),address=url(name),options=config(name,'restored-copy');
   sql(base,'CREATE DATABASE '+name);
