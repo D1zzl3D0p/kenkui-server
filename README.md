@@ -44,3 +44,18 @@ uv run kenkui-server
 ## License
 
 Kenkui Server is licensed under [AGPL-3.0-only](LICENSE).
+
+## Workspace verification
+
+From a compatible sibling checkout, run `python scripts/verify-workspace.py --tier fast`
+for deterministic Python/API/Studio checks without a database URL. `--component`
+selects `server`, `hosted-api`, or `studio`; `--list` prints commands without running them.
+Install frozen dependencies in each selected component first.
+
+The default `integration` tier also runs PostgreSQL and browser journeys. It requires
+the synthetic loopback fixture `postgresql://postgres@127.0.0.1:55438/postgres` in
+`KENKUI_TEST_DATABASE_URL`; it rejects other targets before running a command.
+The `release` tier adds the existing built-artifact smoke. These tiers complement
+the dedicated Neon workflow's archive, ingress, TLS and release-provenance checks;
+they do not replace real staging acceptance. Integration skips remain visible in
+test output and are not evidence of live provider acceptance.
