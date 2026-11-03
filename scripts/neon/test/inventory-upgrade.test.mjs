@@ -9,7 +9,7 @@ import { verifyRestore } from '../restore-verify.mjs';
 const base='postgresql://postgres@127.0.0.1:55438/postgres',python=resolve('.venv/bin/python'),pg='/opt/homebrew/opt/libpq/bin/';
 function py(code,data={}) {return JSON.parse(execFileSync(python,['-c',code],{input:JSON.stringify(data),encoding:'utf8',stdio:['pipe','pipe','pipe']}));}
 function sql(url,query) {return py("import sys,json,psycopg\nd=json.load(sys.stdin)\nwith psycopg.connect(d['url'],autocommit=True) as c:c.execute(d['query'])\nprint('null')",{url,query});}
-function review(source,target,extra={}) {return {format:'restore-review-v1',purpose:'restored-copy',environment:'staging',source:{target:source.target,captureDigest:source.captureDigest},destination:{target:target.target,captureDigest:target.captureDigest},approvalRef:'synthetic-independent-review',attestedBy:'synthetic-operator',attestedAt:new Date().toISOString(),migrationIds:[],newSequences:{},...extra,attestedAt:new Date().toISOString()};}
+function review(source,target,extra={}) {return {format:'restore-review-v1',purpose:'restored-copy',environment:'staging',source:{target:source.target,captureDigest:source.captureDigest,databaseIdentity:{projectId:source.target.projectId,branchId:source.target.branchId,database:source.target.database}},destination:{target:target.target,captureDigest:target.captureDigest,databaseIdentity:{projectId:target.target.projectId,branchId:target.target.branchId,database:target.target.database}},approvalRef:'synthetic-independent-review',attestedBy:'synthetic-operator',attestedAt:new Date().toISOString(),migrationIds:[],newSequences:{},...extra,attestedAt:new Date().toISOString()};}
 test('actual pre0004 settlement ->0004 ->pre0008 source copy ->all pending migrations preserves history', {skip:process.env.KENKUI_TEST_DATABASE_URL!==base},async()=>{
   const root=mkdtempSync(join(tmpdir(),'kenkui-actual-upgrade-'));
   const names=py(`import json,uuid,tempfile,shutil,psycopg
@@ -58,7 +58,7 @@ db.close();print(json.dumps(names))`);
       ["UPDATE credit_authorizations SET finalized_at=NULL","UPDATE credit_authorizations SET finalized_at='2020-01-02Z'"],
       ["UPDATE credit_authorizations SET finalized_at=clock_timestamp()","UPDATE credit_authorizations SET finalized_at='2020-01-02Z'"],
       ["INSERT INTO credit_allocations VALUES ('00000000-0000-0000-0000-000000000003','legacy:00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000002',1)","DELETE FROM credit_allocations"],
-    ]) {sql(urls[1],change);try {const bad=await captureInventory(migratedOptions);assert.throws(()=>verifyRestore(source,bad,review(source,bad,{...approved,destination:{target:bad.target,captureDigest:bad.captureDigest},reviewedTargetDigest:bad.fullDigest})));}finally{sql(urls[1],undo);}}
+    ]) {sql(urls[1],change);try {const bad=await captureInventory(migratedOptions);assert.throws(()=>verifyRestore(source,bad,review(source,bad,{...approved,destination:{target:bad.target,captureDigest:bad.captureDigest,databaseIdentity:{projectId:bad.target.projectId,branchId:bad.target.branchId,database:bad.target.database}},reviewedTargetDigest:bad.fullDigest})));}finally{sql(urls[1],undo);}}
     for(const finalized of ['NULL','clock_timestamp()']) {
       sql(urls[0],'UPDATE credit_authorizations SET finalized_at='+finalized);
       try {
@@ -70,6 +70,6 @@ db.close();print(json.dumps(names))`);
     sql(urls[1],"INSERT INTO jobs(id,spec_json,status,version,progress_json,owner_id) VALUES ('new-job','{}','succeeded',0,'{}','00000000-0000-0000-0000-000000000001'); INSERT INTO credit_authorizations(id,job_id,account_id,credits,status,created_at,finalized_at) VALUES (gen_random_uuid(),'new-job','00000000-0000-0000-0000-000000000002',1,'settled',clock_timestamp(),clock_timestamp())");
     const bad=await captureInventory(migratedOptions);
     const fabricated={...historicalSettlements,records:bad.creditInvariants.historicalSettlementCandidates};
-    assert.throws(()=>verifyRestore(source,bad,review(source,bad,{...approved,destination:{target:bad.target,captureDigest:bad.captureDigest},reviewedTargetDigest:bad.fullDigest,historicalSettlements:fabricated})),/historical|allocation/i);
+    assert.throws(()=>verifyRestore(source,bad,review(source,bad,{...approved,destination:{target:bad.target,captureDigest:bad.captureDigest,databaseIdentity:{projectId:bad.target.projectId,branchId:bad.target.branchId,database:bad.target.database}},reviewedTargetDigest:bad.fullDigest,historicalSettlements:fabricated})),/historical|allocation/i);
   } finally {for(const n of names)sql(base,'DROP DATABASE '+n+' WITH (FORCE)');rmSync(root,{recursive:true,force:true});}
 });

@@ -5,7 +5,7 @@ import { dirname,basename,resolve,join } from 'node:path';
 import { fileURLToPath,pathToFileURL } from 'node:url';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
-const bodyKeys=['databaseCollation','tables','schemaObjects','sequences','migrationIds','creditInvariants','r2','sourceProjection','restoredSnapshotDigest'];
+const bodyKeys=['types','databaseCollation','tables','schemaObjects','sequences','migrationIds','creditInvariants','r2','sourceProjection','restoredSnapshotDigest'];
 const provenanceKeys=['format','environment','target','mode','capturedAt','managedAuth','sourceProjectionCaptureDigest','fullDigest'];
 function canonical(value) {
   if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';
@@ -40,7 +40,12 @@ export async function writePrivateManifest(path,manifest) {
   const failure=()=>Error('Private evidence placement must be positively verified outside Git');
   const parent=await realpath(dirname(resolve(path))),info=await lstat(parent);
   if(!info.isDirectory()||info.uid!==process.getuid()||(info.mode&0o077)!==0)throw failure();
-  for(let dir=parent;;dir=dirname(dir)) {if(basename(dir)==='.git')throw failure();if(dirname(dir)===dir)break;}
+  for(let dir=parent;;dir=dirname(dir)) {
+    if(basename(dir)==='.git')throw failure();
+    try {await lstat(join(dir,'.git'));throw failure();}
+    catch(error) {if(error.code!=='ENOENT')throw failure();}
+    if(dirname(dir)===dir)break;
+  }
   const git=spawnSync('git',['-C',parent,'rev-parse','--is-inside-work-tree','--is-inside-git-dir'],{encoding:'utf8',env:{PATH:process.env.PATH,LANG:'C',LC_ALL:'C',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'},stdio:['ignore','pipe','pipe']});
   const outside=git.status===128&&!git.error&&git.stderr.trim()==='fatal: not a git repository (or any of the parent directories): .git';
   if(!outside)throw failure();

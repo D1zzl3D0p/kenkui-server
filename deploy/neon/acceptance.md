@@ -1,15 +1,17 @@
 # Staging acceptance record — operational gates pending
 
+Task13 covers staging only. Its staging database-writer freeze and expiring provisional directory do not freeze the shared WorkOS source: production uses that same client/environment and its auth/signup must remain untouched during staging. Task14 separately owns the authorized final shared-source admission freeze, final watermark/capture and final directory activation.
+
 Code and disposable synthetic rehearsal do not establish live acceptance. The controller owns every operation below. No production switch is authorized by this document. Add a dated private evidence reference, exact environment/resource/revision pins, actual readback and unresolved findings for each item before changing its status. Do not paste profiles, SQL rows, exports, dumps, addresses, object keys, sessions or secrets here.
 
 ## Restore and ownership
 
 - [ ] Confirm existing staging website/API/Modal targets, exact server/core/Studio/Modal revisions, Neon project/branch/database/host and existing-copy provenance. Current Neon staging is occupied; preserve it. Select an independently approved empty restore destination or a reviewed reconciliation path. No destructive cleanup.
-- [ ] Bounded provisional source write pause: complete consistent source dump; source-before/source-after comparison; empty-target restore and exact source-copy verification **before additive DDL**; independent backup restoration. Keep managed-auth scope explicit. A prior local encrypted backup/decrypt rehearsal is preparation, not final source equality or a Neon restore.
+- [ ] Bounded staging database-writer pause (without changing shared WorkOS or production admission): complete consistent source dump; source-before/source-after comparison; empty-target restore and exact source-copy verification **before additive DDL**; independent backup restoration. Keep managed-auth scope explicit. A prior local encrypted backup/decrypt rehearsal is preparation, not final source equality or a Neon restore.
 - [ ] Apply exact pending migrations only through Python authority; capture original-column projection and full post-DDL target; independently attest complete target digest and migration delta. Preserve every original financial row, identity UUID, book/job owner and payment reference.
 - [ ] Complete authenticated WorkOS pagination/authority/invitation policy; root-owned reviewed per-target financial inventory; exact approved fixture classifications/fingerprints; explicit reviewed v2 only where needed. Dry-run importer first. Prove exhaustive disjoint matched/quarantined coverage and every source-only record. Unlisted/ambiguous/real/purchase-evidenced/changed owners block release. No fabricated provenance or runtime eligibility for quarantines.
 - [ ] Rehearse branch managed-auth **data and configuration** restoration deliberately; capture all private tables plus provider/native/redirect/issuer/JWKS/client/login-method/email settings. Prove actual ordinary email-code/password methods cannot authenticate; Console toggles alone are insufficient. Google/GitHub ownership is established, ordinary OTP enforcement remains unproven.
-- [ ] Final freeze recapture: old admission and relevant writers really frozen, jobs drained, both primary Render staging API and free `kenkui-staging-api-idle` preview API (`srv-dbkgesou01pc73afapc0`, sharing the source database) plus Modal consumers/schedules/webhooks paused; fresh source/export/invitation/target captures and final watermark/digest; approval continuity and unchanged fixture fingerprints reviewed; atomic final directory activation. Provisional evidence never substitutes for this final review.
+- [ ] Staging writer freeze/transfer and provisional directory: drain and pause both primary Render staging API and free `kenkui-staging-api-idle` preview API (`srv-dbkgesou01pc73afapc0`, sharing the staging source database), plus staging Modal consumers/schedules/webhooks. Verify staging-only DB captures and fresh complete shared-source/invitation evidence; review exact fixture continuity; atomically activate **provisional** staging evidence expiring within24hours. Refresh/review that evidence before expiry as needed for staging acceptance. Do not claim shared-source admission was frozen, publish a final run, or change production auth/signup.
 
 ## Roles, backup and coordinated transfer
 
@@ -28,6 +30,10 @@ Code and disposable synthetic rehearsal do not establish live acceptance. The co
 - [ ] Interrupt a multi-chapter canary after a checkpoint, prove checkpoint reuse, fencing, ongoing lease renewal/retention and exactly one credit settlement. Daily bounded cleanup/pruning preserves active work and all release/quarantine evidence; empty minute markers cause no DB wake. Never introduce unreviewed canary owners during final capture.
 - [ ] Actual Neon suspend/idle-pool reconnect, Function cold wake and same-auth standalone fallback targeting the current Neon DB pass with real browser/native auth/upload/SSE/downloads. Keep every post-transfer identity/payment/write. Never revert to a stale snapshot or WorkOS-only legacy image after writes reopen.
 - [ ] Observe at least one genuine suspension/wake and an overnight idle interval via control-plane state/usage, without DB/HTTP keep-alives. Daily maintenance is the only intended empty-system DB activity; record any deviations and cold latency.
+
+## Separate Task14 final shared-source gate
+
+- [ ] After staging acceptance and separate Task14 authorization, coordinate the actual shared WorkOS source-admission freeze and every relevant environment's writer pause. Independently prove the effective shared admission freeze, fresh final export/invitation/target captures, final watermark/digest and exact approved fixture continuity before atomic **final** directory activation. A staging-only pause or provisional run never establishes this gate. Production auth/signup stays unchanged until that separately authorized Task14 action.
 
 ## Budget and release decision
 

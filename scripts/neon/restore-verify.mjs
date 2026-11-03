@@ -28,7 +28,8 @@ function healthy(m,approved) {
   requireCheck(m.r2?.missingObjects===0&&m.r2?.orphanReferences===0,'R2 reference invariant failed');
   requireCheck(m.managedAuth!=='required'||Object.keys(m.tables).some(k=>k.startsWith('"neon_auth".')),'Managed auth inventory missing');
 }
-function physical(pin) {return [pin.host,pin.port,pin.database];}
+function databaseIdentity(pin) {return {projectId:pin.projectId,branchId:pin.branchId,database:pin.database};}
+function physical(pin) {return [pin.host.toLowerCase().replace(/\.$/,''),pin.port,pin.database];}
 /** Mandatory operator attestation is an existing trust boundary, not cryptographic proof of authorship. */
 export function verifyRestore(source,target,review) {
   requireCheck(review?.format==='restore-review-v1'&&['source-stability','restored-copy','migrated-target'].includes(review.purpose),'Independent restore review required');
@@ -36,17 +37,17 @@ export function verifyRestore(source,target,review) {
   intact(source);intact(target);
   const reviewedAt=Date.parse(review.attestedAt);
   requireCheck(typeof review.approvalRef==='string'&&!!review.approvalRef.trim()&&typeof review.attestedBy==='string'&&!!review.attestedBy.trim()&&Number.isFinite(reviewedAt)&&reviewedAt>=Math.max(Date.parse(source.capturedAt),Date.parse(target.capturedAt))&&reviewedAt<=Date.now(),'Independent review provenance/time required');
-  requireCheck(same(review.source,{target:source.target,captureDigest:source.captureDigest})&&same(review.destination,{target:target.target,captureDigest:target.captureDigest}),'Reviewed source/destination pin or capture mismatch');
+  requireCheck(same(review.source,{target:source.target,captureDigest:source.captureDigest,databaseIdentity:databaseIdentity(source.target)})&&same(review.destination,{target:target.target,captureDigest:target.captureDigest,databaseIdentity:databaseIdentity(target.target)}),'Reviewed source/destination pin or capture mismatch');
   requireCheck(source.mode==='source','Original source capture required');
   if(review.purpose==='source-stability') {
     requireCheck(target.mode==='source'&&same(source.target,target.target)&&source.captureDigest!==target.captureDigest&&Date.parse(source.capturedAt)<Date.parse(target.capturedAt),'Distinct before/after captures of the same source required');
   } else {
-    requireCheck(!same(physical(source.target),physical(target.target))&&target.mode===review.purpose,'Independent restored destination required');
+    requireCheck(!same(databaseIdentity(source.target),databaseIdentity(target.target))&&!same(physical(source.target),physical(target.target))&&target.mode===review.purpose,'Independent restored destination required');
   }
   const approved=historical(source,review);healthy(source,approved);healthy(target,approved);
   requireCheck(source.managedAuth===target.managedAuth||(review.purpose==='migrated-target'&&review.managedAuthAdded===true&&source.managedAuth==='absent-reviewed-source'&&target.managedAuth==='required'),'Managed auth scope mismatch');
   if(review.purpose!=='migrated-target') {
-    for(const key of ['databaseCollation','migrationIds','tables','schemaObjects','sequences','creditInvariants','r2','fullDigest'])requireCheck(same(source[key],target[key]),'Source-copy migration/table/schema/digest mismatch');
+    for(const key of ['types','databaseCollation','migrationIds','tables','schemaObjects','sequences','creditInvariants','r2','fullDigest'])requireCheck(same(source[key],target[key]),'Source-copy migration/table/schema/digest mismatch');
     return {status:review.purpose==='source-stability'?'verified-source-stability':'verified-copy',tables:Object.keys(target.tables).length,fullDigest:target.fullDigest,captureDigest:target.captureDigest};
   }
   requireCheck(/^[a-f0-9]{64}$/.test(review.reviewedTargetDigest)&&review.reviewedTargetDigest===target.fullDigest,'Full target attestation required after DDL');

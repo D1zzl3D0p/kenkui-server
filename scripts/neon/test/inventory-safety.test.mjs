@@ -26,6 +26,9 @@ test('private placement refuses unavailable/uncertain Git classification and Git
     process.env.PATH=original;
     const repo=join(root,'repo');mkdirSync(repo);execFileSync('git',['init','--quiet',repo]);chmodSync(join(repo,'.git','objects'),0o700);
     await assert.rejects(()=>writePrivateManifest(join(repo,'.git','objects','private.json'),{}));assert(!existsSync(join(repo,'.git','objects','private.json')));
+    const evidence=join(repo,'evidence');mkdirSync(evidence,{mode:0o700});chmodSync(join(repo,'.git'),0);
+    try {await assert.rejects(()=>writePrivateManifest(join(evidence,'blocked.json'),{}));assert(!existsSync(join(evidence,'blocked.json')));}
+    finally {chmodSync(join(repo,'.git'),0o700);}
     const loose=join(root,'loose');mkdirSync(loose);chmodSync(loose,0o777);await assert.rejects(()=>writePrivateManifest(join(loose,'private.json'),{}));
   } finally {process.env.PATH=original;rmSync(root,{recursive:true,force:true});}
 });

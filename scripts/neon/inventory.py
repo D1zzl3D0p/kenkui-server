@@ -104,6 +104,45 @@ def rows_digest(c, table, columns=None):
     return {"count": str(count), "sha256": h.hexdigest()}
 
 
+def user_types(c):
+    """Independent user types; table row types and generated arrays are represented elsewhere."""
+    return c.execute(
+        "SELECT n.nspname AS schema,t.typname AS name,t.typtype,t.oid "
+        "FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace WHERE "
+        + USER_SCHEMA
+        + " AND t.typrelid=0 AND NOT EXISTS "
+        "(SELECT 1 FROM pg_type owner_type WHERE owner_type.typarray=t.oid) "
+        "ORDER BY n.nspname,t.typname"
+    ).fetchall()
+
+
+def database_collation(c):
+    """Capture effective locale and ICU rules without guessing across catalog versions."""
+    catalog = c.execute(
+        "SELECT to_jsonb(d) AS catalog FROM pg_database d WHERE datname=current_database()"
+    ).fetchone()["catalog"]
+    require(
+        all(k in catalog for k in ("datcollate", "datctype", "datcollversion", "datlocprovider"))
+    )
+    provider = catalog["datlocprovider"]
+    require(provider in ("c", "i", "b"))
+    if provider == "i":
+        require("daticurules" in catalog)
+        require(bool(catalog.get("datlocale") or catalog.get("daticulocale")))
+    elif provider == "b":
+        require(bool(catalog.get("datlocale")))
+    fields = (
+        "datcollate",
+        "datctype",
+        "datcollversion",
+        "datlocprovider",
+        "datlocale",
+        "daticulocale",
+        "daticurules",
+    )
+    return {key: catalog[key] for key in fields if key in catalog}
+
+
 def capture(d):
     validate(d)
     with (
@@ -133,12 +172,14 @@ def capture(d):
             + USER_SCHEMA
             + " ORDER BY n.nspname,p.proname,args"
         ).fetchall()
+        types = user_types(c)
         if d.get("emptyOnly"):
-            require(not relations and not functions)
+            require(not relations and not functions and not types)
             return {}
         require(
             relations and all(r["relkind"] in ("r", "p", "S", "v", "i", "I") for r in relations)
         )
+        require(all(t["typtype"] == "e" for t in types))
         base = [r for r in relations if r["relkind"] in ("r", "p")]
         require(base)
         require(
@@ -168,6 +209,20 @@ def capture(d):
             + " ORDER BY c.oid"
         ).fetchall()
         require(sorted(r["oid"] for r in relations) == [r["oid"] for r in current])
+        require(types == user_types(c))
+        type_definitions = {
+            identifier(c, t["schema"], t["name"]): {
+                "kind": "enum",
+                "labels": [
+                    row["enumlabel"]
+                    for row in c.execute(
+                        "SELECT enumlabel FROM pg_enum WHERE enumtypid=%s ORDER BY enumsortorder",
+                        (t["oid"],),
+                    )
+                ],
+            }
+            for t in types
+        }
         tables, projection, objects, sequences = {}, {}, {}, {}
         for r in base:
             key, table = (
@@ -333,13 +388,9 @@ def capture(d):
         snapshot = (
             restored_snapshot_digest(c) if all(("public", n) in names for n in INVENTORY) else None
         )
-        database_collation = c.execute(
-            "SELECT datcollate,datctype,datcollversion,to_jsonb(d)->>'datlocprovider' AS "
-            "provider,to_jsonb(d)->>'datlocale' AS locale FROM pg_database d WHERE "
-            "datname=current_database()"
-        ).fetchone()
         body = {
-            "databaseCollation": database_collation,
+            "databaseCollation": database_collation(c),
+            "types": type_definitions,
             "tables": tables,
             "schemaObjects": objects,
             "sequences": sequences,
