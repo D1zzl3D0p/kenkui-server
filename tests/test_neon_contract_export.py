@@ -21,7 +21,11 @@ def test_contract_export_freezes_postgres_admission_and_payment_invariants():
     exporter = globals().get("export_database_contract")
     assert callable(exporter), "missing synthetic PostgreSQL invariant exporter"
     observed = exporter(os.environ["KENKUI_TEST_DATABASE_URL"])
-    assert observed == json.loads(BASELINE.read_text())["postgresContract"]
+    frozen = json.loads(BASELINE.read_text())["postgresContract"]
+    # This is the sole deliberate extension. Unknown/missing migrations still fail;
+    # the frozen baseline and every previous ownership/credit invariant stay exact.
+    assert observed["migrations"] == frozen["migrations"] + ["0006_provider_identities.sql"]
+    assert {**observed, "migrations": frozen["migrations"]} == frozen
     assert observed["creditsAfterPaymentReplay"] == 500
     assert observed["creditsAfterIdempotentAdmission"] == 300
     assert observed["concurrentAdmissions"] == {"accepted": 1, "rejected": 1}
@@ -33,6 +37,7 @@ def test_contract_export_freezes_postgres_admission_and_payment_invariants():
 def export_database_contract(url):
     """Migrate a new schema, exercise real SQL, then drop only that test schema."""
     from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
     from uuid import UUID, uuid4
 
     from kenkui_server.billing.models import AuthorizationStatus
@@ -72,7 +77,10 @@ def export_database_contract(url):
             OutputSpec("out.m4b"),
         )
 
+        start = Barrier(2, timeout=5)
+
         def admit(index, credits, key):
+            start.wait()
             job = Job(str(UUID(int=200 + index)), spec)
             return repo.admit(
                 job,
