@@ -5,10 +5,12 @@ import { mkdtempSync,rmSync,readFileSync,statSync,writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os';
 import { join,resolve } from 'node:path';
 import { captureInventory,writePrivateManifest } from '../inventory.mjs';
-import { assertEmptyTarget,verifyRestore } from '../restore-verify.mjs';
+import { assertEmptyTarget,verifyRestore as rawVerifyRestore } from '../restore-verify.mjs';
 
 const base='postgresql://postgres@127.0.0.1:55438/postgres',python=resolve('.venv/bin/python');
 const pg='/opt/homebrew/opt/libpq/bin/';
+function reviewFor(source,target,extra={}) {return {format:'restore-review-v1',mode:'copy',purpose:'restored-copy',environment:source.environment,source:{target:source.target,captureDigest:source.captureDigest},destination:{target:target.target,captureDigest:target.captureDigest},approvalRef:'synthetic-independent-review',attestedBy:'synthetic-operator',attestedAt:new Date().toISOString(),migrationIds:[],newSequences:{},...extra};}
+function verifyRestore(source,target,review) {return rawVerifyRestore(source,target,review?.mode==='migrated'?reviewFor(source,target,{...review,purpose:'migrated-target'}):review??reviewFor(source,target));}
 function py(code,data={}) {return JSON.parse(execFileSync(python,['-c',code],{input:JSON.stringify(data),encoding:'utf8',stdio:['pipe','pipe','pipe']}));}
 function sql(url,statement) {return py("import sys,json,psycopg\nd=json.load(sys.stdin)\nwith psycopg.connect(d['url'],autocommit=True) as c:\n c.execute(d['sql'])\nprint('null')",{url,sql:statement});}
 test('real disposable copy, mutations, migration delta, managed/private permissions and safe CLI', {skip:process.env.KENKUI_TEST_DATABASE_URL!==base},async t=>{
@@ -36,7 +38,7 @@ print(json.dumps(names))`);
   const urls=names.map(n=>base.replace(/postgres$/,n)),dump=join(root,'synthetic.dump');
   // Existing R2 derivation, fixed independently checked salt/key vector for this synthetic source.
   const key='sources/72aa2268ef8aeab045bf4256afc3cdcc9027e1824f90520e23ac5340ab65197c';
-  const options=i=>({databaseUrl:urls[i],environment:'staging',target:{host:'127.0.0.1',database:names[i],projectId:'synthetic-project',branchId:'synthetic-'+i},r2Keys:[key,'checkpoints/a9bb44f5451bbbc0fe393a9c4ad8b7a8fb4c0c14516542a14c595c96a26cff6c'],keySalt:'synthetic',managedAuth:'required'});
+  const options=i=>({databaseUrl:urls[i],environment:'staging',mode:i===0?'source':'restored-copy',synthetic:true,target:{host:'127.0.0.1',port:55438,database:names[i],projectId:'synthetic-project',branchId:'synthetic-'+i},r2Keys:[key,'checkpoints/a9bb44f5451bbbc0fe393a9c4ad8b7a8fb4c0c14516542a14c595c96a26cff6c'],keySalt:'synthetic',managedAuth:'required'});
   try {
     await assertEmptyTarget(options(1));
     execFileSync(pg+'pg_dump',['--format=custom','--no-owner','--no-acl','--file',dump,urls[0]],{stdio:'pipe'});
@@ -44,11 +46,44 @@ print(json.dumps(names))`);
     const source=await captureInventory(options(0)),target=await captureInventory(options(1));
     await t.test('all tables/auth/private evidence and exact established quarantine digest survive empty-target copy',()=>{
       assert.equal(verifyRestore(source,target).status,'verified-copy');
-      assert.equal(target.tables['neon_auth.credentials'].count,'1');assert.equal(target.tables['public.private_release_extra'].count,'1');
+      assert.equal(target.tables['"neon_auth"."credentials"'].count,'1');assert.equal(target.tables['"public"."private_release_extra"'].count,'1');
       assert.equal(target.creditInvariants.accounts[0].openingResidualCredits,'7');
       assert.equal(target.creditInvariants.accounts[0].availableCredits,'4');
       const exact=py("import sys,json,psycopg\nfrom psycopg.rows import dict_row\nfrom kenkui_server.storage.migration_fixture_quarantine import restored_snapshot_digest\nd=json.load(sys.stdin)\nwith psycopg.connect(d['url'],row_factory=dict_row) as c: print(json.dumps(restored_snapshot_digest(c)))",{url:urls[1]});
       assert.equal(target.restoredSnapshotDigest,exact);
+    });
+    await t.test('mandatory independent provenance review rejects self, relabeling and wrong reviewed destination',async()=>{
+      assert.throws(()=>rawVerifyRestore(source,target));
+      assert.throws(()=>rawVerifyRestore(source,source,reviewFor(source,source)));
+      assert.throws(()=>rawVerifyRestore(source,{...target,environment:'production'},reviewFor(source,target)));
+      assert.throws(()=>rawVerifyRestore(source,target,{...reviewFor(source,target),destination:{...reviewFor(source,target).destination,target:source.target}}));
+      const relabeled={...source,target:target.target};assert.throws(()=>rawVerifyRestore(source,relabeled,reviewFor(source,relabeled)));
+      const stable=await captureInventory(options(0));
+      assert.equal(rawVerifyRestore(source,stable,reviewFor(source,stable,{purpose:'source-stability'})).status,'verified-source-stability');
+      assert.throws(()=>rawVerifyRestore(source,source,reviewFor(source,source,{purpose:'source-stability'})));
+      for(const change of [{mode:'source'},{capturedAt:'2020-01-01T00:00:00Z'},{managedAuth:'absent-reviewed-source'},{target:{...target.target,branchId:'other'}}])assert.throws(()=>rawVerifyRestore(source,{...target,...change},reviewFor(source,target)));
+    });
+    await t.test('quoted identifiers, pgdata and sequence/view-only targets cannot be omitted',async()=>{
+      sql(urls[1],'CREATE SCHEMA pgdata; CREATE TABLE pgdata.private_rows(id int); INSERT INTO pgdata.private_rows VALUES (7); CREATE VIEW pgdata.private_view AS SELECT id FROM pgdata.private_rows; CREATE SCHEMA "a.b"; CREATE SCHEMA a; CREATE TABLE "a.b".c(id int); CREATE TABLE a."b.c"(id int)');
+      try {const captured=await captureInventory(options(1));assert.equal(captured.tables['"pgdata"."private_rows"'].count,'1');assert.equal(captured.schemaObjects['"pgdata"."private_view"'].kind,'view');assert(captured.tables['"a.b"."c"']);assert(captured.tables['"a"."b.c"']);}
+      finally {sql(urls[1],'DROP SCHEMA pgdata CASCADE; DROP SCHEMA "a.b" CASCADE; DROP SCHEMA a CASCADE');}
+      const extra=names[1]+'_empty';sql(base,'CREATE DATABASE '+extra);
+      const empty={...options(1),databaseUrl:base.replace(/postgres$/,extra),target:{...options(1).target,database:extra}};
+      try {for(const [create,drop] of [['CREATE SEQUENCE only_sequence','DROP SEQUENCE only_sequence'],['CREATE VIEW only_view AS SELECT 1 AS id','DROP VIEW only_view']]) {sql(empty.databaseUrl,create);await assert.rejects(()=>assertEmptyTarget(empty));sql(empty.databaseUrl,drop);}}
+      finally {sql(base,'DROP DATABASE '+extra+' WITH (FORCE)');}
+    });
+    await t.test('sequence definitions, trigger enablement/function and collation are part of schema equality',async()=>{
+      sql(urls[1],"ALTER SEQUENCE credit_lots_sequence_seq INCREMENT BY 2");
+      try {await assert.rejects(async()=>verifyRestore(source,await captureInventory(options(1))));}finally{sql(urls[1],"ALTER SEQUENCE credit_lots_sequence_seq INCREMENT BY 1");}
+      for(const url of urls)sql(url,`CREATE FUNCTION public.synthetic_trigger() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$; CREATE TRIGGER synthetic_trigger BEFORE INSERT ON private_release_extra FOR EACH ROW EXECUTE FUNCTION public.synthetic_trigger()`);
+      try {
+        const before=await captureInventory(options(0));sql(urls[1],'ALTER TABLE private_release_extra DISABLE TRIGGER synthetic_trigger');
+        await assert.rejects(async()=>verifyRestore(before,await captureInventory(options(1))));sql(urls[1],'ALTER TABLE private_release_extra ENABLE TRIGGER synthetic_trigger');
+        sql(urls[1],`CREATE OR REPLACE FUNCTION public.synthetic_trigger() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$`);
+        await assert.rejects(async()=>verifyRestore(before,await captureInventory(options(1))));
+      } finally {for(const url of urls)sql(url,'DROP TRIGGER synthetic_trigger ON private_release_extra; DROP FUNCTION public.synthetic_trigger()');}
+      sql(urls[1],'ALTER TABLE private_release_extra ALTER COLUMN secret TYPE text COLLATE "C"');
+      try {await assert.rejects(async()=>verifyRestore(source,await captureInventory(options(1))));}finally {sql(urls[1],'ALTER TABLE private_release_extra ALTER COLUMN secret TYPE text COLLATE "default"');}
     });
     await t.test('occupied target rejection never deletes user/auth rows',async()=>{
       await assert.rejects(()=>assertEmptyTarget(options(1)),/occupied/);assert.equal((await captureInventory(options(1))).fullDigest,target.fullDigest);
@@ -83,16 +118,16 @@ print(json.dumps(names))`);
     await t.test('known additive DDL requires original column projection, exact migration delta and full target attestation',async()=>{
       sql(urls[1],"ALTER TABLE identities ADD COLUMN synthetic_new text; CREATE TABLE additive_release_private (id text); INSERT INTO schema_migrations VALUES ('0011_synthetic_only.sql')");
       try {
-        const after=await captureInventory({...options(1),sourceProjection:source});
-        assert.throws(()=>verifyRestore(source,after),/migration|table|digest/);
+        const after=await captureInventory({...options(1),sourceProjection:source,mode:'migrated-target'});
+        assert.throws(()=>verifyRestore(source,after),/migration|table|digest|destination/);
         assert.throws(()=>verifyRestore(source,after,{mode:'migrated',migrationIds:['0011_synthetic_only.sql']}),/attestation/);
         const review={mode:'migrated',migrationIds:['0011_synthetic_only.sql'],reviewedTargetDigest:after.fullDigest};
         assert.equal(verifyRestore(source,after,review).status,'verified-migration');
-        const tampered=structuredClone(after);tampered.tables['public.additive_release_private'].count='2';
+        const tampered=structuredClone(after);tampered.tables['"public"."additive_release_private"'].count='2';
         assert.throws(()=>verifyRestore(source,tampered,review),/digest/);
         assert.throws(()=>verifyRestore(source,after,{...review,migrationIds:[]}),/migration/);
         sql(urls[1],"UPDATE credit_ledger_entries SET credits=-2");
-        const changed=await captureInventory({...options(1),sourceProjection:source});
+        const changed=await captureInventory({...options(1),sourceProjection:source,mode:'migrated-target'});
         assert.throws(()=>verifyRestore(source,changed,{...review,reviewedTargetDigest:changed.fullDigest}),/preserv/);
         sql(urls[1],"UPDATE credit_ledger_entries SET credits=-3");
       } finally {sql(urls[1],"ALTER TABLE identities DROP COLUMN synthetic_new; DROP TABLE additive_release_private; DELETE FROM schema_migrations WHERE name='0011_synthetic_only.sql'");}
@@ -100,7 +135,7 @@ print(json.dumps(names))`);
     await t.test('managed Auth addition is an explicit reviewed target transition, never a silent source omission',async()=>{
       sql(urls[0],"DROP SCHEMA neon_auth CASCADE");
       const legacy=await captureInventory({...options(0),managedAuth:'absent-reviewed-source'});
-      const withAuth=await captureInventory({...options(1),sourceProjection:legacy});
+      const withAuth=await captureInventory({...options(1),sourceProjection:legacy,mode:'migrated-target'});
       const review={mode:'migrated',migrationIds:[],reviewedTargetDigest:withAuth.fullDigest};
       assert.throws(()=>verifyRestore(legacy,withAuth,review),/auth scope/);
       assert.equal(verifyRestore(legacy,withAuth,{...review,managedAuthAdded:true}).status,'verified-migration');
@@ -114,7 +149,7 @@ print(json.dumps(names))`);
       const configPath=join(root,'config.json'),cliPath=join(root,'cli-inventory.json');
       const {databaseUrl,...config}=options(1);writeFileSync(configPath,JSON.stringify(config),{mode:0o600});
       const cli=execFileSync(process.execPath,['scripts/neon/inventory.mjs','capture',configPath,cliPath],{encoding:'utf8',env:{PATH:process.env.PATH,KENKUI_INVENTORY_DATABASE_URL:databaseUrl.replace('postgres@','postgres:synthetic-secret-not-for-stdout@')}});
-      assert.deepEqual(Object.keys(JSON.parse(cli)),['tables','fullDigest','restoredSnapshotDigest']);
+      assert.deepEqual(Object.keys(JSON.parse(cli)),['tables','fullDigest','captureDigest','restoredSnapshotDigest']);
       assert(!cli.includes('synthetic-secret'));assert(!cli.includes('synthetic-private-evidence'));assert(!cli.includes('synthetic-only'));
       const result=await import('node:child_process').then(({spawnSync})=>spawnSync(process.execPath,['scripts/neon/inventory.mjs','invalid'],{encoding:'utf8',env:{...process.env,KENKUI_INVENTORY_DATABASE_URL:'postgresql://synthetic-secret-not-for-stdout@invalid/db'}}));
       assert.notEqual(result.status,0);assert(!result.stdout.includes('synthetic-secret'));assert(!result.stderr.includes('synthetic-secret'));

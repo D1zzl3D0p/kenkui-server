@@ -1,166 +1,50 @@
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import { lstat,readFile,writeFile } from 'node:fs/promises';
-import { dirname,resolve } from 'node:path';
+import { execFileSync,spawnSync } from 'node:child_process';
+import { lstat,realpath,readFile,writeFile } from 'node:fs/promises';
+import { dirname,basename,resolve,join } from 'node:path';
 import { fileURLToPath,pathToFileURL } from 'node:url';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
-// Use the reviewed Python/psycopg authority, including its exact locked target digest.
-// Connection material is sent over stdin, never argv or inherited subprocess diagnostics.
-const collector=String.raw`
-import sys,json,hashlib
-from datetime import datetime,timezone
-import psycopg
-from psycopg import sql
-from psycopg.rows import dict_row
-from kenkui_server.storage.migration_fixture_quarantine import INVENTORY,restored_snapshot_digest
-from kenkui_server.storage.assets import R2AssetStore
-d=json.load(sys.stdin)
-def require(ok):
- if not ok:raise ValueError('inventory blocked')
-def digest(value):
- return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':'),ensure_ascii=True).encode('ascii')).hexdigest()
-with psycopg.connect(d['databaseUrl'],row_factory=dict_row,connect_timeout=15) as c:
- with c.transaction():
-  c.execute('SET TRANSACTION ISOLATION LEVEL READ COMMITTED, READ ONLY')
-  c.execute("SET LOCAL lock_timeout='15s'; SET LOCAL statement_timeout='120s'; SET LOCAL row_security=off; SET LOCAL TIME ZONE 'UTC'; SET LOCAL extra_float_digits=3; SET LOCAL search_path=public")
-  require(c.info.host==d['target']['host'] and c.info.dbname==d['target']['database'])
-  relations=c.execute("""SELECT n.nspname AS schema,c.relname AS name,c.oid
-   FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-   WHERE c.relkind IN ('r','p','m','f') AND n.nspname NOT IN ('information_schema')
-    AND n.nspname NOT LIKE 'pg_%' ORDER BY n.nspname COLLATE "C",c.relname COLLATE "C" """
-  ).fetchall()
-  if d.get('emptyOnly'):
-   require(not relations)
-   print('{}')
-   sys.exit(0)
-  require(relations)
-  require(not any(r['schema']=='neon_auth' for r in relations) or d['managedAuth']=='required')
-  if d['managedAuth']=='required':require(any(r['schema']=='neon_auth' for r in relations))
-  # No information_schema visibility filter: inaccessible private relations must raise.
-  require(all(c.execute('SELECT has_schema_privilege(%s,%s) AS ok',(r['schema'],'USAGE')).fetchone()['ok'] and
-    c.execute('SELECT has_table_privilege(%s,%s) AS ok',(r['oid'],'SELECT')).fetchone()['ok'] for r in relations))
-  c.execute(sql.SQL('LOCK TABLE {} IN SHARE MODE').format(sql.SQL(',').join(sql.Identifier(r['schema'],r['name']) for r in relations)))
-  # A second catalog read detects DDL drift during lock acquisition; release freeze must prevent new DDL.
-  current=c.execute("SELECT c.oid FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.relkind IN ('r','p','m','f') AND n.nspname<>'information_schema' AND n.nspname NOT LIKE 'pg_%' ORDER BY oid").fetchall()
-  require(sorted(r['oid'] for r in relations)==[r['oid'] for r in current])
-  tables={};projection={}
-  def capture(identifier,columns=None):
-   value=sql.SQL('to_jsonb(t)') if columns is None else sql.SQL('jsonb_build_object({})').format(sql.SQL(',').join(part for col in columns for part in (sql.Literal(col),sql.SQL('t.{}').format(sql.Identifier(col)))))
-   query=sql.SQL('SELECT {}::text AS line FROM {} t ORDER BY {}::text COLLATE "C"').format(value,identifier,value)
-   h=hashlib.sha256();count=0
-   with c.cursor(name='inventory_rows') as cur:
-    cur.execute(query)
-    for row in cur:h.update(row['line'].encode('utf8')+bytes([10]));count+=1
-   return {'count':str(count),'sha256':h.hexdigest()}
-  for r in relations:
-   name=r['schema']+'.'+r['name'];identifier=sql.Identifier(r['schema'],r['name'])
-   columns=c.execute("""SELECT a.attname AS name,format_type(a.atttypid,a.atttypmod) AS type,a.attnotnull AS not_null,
-     pg_get_expr(v.adbin,v.adrelid) AS default,a.attidentity AS identity,a.attgenerated AS generated
-     FROM pg_attribute a LEFT JOIN pg_attrdef v ON v.adrelid=a.attrelid AND v.adnum=a.attnum
-     WHERE a.attrelid=%s AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attnum""",(r['oid'],)).fetchall()
-   constraints=c.execute('SELECT conname,pg_get_constraintdef(oid) AS definition,convalidated FROM pg_constraint WHERE conrelid=%s ORDER BY conname',(r['oid'],)).fetchall()
-   indexes=c.execute('SELECT pg_get_indexdef(indexrelid) AS definition FROM pg_index WHERE indrelid=%s ORDER BY pg_get_indexdef(indexrelid)',(r['oid'],)).fetchall()
-   security=c.execute('SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE oid=%s',(r['oid'],)).fetchone()
-   policies=c.execute('SELECT policyname,permissive,roles,cmd,qual,with_check FROM pg_policies WHERE schemaname=%s AND tablename=%s ORDER BY policyname',(r['schema'],r['name'])).fetchall()
-   tables[name]={**capture(identifier),'columns':[x['name'] for x in columns], 'definitionDigest':digest([columns,constraints,indexes,security,policies])}
-   old=d.get('sourceProjection',{}).get('tables',{}).get(name)
-   if old:projection[name]=capture(identifier,old['columns'])
-  sequences={}
-  for r in c.execute("SELECT schemaname,sequencename FROM pg_sequences WHERE schemaname<>'information_schema' AND schemaname NOT LIKE 'pg_%' ORDER BY schemaname,sequencename").fetchall():
-   # Explicit sequence SELECT catches privilege omissions as well as preserves next-id state.
-   row=c.execute(sql.SQL('SELECT last_value::text,is_called FROM {}').format(sql.Identifier(r['schemaname'],r['sequencename']))).fetchone()
-   sequences[r['schemaname']+'.'+r['sequencename']]=row
-  names={r['schema']+'.'+r['name'] for r in relations}
-  require(all('public.'+n in names for n in ['schema_migrations','identities','assets','jobs','artifacts','credit_accounts','credit_lots','credit_authorizations','credit_ledger_entries','credit_allocations','payment_events','stored_objects']))
-  migrations=[r['name'] for r in c.execute('SELECT name FROM schema_migrations ORDER BY name COLLATE "C"')]
-  # Check FKs from actual values, even if a dump carries unvalidated constraints.
-  orphan_count=0
-  for fk in c.execute("""SELECT conrelid,confrelid,conkey,confkey FROM pg_constraint
-    WHERE contype='f' AND conrelid=ANY(%s)""",([r['oid'] for r in relations],)).fetchall():
-   def table(oid):
-    row=c.execute('SELECT n.nspname,c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.oid=%s',(oid,)).fetchone()
-    return sql.Identifier(row['nspname'],row['relname'])
-   def column(oid,num):return c.execute('SELECT attname FROM pg_attribute WHERE attrelid=%s AND attnum=%s',(oid,num)).fetchone()['attname']
-   pairs=[(column(fk['conrelid'],a),column(fk['confrelid'],b)) for a,b in zip(fk['conkey'],fk['confkey'])]
-   condition=sql.SQL(' AND ').join(sql.SQL('p.{}=t.{}').format(sql.Identifier(b),sql.Identifier(a)) for a,b in pairs)
-   notnull=sql.SQL(' AND ').join(sql.SQL('t.{} IS NOT NULL').format(sql.Identifier(a)) for a,b in pairs)
-   orphan_count+=c.execute(sql.SQL('SELECT count(*) AS n FROM {} t WHERE {} AND NOT EXISTS (SELECT 1 FROM {} p WHERE {})').format(table(fk['conrelid']),notnull,table(fk['confrelid']),condition)).fetchone()['n']
-  duplicates=c.execute('SELECT count(*) AS n FROM (SELECT 1 FROM payment_events GROUP BY provider,provider_event_id HAVING count(*)>1) x').fetchone()['n']
-  accounts=c.execute('''SELECT a.id::text AS "accountId",a.available_credits::text AS "availableCredits",
-    COALESCE((SELECT sum(l.credited-l.reserved-l.consumed) FROM credit_lots l WHERE l.account_id=a.id),0)::text AS "lotAvailableCredits",
-    COALESCE((SELECT sum(e.credits) FROM credit_ledger_entries e WHERE e.account_id=a.id),0)::text AS "netLedgerCredits",
-    (a.available_credits-COALESCE((SELECT sum(e.credits) FROM credit_ledger_entries e WHERE e.account_id=a.id),0))::text AS "openingResidualCredits"
-    FROM credit_accounts a ORDER BY a.id''').fetchall()
-  invalid_lots=c.execute('SELECT count(*) AS n FROM credit_lots WHERE credited<0 OR reserved<0 OR consumed<0 OR reserved+consumed>credited').fetchone()['n']
-  cross_owner=c.execute('SELECT count(*) AS n FROM credit_authorizations z JOIN credit_accounts a ON a.id=z.account_id JOIN jobs j ON j.id=z.job_id WHERE a.identity_id<>j.owner_id').fetchone()['n']
-  allocations=c.execute('''SELECT count(*) AS n FROM credit_authorizations z WHERE z.status IN ('reserved','settled') AND
-    z.credits<>COALESCE((SELECT sum(a.credits) FROM credit_allocations a WHERE a.authorization_id=z.id AND a.account_id=z.account_id),0)''').fetchone()['n']
-  lot_allocations=c.execute('''SELECT count(*) AS n FROM credit_lots l WHERE
-    l.reserved<>COALESCE((SELECT sum(a.credits) FROM credit_allocations a JOIN credit_authorizations z ON z.id=a.authorization_id WHERE a.lot_id=l.id AND z.status='reserved'),0) OR
-    l.consumed<>COALESCE((SELECT sum(a.credits) FROM credit_allocations a JOIN credit_authorizations z ON z.id=a.authorization_id WHERE a.lot_id=l.id AND z.status='settled'),0)''').fetchone()['n']
-  invariants={'accounts':accounts,'orphanReferences':orphan_count,'duplicatePayments':duplicates,'invalidLots':invalid_lots,'crossOwnerAuthorizations':cross_owner,'invalidAllocations':allocations,'invalidLotAllocations':lot_allocations}
-  # Reuse current Python key derivation; no object-store credentials or provider calls here.
-  store=R2AssetStore(None,bucket='inventory-only',key_salt=d['keySalt'])
-  refs=[]
-  for row in c.execute('SELECT id FROM assets WHERE deleted_at IS NULL ORDER BY id COLLATE "C"'):refs.append({'kind':'source','resourceId':row['id'],'key':store._key('source',row['id'])})
-  for row in c.execute('SELECT path FROM artifacts ORDER BY path COLLATE "C"'):refs.append({'kind':'artifact','resourceId':row['path'],'key':store._key('artifact',row['path'])})
-  if 'public.job_checkpoints' in names:
-   for row in c.execute('SELECT id FROM job_checkpoints WHERE ready ORDER BY id COLLATE "C"'):refs.append({'kind':'checkpoint','resourceId':row['id'],'key':store._key('checkpoint',row['id'])})
-  resources={'source':{r['id'] for r in c.execute('SELECT id FROM assets')},'artifact':{r['path'] for r in c.execute('SELECT path FROM artifacts')}}
-  orphan_objects=0
-  for row in c.execute('SELECT object_kind,resource_id,opaque_object_key FROM stored_objects WHERE deleted_at IS NULL ORDER BY opaque_object_key COLLATE "C"'):
-   if row['object_kind'] in resources and (row['resource_id'] not in resources[row['object_kind']] or store._key(row['object_kind'],row['resource_id'])!=row['opaque_object_key']):orphan_objects+=1
-   refs.append({'kind':row['object_kind'],'resourceId':row['resource_id'],'key':row['opaque_object_key']})
-  refs.sort(key=lambda r:(r['kind'],r['key'],r['resourceId'] or ''))
-  r2={'references':refs,'missingObjects':sum(r['key'] not in d['r2Keys'] for r in refs),'orphanReferences':orphan_objects}
-  snapshot=restored_snapshot_digest(c) if all('public.'+n in names for n in INVENTORY) else None
-  body={'tables':tables,'sequences':sequences,'migrationIds':migrations,'creditInvariants':invariants,'r2':r2,'sourceProjection':projection,'restoredSnapshotDigest':snapshot}
-  print(json.dumps({'format':'kenkui-restore-inventory-v1','environment':d['environment'],'target':d['target'],
-    'capturedAt':datetime.now(timezone.utc).isoformat(),'managedAuth':d['managedAuth'],**body,'fullDigest':digest(body),
-    'restoredSnapshotDigest':snapshot,'sourceProjection':projection},separators=(',',':')))
-`;
-
-/** Recheck private-file integrity using the collector's sorted ensure_ascii JSON encoding. */
-export function inventoryDigest(manifest) {
-  function canonical(value) {
-    if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';
-    if(value!==null&&typeof value==='object')return '{'+Object.keys(value).sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b))).map(k=>canonical(k)+':'+canonical(value[k])).join(',')+'}';
-    if(typeof value==='number'&&!Number.isSafeInteger(value))throw Error('Unsafe inventory number');
-    return JSON.stringify(value).replace(/[\u007f-\uffff]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'));
-  }
-  const body=Object.fromEntries(['tables','sequences','migrationIds','creditInvariants','r2','sourceProjection','restoredSnapshotDigest'].map(k=>[k,manifest[k]]));
-  return createHash('sha256').update(canonical(body),'ascii').digest('hex');
+const bodyKeys=['databaseCollation','tables','schemaObjects','sequences','migrationIds','creditInvariants','r2','sourceProjection','restoredSnapshotDigest'];
+const provenanceKeys=['format','environment','target','mode','capturedAt','managedAuth','sourceProjectionCaptureDigest','fullDigest'];
+function canonical(value) {
+  if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';
+  if(value!==null&&typeof value==='object')return '{'+Object.keys(value).sort((a,b)=>Buffer.compare(Buffer.from(a),Buffer.from(b))).map(k=>canonical(k)+':'+canonical(value[k])).join(',')+'}';
+  if(typeof value==='number'&&!Number.isSafeInteger(value))throw Error('Unsafe inventory number');
+  const encoded=JSON.stringify(value);if(encoded===undefined)throw Error('Incomplete inventory');
+  return encoded.replace(/[\u007f-\uffff]/g,c=>'\\u'+c.charCodeAt(0).toString(16).padStart(4,'0'));
+}
+function hashKeys(manifest,keys) {return createHash('sha256').update(canonical(Object.fromEntries(keys.map(k=>[k,manifest[k]]))),'ascii').digest('hex');}
+export function inventoryDigest(manifest) {return hashKeys(manifest,bodyKeys);}
+export function captureDigest(manifest) {return hashKeys(manifest,provenanceKeys);}
+function python(options) {
+  return JSON.parse(execFileSync(resolve(root,'.venv/bin/python'),[resolve(root,'scripts/neon/inventory.py')],{cwd:root,input:JSON.stringify(options),encoding:'utf8',timeout:300_000,maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe'],env:{PATH:process.env.PATH,PYTHONPATH:resolve(root,'src')}}));
 }
 export function checkedOptions(options) {
-  if(!options||!['staging','production'].includes(options.environment)||!['required','absent-reviewed-source'].includes(options.managedAuth)||
-    !options.target||['host','database','projectId','branchId'].some(key=>typeof options.target[key]!=='string'||!options.target[key].trim())||
-    !Array.isArray(options.r2Keys)||options.r2Keys.some(key=>typeof key!=='string')||typeof options.keySalt!=='string')throw Error('Invalid private inventory configuration');
-  let url;try{url=new URL(options.databaseUrl);}catch{throw Error('Invalid inventory target');}
-  if(!['postgres:','postgresql:'].includes(url.protocol)||url.hostname!==options.target.host||decodeURIComponent(url.pathname.slice(1))!==options.target.database)throw Error('Inventory target pin mismatch');
-  const local=url.hostname==='127.0.0.1'&&url.port==='55438';
-  if(!local&&url.searchParams.get('sslmode')!=='verify-full')throw Error('Inventory target requires verified TLS');
-  if(options.sourceProjection&&(options.sourceProjection.format!=='kenkui-restore-inventory-v1'||options.sourceProjection.environment!==options.environment))throw Error('Invalid source projection');
-  return options;
+  try {
+    python({...options,action:'validate'});
+    if(options.sourceProjection&&(options.sourceProjection.format!=='kenkui-restore-inventory-v2'||options.sourceProjection.environment!==options.environment||captureDigest(options.sourceProjection)!==options.sourceProjection.captureDigest||inventoryDigest(options.sourceProjection)!==options.sourceProjection.fullDigest))throw Error();
+    return options;
+  } catch {throw Error('Invalid private inventory target/connection/TLS configuration');}
 }
 export async function captureInventory(options) {
   checkedOptions(options);
-  try {
-    return JSON.parse(execFileSync(resolve(root,'.venv/bin/python'),['-c',collector],{cwd:root,input:JSON.stringify(options),encoding:'utf8',
-      timeout:300_000,maxBuffer:64*1024*1024,stdio:['pipe','pipe','pipe'],env:{PATH:process.env.PATH,PYTHONPATH:resolve(root,'src')}}));
-  } catch {throw Error(options.emptyOnly?'Restore target occupied or unreadable; no changes made':'Inventory capture blocked by data, privilege, RLS or schema check');}
+  try {return python({...options,action:'capture'});}catch {throw Error(options.emptyOnly?'Restore target occupied or unreadable; no changes made':'Inventory capture blocked by data, privilege, RLS or schema check');}
 }
 export async function readPrivateJson(path) {
   const info=await lstat(path);
-  if(!info.isFile()||info.isSymbolicLink()||(info.mode&0o077)!==0||info.size>64*1024*1024)throw Error('Private regular mode0600 input required');
+  if(!info.isFile()||info.isSymbolicLink()||info.uid!==process.getuid()||(info.mode&0o077)!==0||info.size>64*1024*1024)throw Error('Private owned regular mode0600 input required');
   return JSON.parse(await readFile(path,'utf8'));
 }
 export async function writePrivateManifest(path,manifest) {
-  const output=resolve(path);
-  try {
-    if(execFileSync('git',['-C',dirname(output),'rev-parse','--is-inside-work-tree'],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim()==='true')throw Error('git checkout');
-  } catch(error) {if(error.message==='git checkout')throw Error('Private evidence must be outside Git');}
-  await writeFile(output,JSON.stringify(manifest,null,2)+'\n',{flag:'wx',mode:0o600});
+  const failure=()=>Error('Private evidence placement must be positively verified outside Git');
+  const parent=await realpath(dirname(resolve(path))),info=await lstat(parent);
+  if(!info.isDirectory()||info.uid!==process.getuid()||(info.mode&0o077)!==0)throw failure();
+  for(let dir=parent;;dir=dirname(dir)) {if(basename(dir)==='.git')throw failure();if(dirname(dir)===dir)break;}
+  const git=spawnSync('git',['-C',parent,'rev-parse','--is-inside-work-tree','--is-inside-git-dir'],{encoding:'utf8',env:{PATH:process.env.PATH,LANG:'C',LC_ALL:'C',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'},stdio:['ignore','pipe','pipe']});
+  const outside=git.status===128&&!git.error&&git.stderr.trim()==='fatal: not a git repository (or any of the parent directories): .git';
+  if(!outside)throw failure();
+  await writeFile(join(parent,basename(path)),JSON.stringify(manifest,null,2)+'\n',{flag:'wx',mode:0o600});
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
   try {
@@ -170,6 +54,6 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href) {
     if(config.sourceProjectionPath)config.sourceProjection=await readPrivateJson(config.sourceProjectionPath);
     const manifest=await captureInventory({...config,databaseUrl:process.env.KENKUI_INVENTORY_DATABASE_URL});
     await writePrivateManifest(output,manifest);
-    console.log(JSON.stringify({tables:Object.keys(manifest.tables).length,fullDigest:manifest.fullDigest,restoredSnapshotDigest:manifest.restoredSnapshotDigest}));
+    console.log(JSON.stringify({tables:Object.keys(manifest.tables).length,fullDigest:manifest.fullDigest,captureDigest:manifest.captureDigest,restoredSnapshotDigest:manifest.restoredSnapshotDigest}));
   } catch {console.error('Inventory capture failed; inspect private configuration and permissions.');process.exitCode=1;}
 }

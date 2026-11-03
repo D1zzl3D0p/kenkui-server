@@ -79,3 +79,56 @@ Live staging target is occupied: exact provenance/reconciliation or an independe
 ## Self-review
 
 Reviewed the full new scripts/tests, scoped runtime diff and runbooks against the brief/canonical Task13 constraints. Corrected checkpoint id derivation, explicit Auth addition handling, full-manifest integrity, RLS schema drift and legitimate retained tombstones using observed failing tests. Original finance data and canonical v1/v2 authority remain unchanged. No unresolved implementation uncertainty; operational limitations are deliberately explicit and pending. No source/profile/email/identity/secret inspection, SMTP, live provider SQL, deploy, paid activation, DNS mutation or push occurred. Only the authorized synthetic local database was used.
+
+## Review fix round 1 — supersedes the pre-review code verdict above
+
+Base: `cb92b017ff48958f57d63e058508077a5b9fb937`. Read `task-13-review.md` verbatim: fixed its Critical finding and all seven Important findings together. No private/live invocation of these helpers occurred or was authorized. All operational gates remain pending. The controller approved the exact restore-review/historical-evidence boundary before implementation; no new signing infrastructure or importer exception was introduced.
+
+1. **TLS/endpoint boundary:** moved the collector to auditable `scripts/neon/inventory.py`, invoked only through private stdin. The exact pinned psycopg/libpq parser validates effective host, single port, database and TLS **before connecting**, alongside strict URI/query validation. Duplicate query parameters, host/db/port overrides, service/hostaddr/options, multihost/port ambiguity and non-TLS escape attempts reject offline. Synthetic cleartext is explicitly limited to staging/127.0.0.1:55438/disposable rehearsal database/synthetic project+branch pins. Inherited PG variables stay cleared; read-only/read-committed/timeouts remain SQL settings after connection.
+2. **Actual upgrade/sequences:** sequence metadata now includes type, start/increment/min/max/cache/cycle, exact OWNED BY dependency, last value and is-called. Every original sequence must be identical. Only the exact independently reviewed `newSequences` map is allowed after DDL. The real old-schema test applies actual0004 then creates the pre0008 source, independently dumps/restores it, and applies actual0008/0009/0010. The new `migration_rate_events_id_seq` is required in the separate review; omission rejects. Original rows/history are unchanged.
+3. **Historical settled allocations:** collector reports exact candidate rows; no candidate automatically qualifies. Mandatory independent historical-pre-0004 source attestation is tied to the ORIGINAL source capture and exact authorization full-row digest, account/job/credits/status/created/finalized timestamps plus canonical legacy opening lot id/reference/created time. Only settled/zero-allocation rows with affirmative created≤finalized<legacy-lot-created chronology can qualify. Partial/reserved/new/changed rows and ambiguous/missing/late chronology remain blocked, including when an operator attestation claims them. No ledger seed, origin inference, lot relabel or accounting mutation. Canonical v1/v2 finance/importer code is untouched.
+4. **Catalog completeness:** literal reserved `pg_` prefix exclusion includes legal `pgdata`; identifiers are fully quoted and cannot collide on dots. Emptiness discovers every user relation and user function, including sequence-only/view-only targets. Required views/functions and their definitions/options are captured; unsupported foreign/materialized/composite objects refuse capture rather than silently omit. Private-schema and quoted-name collisions are covered by real PostgreSQL fixtures. R2 key membership now uses a set.
+5. **Independent provenance:** comparable `fullDigest` is separate from `captureDigest`, which binds all format/environment/target host+port+database/project/branch/capture-time/mode/managed-auth/projection-source provenance. Format is now `kenkui-restore-inventory-v2`; the prior unbound v1 is rejected. Every verification requires a trusted independent `restore-review-v1` object with original source and expected destination exact pins/capture digests, purpose, approval reference/operator/time. Source-stability requires distinct fresh captures of the same source; restored-copy/migrated-target requires a different physical destination and correct capture mode. No default or self-file restore proof. Migrated review also binds full target digest, exact pending migrations and new sequences. The review is an operator attestation through the existing private authority boundary, **not cryptographic proof of who approved it**; hashes alone confer no approval.
+6. **Private output:** owner-only private parent directory and positive outside-checkout/outside-Git-metadata classification are required before exclusive0600 creation. Missing Git, dubious/unknown Git errors, Git metadata and uncertain ownership/permissions fail closed. Tests confirm no file appears for each refusal, with Git metadata parent permissions made private so that test actually reaches the metadata guard.
+7. **Billing scope:** exported operation rejects every cents value except500 before fetch. Independent admin review binds selected org/principal/credential SHA256 plus approval/operator/time/admin role; self-asserted role or paid-tier GET read access is insufficient. Provider PUT enforcement and independent readback are still mandatory. Tests include positive non500 values and a paid read-only principal, missing attestation, changed principal and changed credential. No live billing call or activation.
+8. **Behavioral schema:** column and default database collations, user triggers/enabled state/referenced function definitions, user function/view definitions and view options participate in content equality. Actual sequence-increment, disabled-trigger, changed-trigger-function and column-collation drift reject; supported private view capture is exercised positively.
+
+Runbooks now specify the mandatory review shape/purposes, provenance digest, explicit new sequence review and narrow historical evidence. They also include BOTH Render staging API writers (primary plus free `kenkui-staging-api-idle` / `srv-dbkgesou01pc73afapc0`, sharing the source DB) and Modal consumers/schedules in the coordinated source freeze. No suspension, transfer, private evidence use, provider SQL or configuration action was performed.
+
+### Round 1 exact RED/GREEN evidence
+
+All commands used `rtk`, Node24.21.0 and only the authorized synthetic PostgreSQL55438. No unrelated Python/Studio/native/full-provider suite was rerun.
+
+Initial offline RED:
+
+```
+rtk proxy /Users/dizzler/.local/share/mise/installs/node/24.21.0/bin/node --test scripts/neon/test/inventory-safety.test.mjs scripts/neon/test/billing-alert.test.mjs
+```
+
+Result before fixes:3 failed/3 passed. TLS override test: `Missing expected exception`; unavailable-Git private placement: `Missing expected rejection`; non500 billing: fetch count `1 !== 0`. After adding principal-bound cases, standalone billing RED also reported `Missing expected rejection` for paid read access without independent admin review. Following implementation: offline safety2/2 and billing5/5 passed.
+
+New provenance/catalog/schema RED:
+
+```
+rtk proxy env KENKUI_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55438/postgres /Users/dizzler/.local/share/mise/installs/node/24.21.0/bin/node --test --test-name-pattern='real disposable' scripts/neon/test/restore-verify.test.mjs
+```
+
+Before fixes: self-verification `Missing expected exception`; `pgdata`/quoted-name entries absent; sequence definition drift `Missing expected rejection`; old CLI lacked captureDigest. First old-schema regression failed because historical candidate evidence did not exist. After implementing the evidence boundary, real pre0004→0004→pre0008→actual0008/0009/0010 succeeds, requires independently reviewed new BIGSERIAL sequence, and rejects missing/changed/partial/new/late historical claims.
+
+Extraction formatting initially produced Ruff line-length/style failures. Corrected formatting and a supported-view string-concatenation error detected during self-review; a positive private-view capture regression first failed `Inventory capture blocked...` then passed after repair. No failing formatting/setup output was counted as successful behavior verification.
+
+Final focused GREEN:
+
+```
+rtk proxy env KENKUI_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55438/postgres /Users/dizzler/.local/share/mise/installs/node/24.21.0/bin/node --test scripts/neon/test/inventory-upgrade.test.mjs scripts/neon/test/restore-verify.test.mjs scripts/neon/test/inventory-safety.test.mjs scripts/neon/test/billing-alert.test.mjs
+```
+
+Result: **23 passed,0 failed,0 skipped**, including independent full synthetic dump/restore and actual migrations, supported view capture, exact established quarantine digest equality, all catalog/provenance/privacy/schema/finance/R2 checks and billing guards. Added explicit independently attested ambiguous/late ORIGINAL-source chronology cases and reran:
+
+```
+rtk proxy env KENKUI_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:55438/postgres /Users/dizzler/.local/share/mise/installs/node/24.21.0/bin/node --test scripts/neon/test/inventory-upgrade.test.mjs
+```
+
+Result: **1 passed,0 failed**, both source chronology claims correctly rejected as unresolved. `rtk proxy .venv/bin/ruff check scripts/neon/inventory.py`: **All checks passed!** `rtk proxy .venv/bin/ruff format --check scripts/neon/inventory.py`: **1 file already formatted**. `rtk git diff --check`: clean.
+
+Self-review read all extracted Python and JS changes, tests, scope and runbooks. Confirmed pre-auth validation, no false empty target, exact original-sequence preservation/new-sequence review, no standalone historical exemption, no provenance self-approval, safe output classification and exact500 enforcement. No actual source data/private files were read and no provider calls were made. Operational limitations stay explicit: independent operator provenance/role/admin review, historical chronology gaps, existing-target provenance, real full Auth/backup/restore and owner custody, coordinated freezes, provider/auth/native/DNS/billing/cold/overnight acceptance remain controller-owned and pending.

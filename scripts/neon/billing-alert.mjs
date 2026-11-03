@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
@@ -6,7 +7,10 @@ const endpoint='https://console.neon.tech/api/v2/organizations/';
 export function createBillingHelper(config,fetchImpl=fetch) {
   return {async setSpendingAlert(orgId,cents) {
     if(!config||orgId!==config.orgId||!/^[a-z0-9-]{1,60}$/.test(orgId)||!['Launch','Scale'].includes(config.plan)||config.role!=='admin'||
-      typeof config.apiKey!=='string'||!config.apiKey.trim()||!Number.isSafeInteger(cents)||cents<1)throw Error('Billing scope, paid-plan, admin or amount review required');
+      typeof config.apiKey!=='string'||!config.apiKey.trim()||cents!==500)throw Error('Billing scope, paid-plan, admin or amount review required');
+    const a=config.adminAttestation,time=Date.parse(a?.attestedAt);
+    if(!a||a.orgId!==orgId||a.principalId!==config.principalId||typeof config.principalId!=='string'||!config.principalId.trim()||a.role!=='admin'||
+      a.credentialSha256!==createHash('sha256').update(config.apiKey).digest('hex')||!a.approvalRef?.trim()||!a.attestedBy?.trim()||!Number.isFinite(time)||time>Date.now())throw Error('Independent principal-bound organization admin review required');
     const url=endpoint+orgId+'/billing/spending_limit';
     async function request(method) {
       try {
@@ -19,7 +23,8 @@ export function createBillingHelper(config,fetchImpl=fetch) {
         return value;
       } catch {throw Error('Billing request failed; read provider state before any manual retry');}
     }
-    // GET is unavailable on Free. Prove access before the one explicit mutation.
+    // GET proves paid-tier read access only; the independent admin attestation above
+    // is separately bound to the chosen principal and credential. PUT enforces live admin rights.
     await request('GET');
     if(await request('PUT')!==cents)throw Error('Billing write response mismatch; read provider state');
     if(await request('GET')!==cents)throw Error('Billing readback mismatch; alert is unverified');
