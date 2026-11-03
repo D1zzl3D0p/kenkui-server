@@ -34,6 +34,10 @@ func TestReviewedDockerContext(t *testing.T) {
 		"hosted-api/dist/standalone/.snapshot", "hosted-api/dist/standalone/nested/fixture.json",
 		"deploy/neon/unreviewed.mjs", ".git/config", ".env", "private/export.json", "fixture.pem",
 	}
+	// A filename exception also matches descendants when that path is replaced by a directory.
+	for _, path := range allowed {
+		denied = append(denied, path+"/diagnostic.json", path+"/customer-export.csv", path+"/nested/session-dump.txt", path+"/.snapshot")
+	}
 	for _, group := range []struct {
 		paths    []string
 		excluded bool

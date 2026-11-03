@@ -5,6 +5,12 @@
 !hosted-api/dist/release-manifest.json
 !deploy/neon/Dockerfile
 !deploy/neon/verify-standalone.mjs
+# A filename replaced by a directory must not admit any descendants.
+hosted-api/dist/standalone/standalone.js/**
+hosted-api/dist/standalone/package.json/**
+hosted-api/dist/release-manifest.json/**
+deploy/neon/Dockerfile/**
+deploy/neon/verify-standalone.mjs/**
 # Defense in depth if future exceptions are added.
 **/.env
 **/.env.*
