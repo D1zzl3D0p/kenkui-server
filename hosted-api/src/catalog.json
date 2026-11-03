@@ -1,0 +1,424 @@
+{
+  "schemaVersion": 1,
+  "coreSha": "97cba6bdb663c15d2d90d6e4e017be23ecdb9c7c",
+  "selector": "vctk",
+  "sourceSha256": {
+    "builtin.json": "2c17a7f1a379c0a7145d81c28e7388e8347cdd2bbb04b66e0bbb6c4abb68743d",
+    "pack.json": "70b879e2f58a00db6f7c6356270f8905c5440a419df259f26417580ea600288d"
+  },
+  "voices": [
+    {
+      "id": "alasdair",
+      "name": "Alasdair",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "alf",
+      "name": "Alf",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "angus",
+      "name": "Angus",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "anna",
+      "name": "Anna",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "aoife",
+      "name": "Aoife",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "arjun",
+      "name": "Arjun",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "aroha",
+      "name": "Aroha",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "azelma",
+      "name": "Azelma",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "beatrix",
+      "name": "Beatrix",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "benny",
+      "name": "Benny",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "bram",
+      "name": "Bram",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "bridget",
+      "name": "Bridget",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "brigid",
+      "name": "Brigid",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "bronwen",
+      "name": "Bronwen",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "callum",
+      "name": "Callum",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "charles",
+      "name": "Charles",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "ciaran",
+      "name": "Ciaran",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "declan",
+      "name": "Declan",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "deon",
+      "name": "Deon",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "dolly",
+      "name": "Dolly",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "earl",
+      "name": "Earl",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "elspeth",
+      "name": "Elspeth",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "eoin",
+      "name": "Eoin",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "eponine",
+      "name": "Eponine",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "eve",
+      "name": "Eve",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "fantine",
+      "name": "Fantine",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "fergus",
+      "name": "Fergus",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "finlay",
+      "name": "Finlay",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "flynn",
+      "name": "Flynn",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "frankie",
+      "name": "Frankie",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "george",
+      "name": "George",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "georgie",
+      "name": "Georgie",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "hamish",
+      "name": "Hamish",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "isabeau",
+      "name": "Isabeau",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "jane",
+      "name": "Jane",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "laurel",
+      "name": "Laurel",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "lexie",
+      "name": "Lexie",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "mabel",
+      "name": "Mabel",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "marco",
+      "name": "Marco",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "marin",
+      "name": "Marin",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "mary",
+      "name": "Mary",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "michael",
+      "name": "Michael",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "moira",
+      "name": "Moira",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "nora",
+      "name": "Nora",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "ozzy",
+      "name": "Ozzy",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "paul",
+      "name": "Paul",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "priya",
+      "name": "Priya",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "reid",
+      "name": "Reid",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "rex",
+      "name": "Rex",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "rohan",
+      "name": "Rohan",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "rory",
+      "name": "Rory",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "saoirse",
+      "name": "Saoirse",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "seamus",
+      "name": "Seamus",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "tavish",
+      "name": "Tavish",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "thandi",
+      "name": "Thandi",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "vera",
+      "name": "Vera",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "vivienne",
+      "name": "Vivienne",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "wren",
+      "name": "Wren",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    },
+    {
+      "id": "zola",
+      "name": "Zola",
+      "language": "english",
+      "licenseId": "CC-BY-4.0",
+      "voiceRights": "Derived from the VCTK corpus via kyutai/tts-voices. Review the VCTK terms and speaker consent for your intended use before commercial deployment."
+    }
+  ]
+}

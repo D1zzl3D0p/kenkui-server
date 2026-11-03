@@ -1,0 +1,25 @@
+{
+  "name": "@kenkui/hosted-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "24.21.0" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "esbuild src/index.ts --bundle --platform=node --target=node24 --format=esm --packages=external --sourcemap=external --sources-content=false --outfile=dist/index.js"
+  },
+  "dependencies": {
+    "@neon/config": "1.10.0",
+    "@neon/functions": "0.11.0",
+    "hono": "4.13.16",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
