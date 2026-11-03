@@ -231,6 +231,42 @@ def test_runtime_grants_prevent_directory_activation(database):
                 apply_grants()
             conn.execute(sql.SQL("REVOKE {} FROM {}").format(inherited, worker))
             apply_grants()
+
+            # A session can assume these roles even when none of their privileges
+            # are automatically inherited. Exercise the access as the runtime session.
+            bridge = sql.Identifier("migration_bridge_" + uuid4().hex)
+            writer = sql.Identifier("migration_writer_" + uuid4().hex)
+            for group in (bridge, writer):
+                conn.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(group))
+            for group in (inherited, writer):
+                conn.execute(
+                    sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(sql.Identifier(schema), group)
+                )
+            conn.execute(sql.SQL("GRANT DELETE ON migration_directory_active TO {}").format(writer))
+            switchable = sql.SQL("GRANT {} TO {} WITH INHERIT FALSE, SET TRUE")
+            conn.execute(switchable.format(bridge, api))
+            apply_grants()  # The intermediate role has no private reads or directory writes.
+            for runtime, via, target, operation in (
+                (
+                    worker,
+                    worker,
+                    inherited,
+                    "SELECT legacy_finance_evidence FROM migration_directory_quarantines",
+                ),
+                (api, bridge, writer, "DELETE FROM migration_directory_active WHERE false"),
+                (worker, worker, api, "SELECT invited_emails FROM migration_directory_runs"),
+            ):
+                with conn.transaction(force_rollback=True):
+                    conn.execute(switchable.format(target, via))
+                    with conn.transaction(force_rollback=True):
+                        conn.execute(sql.SQL("SET LOCAL SESSION AUTHORIZATION {}").format(runtime))
+                        with pytest.raises(InsufficientPrivilege), conn.transaction():
+                            conn.execute(operation)
+                        conn.execute(sql.SQL("SET LOCAL ROLE {}").format(target))
+                        conn.execute(operation)
+                    with pytest.raises(psycopg.errors.DivisionByZero), conn.transaction():
+                        apply_grants()
+            apply_grants()
             insert_event = "INSERT INTO migration_rate_events(kind,rate_key) VALUES ('issue','key')"
             insert_challenge = (
                 "INSERT INTO migration_challenges SELECT * FROM migration_challenges WHERE false"
