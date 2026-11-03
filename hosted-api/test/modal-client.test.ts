@@ -63,3 +63,12 @@ describe('authenticated bounded Modal client', () => {
     }
   });
 });
+
+it('preserves safe preflight validation messages while refusing untrusted bridge error details',async()=>{
+  for(const detail of ['unknown chapter id','empty_speech','job_size_limit','voice is unavailable']){
+    const bridge=new ModalBridge(config,async()=>Response.json({detail},{status:422}));
+    await expect(bridge.preflight(owner,{sourceId:source,chapters:['one'],casting:{voiceId:'narrator'}})).rejects.toMatchObject({status:422,message:detail});
+  }
+  const bridge=new ModalBridge(config,async()=>Response.json({detail:'private SQL secret'},{status:422}));
+  await expect(bridge.preflight(owner,{sourceId:source,chapters:['one'],casting:{voiceId:'narrator'}})).rejects.toMatchObject({status:422,message:'The source or job is invalid.'});
+});

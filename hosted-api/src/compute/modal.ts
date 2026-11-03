@@ -45,7 +45,15 @@ export class ModalBridge {
           body:JSON.stringify({environment:this.config.environment,...payload})});
       }catch{throw unavailable();}
       if(!response.ok) {
-        await response.body?.cancel();
+        let detail:unknown;
+        if(path==='/preflight'&&response.status===422){
+          const reader=response.body?.getReader();const chunks:Uint8Array[]=[];let size=0;
+          try{
+            if(reader)while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>2048){await reader.cancel();break;}chunks.push(value);}
+            if(size<=2048)detail=(JSON.parse(Buffer.concat(chunks,size).toString('utf8')) as {detail?:unknown}).detail;
+          }catch{/* Untrusted response text never reaches a public error. */}finally{reader?.releaseLock();}
+        }else await response.body?.cancel();
+        if(response.status===422&&typeof detail==='string'&&['unknown chapter id','voice is unavailable','empty_speech','job_size_limit'].includes(detail))throw new ApiError(422,'http_error',detail);
         if(response.status===429) throw new ApiError(429,'compute_unavailable','Document processing is temporarily unavailable.',{}, {'Retry-After':'5'});
         if(response.status===404) throw new ApiError(404,'not_found','Not found');
         if(response.status===403) throw new ApiError(403,'http_error','resource is not owned by this user');

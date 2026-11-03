@@ -15,6 +15,10 @@ import { registerAssetRoutes, type AssetServices } from './routes/assets.js';
 import { BillingStore } from './db/billing.js';
 import { Checkout, StripePayments } from './billing/stripe.js';
 import { registerBillingRoutes } from './routes/billing.js';
+import { JobStore } from './db/jobs.js';
+import { NotificationStore } from './db/notifications.js';
+import { registerJobRoutes } from './routes/jobs.js';
+import { registerNotificationRoutes } from './routes/notifications.js';
 
 let app:ReturnType<typeof createApi>|undefined;
 
@@ -66,6 +70,14 @@ export default {
           checkout:()=>checkout??=Checkout.fromEnvironment(process.env),
           ...(signingSecret?{webhook:new StripePayments(signingSecret,(id,account,credits)=>billing.grantPayment(id,account,credits))}:{}),
         });
+        const jobs=new JobStore(getPool);
+        registerJobRoutes(next,config,()=>({
+          jobs,assets:assetServices.assets,billing,
+          get bridge(){return assetServices.bridge as ModalBridge;},
+          get objects(){return assetServices.objects;},
+          get signals(){return (assetServices.objects as R2ObjectStore).recoverySignals(config.environment);},
+        }),Number(process.env.KENKUI_MAX_SPEECH_CHARACTERS??'10000000'));
+        registerNotificationRoutes(next,new NotificationStore(getPool),process.env.KENKUI_UNSUBSCRIBE_SECRET??'');
         app=next;
       } catch {
         // A failed bootstrap is retryable after configuration is corrected. Never log env.

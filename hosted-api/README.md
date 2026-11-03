@@ -161,6 +161,52 @@ rearms the original job before deleting the unused candidate. Match `KENKUI_ENV`
 to Python's `KENKUI_DEPLOYMENT` and verify the existing recovery and daily cleanup
 schedules in staging. Python owns execution leases and terminal credit settlement.
 
+## Jobs and completion preferences
+
+The canonical handler now binds owned preflight, create/list/get/cancel jobs and
+notification preferences. Public model aliases, ignored extras and Python's
+selected boolean coercions remain compatible; strict speech booleans and pause
+integers retain their existing rules. The API canonicalizes selected options and
+asks Python to reconstruct the executable pipeline and count speech. It never
+uses a client character count or JavaScript text estimate. Preserve the actual
+`KENKUI_MAX_SPEECH_CHARACTERS` setting (default 10,000,000) alongside the existing
+pricing and beta allowance settings. Admission always uses the recovery marker
+wrapper; Python remains the only execution, lease and terminal settlement owner.
+
+The migration deliberately exposes the private bridge's existing resource bounds
+as local 422 `resource_limit` errors with `details.field` and `details.maximum`,
+before any Modal request: at most 10,000 selected chapters; at most 1,000 selected
+character-cast entries; 512 Unicode code points per normalized chapter identifier,
+selected voice/model/method, character identifier and cast voice; and 11,250,348
+UTF-8 bytes for the canonical private preflight envelope. Existing nonempty
+selection, duplicate selection, voice/model availability and output title/author
+500-code-point constraints still apply. Validate representative existing books
+against these explicit migration limits in staging. The frozen baseline is
+unchanged.
+
+Queued cancellation atomically updates the job and event and releases the exact
+reserved lots. Running cancellation records the durable request for Python to
+acknowledge. Both languages keep optimistic job UPDATE, then account,
+authorization and lot locking. A competing stale write aborts its complete
+transaction and returns the existing sanitized failure; there is no automatic
+transaction or financial-substep replay.
+
+`GET /v1/jobs/{id}/artifact` retains 303 and no-store behavior. The intentionally
+additive authenticated `GET /v1/jobs/{id}/artifact-url` returns `{url}` with
+no-store, using identical ownership/completed-job checks, the stored artifact
+attempt path, filename and 300-second signing. Browser Bearer clients can fetch
+that JSON and navigate directly to private R2. Never place a JWT in a URL or
+buffer the audiobook through the Function. No R2 CORS expansion is required.
+
+Notification GET/PATCH reads only the mapped internal identity's existing email
+and completion preference. It never refreshes or merges email from a provider.
+Set `KENKUI_UNSUBSCRIBE_SECRET` to the exact existing worker signing secret,
+separately in each environment; old signed links and UUIDs remain valid.
+Unsubscribe only turns the preference off and needs no session. Python retains
+completion delivery claims, existing mail links and the actual sending behavior;
+no mail is sent by this API. The proposed team@kenkui.fm sender remains a later
+verification gate. No SMTP/provider identity change is implied here.
+
 ## Catalog provenance and compatibility
 
 `src/catalog.json` contains 59 VCTK metadata records exported from core
