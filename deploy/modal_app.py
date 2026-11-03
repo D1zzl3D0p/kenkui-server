@@ -112,9 +112,7 @@ secrets = [
 ]
 if idle_mode:
     # Later secrets override duplicate keys without rewriting worker credentials.
-    secrets.append(
-        modal.Secret.from_name(f"{app_name}-database-idle", environment_name=deployment)
-    )
+    secrets.append(modal.Secret.from_name(f"{app_name}-database-idle", environment_name=deployment))
 
 
 def configure_model_manifest() -> None:
@@ -147,6 +145,24 @@ def render_job(dispatch_id: str, token: str) -> None:
         token,
         render_workers=8,
     )
+
+
+@app.function(
+    image=image,
+    secrets=[modal.Secret.from_name(f"{app_name}-bridge", environment_name=deployment)] + secrets,
+    volumes={"/models": models},
+    cpu=2,
+    memory=4096,
+    timeout=240,
+    max_containers=2,
+    proxy=proxy,
+)
+@modal.asgi_app(requires_proxy_auth=True)
+def api_bridge():
+    from kenkui_server.compute.api_bridge import bridge_from_environment
+
+    configure_model_manifest()
+    return bridge_from_environment()
 
 
 @app.function(

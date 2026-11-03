@@ -44,6 +44,7 @@ def register_deployment(monkeypatch, idle, deployment="staging"):
         "modal",
         SimpleNamespace(
             App=App,
+            asgi_app=lambda **options: lambda function: function,
             Image=Image,
             Period=lambda **kwargs: kwargs,
             Volume=SimpleNamespace(from_name=lambda *args, **kwargs: object()),
@@ -122,6 +123,15 @@ def test_deployment_secrets_preserve_existing_secrets_with_idle_database_overlay
 ):
     registered = register_deployment(monkeypatch, idle, deployment)
 
-    assert set(registered) == {"render_job", "provision", "recover_jobs", "retain_objects"}
-    for _, options in registered.values():
-        assert options["secrets"] == expected_secrets
+    assert set(registered) == {
+        "render_job",
+        "api_bridge",
+        "provision",
+        "recover_jobs",
+        "retain_objects",
+    }
+    for name, (_, options) in registered.items():
+        bridge_secret = (
+            [(f"kenkui-{deployment}-bridge", deployment)] if name == "api_bridge" else []
+        )
+        assert options["secrets"] == bridge_secret + expected_secrets

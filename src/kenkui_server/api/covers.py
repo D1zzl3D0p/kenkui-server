@@ -6,9 +6,9 @@ import io
 import posixpath
 from pathlib import PurePosixPath
 from urllib.parse import unquote, urlsplit
-from uuid import uuid4
+from uuid import UUID, uuid4
 from xml.etree import ElementTree as ET
-from zipfile import ZIP_STORED, ZipFile
+from zipfile import ZIP_STORED, ZipFile, ZipInfo
 
 from defusedxml.ElementTree import fromstring  # type: ignore[import-untyped]
 
@@ -75,7 +75,7 @@ def read_cover(source: bytes) -> tuple[bytes, str] | None:
     return None
 
 
-def replace_cover(source: bytes, payload: bytes) -> bytes:
+def replace_cover(source: bytes, payload: bytes, *, identifier: UUID | None = None) -> bytes:
     media_type = image_type(payload)
     with ZipFile(io.BytesIO(source)) as archive:
         path, package = _package(archive)
@@ -90,23 +90,28 @@ def replace_cover(source: bytes, payload: bytes) -> bytes:
         for item in list(metadata):
             if item.get("name") == "cover":
                 metadata.remove(item)
-        identifier = f"kenkui-cover-{uuid4().hex}"
-        filename = identifier + (".png" if media_type == "image/png" else ".jpg")
+        deterministic = identifier is not None
+        cover_id = f"kenkui-cover-{(identifier or uuid4()).hex}"
+        filename = cover_id + (".png" if media_type == "image/png" else ".jpg")
         ET.SubElement(
             manifest,
             f"{{{OPF}}}item",
             {
-                "id": identifier,
+                "id": cover_id,
                 "href": filename,
                 "media-type": media_type,
                 "properties": "cover-image",
             },
         )
-        ET.SubElement(metadata, f"{{{OPF}}}meta", {"name": "cover", "content": identifier})
+        ET.SubElement(metadata, f"{{{OPF}}}meta", {"name": "cover", "content": cover_id})
         output = io.BytesIO()
         with ZipFile(output, "w") as target:
             # EPUB requires an uncompressed first mimetype member.
-            target.writestr("mimetype", b"application/epub+zip", compress_type=ZIP_STORED)
+            target.writestr(
+                ZipInfo("mimetype") if deterministic else "mimetype",
+                b"application/epub+zip",
+                compress_type=ZIP_STORED,
+            )
             for member in archive.infolist():
                 if member.filename == "mimetype":
                     continue
@@ -116,5 +121,6 @@ def replace_cover(source: bytes, payload: bytes) -> bytes:
                     if member.filename == path
                     else archive.read(member.filename),
                 )
-            target.writestr(_resolve(path, filename), payload)
+            cover_path = _resolve(path, filename)
+            target.writestr(ZipInfo(cover_path) if deterministic else cover_path, payload)
         return output.getvalue()
