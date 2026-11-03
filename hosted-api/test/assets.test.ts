@@ -62,6 +62,13 @@ describe('owned asset public routes',()=>{
     expect((await request('/v1/assets',init)).status).toBe(422);
     expect(objects.putSource).not.toHaveBeenCalled();
   });
+  it.each(['book','cover'])('rejects HEAD %s before owner lookup and Modal access',async operation=>{
+    const {request,store,bridge}=setup();
+    expect((await request('/v1/assets/'+id+'/'+operation,{method:'HEAD',headers:{authorization:''}})).status).toBe(401);
+    expect((await request('/v1/assets/'+id+'/'+operation,{method:'HEAD'})).status).toBe(405);
+    expect((await request('/v1/assets/'+id+'/unknown',{method:'HEAD'})).status).toBe(404);
+    expect(store.requireOwned).not.toHaveBeenCalled();expect(bridge.inspect).not.toHaveBeenCalled();expect(bridge.cover).not.toHaveBeenCalled();
+  });
   it.each(['book','cover'])('authorizes %s before compute or object access',async operation=>{
     const {request,objects,bridge}=setup({foreign:true});
     expect((await request(`/v1/assets/${id}/${operation}`)).status).toBe(403);

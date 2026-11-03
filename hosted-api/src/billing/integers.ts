@@ -1,3 +1,6 @@
+const maxIntegerDigits=4300;
+export class JsonIntegerTooLong extends RangeError {}
+
 // Python int accepts decimal digits (including Unicode), signs and digit separators.
 export function integerText(text:string):bigint|null {
   let digits=text.replace(/^\p{White_Space}+|\p{White_Space}+$/gu,'');
@@ -9,12 +12,17 @@ export function integerText(text:string):bigint|null {
     while(/\p{Nd}/u.test(String.fromCodePoint(first-1)))first--;
     return String((point-first)%10);
   });
-  if(digits.replace(/^[+-]/,'').length>4300)return null;
+  if(digits.replace(/^[+-]/,'').length>maxIntegerDigits)return null;
   return BigInt(digits);
 }
 
 // Node 24 exposes the original scalar token, preserving Python's distinction between 1, 1.0 and 1e0.
 export function parseExactJson(text:string):unknown {
-  return JSON.parse(text,(_key:string,value:unknown,context?:{source?:string})=>
-    typeof value==='number' && context?.source && /^-?\d+$/.test(context.source)?BigInt(context.source):value);
+  return JSON.parse(text,(_key:string,value:unknown,context?:{source?:string})=>{
+    const token=context?.source;
+    if(typeof value!=='number'||!token||!/^-?\d+$/.test(token))return value;
+    const digits=token.length-(token.startsWith('-')?1:0);
+    if(digits>maxIntegerDigits)throw new JsonIntegerTooLong();
+    return BigInt(token);
+  });
 }

@@ -1,6 +1,7 @@
 import type { Hono } from 'hono';
+import { getOnly } from './get-only.js';
 import { InvalidStripeEvent, packs, type Checkout, type StripePayments } from '../billing/stripe.js';
-import { parseExactJson } from '../billing/integers.js';
+import { JsonIntegerTooLong, parseExactJson } from '../billing/integers.js';
 import { PaymentReferenceConflict, type BillingStore } from '../db/billing.js';
 import { ApiError, type ApiEnv } from '../types.js';
 
@@ -11,6 +12,23 @@ interface BillingServices {
 }
 type ValidationIssue={type:string;loc:(string|number)[];msg:string;input:unknown;ctx?:Record<string,unknown>};
 const validation=(errors:ValidationIssue[])=>new ApiError(422,'validation_error','Request validation failed',{errors});
+const parserReasons=new Map([
+  ["Expected property name or '}' in JSON",'Expecting property name enclosed in double quotes'],
+  ['Expected double-quoted property name in JSON','Expecting property name enclosed in double quotes'],
+  ["Expected ':' after property name in JSON","Expecting ':' delimiter"],
+  ['Unexpected non-whitespace character after JSON','Extra data'],
+]);
+function invalidJson(error:unknown,raw:string):ApiError {
+  // Node sometimes includes request text in a SyntaxError. Only translate exact known diagnostics.
+  const match=error instanceof SyntaxError?/^(.+) at position (\d+) \(line \d+ column \d+\)$/.exec(error.message):null;
+  const reason=match&&parserReasons.get(match[1]!);
+  let position=0;
+  if(reason){
+    // V8 counts UTF-16 units, Python counts code points.
+    for(const _character of raw.slice(0,Number(match![2])))position++;
+  }
+  return validation([{type:'json_invalid',loc:['body',position],msg:'JSON decode error',input:{},ctx:{error:reason||'Expecting value'}}]);
+}
 function checkoutCredits(raw:string,contentType:string|undefined):bigint {
   let value:unknown=raw,original:unknown=raw;
   const mime=contentType?.split(';')[0]?.trim().toLowerCase();
@@ -18,7 +36,10 @@ function checkoutCredits(raw:string,contentType:string|undefined):bigint {
   try {
     if(raw&&isJson){value=parseExactJson(raw);original=JSON.parse(raw);}
   }
-  catch {throw validation([{type:'json_invalid',loc:['body',0],msg:'JSON decode error',input:{},ctx:{error:'Expecting value'}}]);}
+  catch(error){
+    if(error instanceof JsonIntegerTooLong)throw new ApiError(400,'http_error','There was an error parsing the body');
+    throw invalidJson(error,raw);
+  }
   if(!raw||value===null)throw validation([{type:'missing',loc:['body'],msg:'Field required',input:null}]);
   if(typeof value!=='object'||Array.isArray(value))
     throw validation([{type:'model_attributes_type',loc:['body'],msg:'Input should be a valid dictionary or object to extract fields from',input:original}]);
@@ -31,12 +52,12 @@ function checkoutCredits(raw:string,contentType:string|undefined):bigint {
 }
 export function registerBillingRoutes(app:Hono<ApiEnv>,services:BillingServices):void {
   const account=(owner:string)=>services.store.accountForOwner(owner);
-  app.get('/v1/billing',async c=>{
+  app.get('/v1/billing',getOnly,async c=>{
     const result=await account(c.get('principal').userId);
     return c.json({mode:'credits',availableCredits:result.availableCredits,checkoutEnabled:String(services.checkoutEnabled),
       creditHistoryAvailable:true,packs:Array.from(packs,([credits,priceUsdCents])=>({credits,priceUsdCents}))});
   });
-  app.get('/v1/billing/history',async c=>{
+  app.get('/v1/billing/history',getOnly,async c=>{
     const result=await account(c.get('principal').userId);
     return c.json({items:await services.store.history(result.id)});
   });

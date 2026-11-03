@@ -18,6 +18,37 @@ function setup(){
   registerBillingRoutes(app,services);
   return {app,accountForOwner,history,create,grant,services};
 }
+it.each(['/v1/billing','/v1/billing/history'])('rejects HEAD %s after auth without resolving an account',async path=>{
+  const {app,accountForOwner,history}=setup();
+  expect((await app.request(path,{method:'HEAD'})).status).toBe(401);
+  expect((await app.request(path,{method:'HEAD',headers})).status).toBe(405);
+  expect((await app.request('/v1/billing/absent',{method:'HEAD',headers})).status).toBe(404);
+  expect(accountForOwner).not.toHaveBeenCalled();expect(history).not.toHaveBeenCalled();
+});
+it('bounds signed JSON integer tokens at the Python 4300-digit limit before checkout',async()=>{
+  const {app,accountForOwner,create}=setup();
+  for(const sign of ['','-']){
+    const post=(digits:number)=>app.request('/v1/billing/checkout',{method:'POST',headers,body:'{"credits":'+sign+'9'.repeat(digits)+'}'});
+    const allowed=await post(4300);expect((await allowed.json()).error.message).toBe('invalid_credit_pack');
+    const rejected=await post(4301);expect(rejected.status).toBe(400);
+    expect((await rejected.json()).error).toMatchObject({code:'http_error',message:'There was an error parsing the body'});
+  }
+  expect(accountForOwner).not.toHaveBeenCalled();expect(create).not.toHaveBeenCalled();
+});
+it('reports safe Python-style locations for native parser errors with known positions',async()=>{
+  const {app,create}=setup();
+  for(const [body,offset,reason] of [
+    ['{',1,'Expecting property name enclosed in double quotes'],
+    ['{"x" 4}',5,"Expecting ':' delimiter"],
+    ['{"x":"😀"} trailing private',10,'Extra data'],
+  ] as const){
+    const res=await app.request('/v1/billing/checkout',{method:'POST',headers,body});
+    expect(res.status).toBe(422);
+    const errors=(await res.json()).error.details.errors;
+    expect(errors).toEqual([{type:'json_invalid',loc:['body',offset],msg:'JSON decode error',input:{},ctx:{error:reason}}]);
+  }
+  expect(create).not.toHaveBeenCalled();
+});
 it('uses resolved internal account, decimal balance, string feature flag and strict server catalog',async()=>{
   const {app,accountForOwner,history,create,services}=setup();
   expect(await (await app.request('/v1/billing',{headers})).json()).toEqual({mode:'credits',availableCredits:'9007199254740993',

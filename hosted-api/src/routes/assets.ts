@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Hono } from 'hono';
+import { getOnly } from './get-only.js';
 import { ApiError, type ApiEnv, type ApiConfig } from '../types.js';
 import type { AssetResponse, ModalBridge } from '../compute/modal.js';
 import type { AssetStore } from '../db/assets.js';
@@ -43,12 +44,12 @@ export function registerAssetRoutes(app:Hono<ApiEnv>,config:ApiConfig,services:(
     const stored=await selected.assets.completeUpload(asset.id,owner);
     return c.json(stored,201);
   });
-  app.get('/v1/assets/:id/book',async c=>{
+  app.get('/v1/assets/:id/book',getOnly,async c=>{
     const selected=services(),owner=c.get('principal').userId,id=c.req.param('id');
     await selected.assets.requireOwned(id,owner);
     return c.json(await selected.bridge.inspect(owner,id));
   });
-  app.get('/v1/assets/:id/cover',async c=>{
+  app.get('/v1/assets/:id/cover',getOnly,async c=>{
     const selected=services(),owner=c.get('principal').userId,id=c.req.param('id');
     await selected.assets.requireOwned(id,owner);
     const cover=await selected.bridge.cover(owner,id);
