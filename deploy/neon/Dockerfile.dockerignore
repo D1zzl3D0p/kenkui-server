@@ -1,0 +1,17 @@
+**
+!hosted-api
+!hosted-api/package.json
+!hosted-api/package-lock.json
+!hosted-api/build.mjs
+!hosted-api/src
+!hosted-api/src/**/
+!hosted-api/src/**/*.ts
+!hosted-api/src/catalog.json
+!deploy
+!deploy/neon
+!deploy/neon/Dockerfile
+**/.env*
+**/.git/**
+**/private/**
+**/*.pem
+**/*.key

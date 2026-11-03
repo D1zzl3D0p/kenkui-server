@@ -2,10 +2,15 @@
 
 Node 24.21.0; pinned dependencies and package lock. Run `npm ci`, `npm test`,
 `npm run typecheck` and `npm run build` inside this package. The build emits a
-Node 24 ESM bundle with external runtime packages and a source map without source
-contents. The build embeds the managed browser SDK asset. `neon.ts` now uses
-`dist/index.js`, so build before deployment and ship/stage the external runtime
-dependencies. No deploy command has been run.
+self-contained Node24 ESM Function and standalone artifacts under `dist/function`
+and `dist/standalone`, without runtime node_modules or source maps. The build embeds
+the pinned managed browser SDK asset. The only config, `hosted-api/neon.ts`, uses
+`dist/function` with `bundler: 'none'`; build first. Release configuration requires
+an explicit restricted API connection rather than Neon's injected owner URL.
+See [release/ingress preparation](../deploy/neon/README.md) and
+[same-auth rollback](../deploy/neon/rollback.md) for exact archive interfaces,
+protected manual release gates and local clean/TLS smoke commands.
+No provider deploy command has been run.
 
 `src/index.ts` exports the Neon web `fetch` handler. It reads configuration on
 the first invocation, constructs the Hono app once, and passes the lazy `getPool`

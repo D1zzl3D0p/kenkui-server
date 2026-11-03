@@ -61,7 +61,7 @@ jobs:
           python-version: "3.12"
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24.21.0"
       - run: uv sync --frozen --all-groups --extra hosted
         working-directory: kenkui-server
       - run: npm ci

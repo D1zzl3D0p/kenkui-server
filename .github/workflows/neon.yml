@@ -1,0 +1,119 @@
+name: Verify and prepare Neon release
+on:
+  pull_request:
+    paths: ['hosted-api/**', 'ingress/**', 'deploy/neon/**', 'scripts/neon/**', '.github/workflows/neon.yml']
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Protected release target (packages only; no provider writes)
+        type: choice
+        required: true
+        options: [staging, production]
+      studio_ref:
+        description: Reviewed immutable Studio commit
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: neon-release-${{ inputs.environment || github.ref }}
+  cancel-in-progress: false
+env:
+  NODE_VERSION: 24.21.0
+  WRANGLER_SEND_METRICS: 'false'
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ['55438:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm ci
+        working-directory: hosted-api
+      - run: npm run typecheck
+        working-directory: hosted-api
+      - name: Relevant ingress and same-runtime contracts
+        run: npm test -- test/standalone.test.ts test/release-environment.test.ts test/catalog.test.ts test/auth.test.ts test/stripe.test.ts test/assets.test.ts test/events.test.ts
+        working-directory: hosted-api
+      - run: npm run build
+        working-directory: hosted-api
+      - run: npm run smoke
+        working-directory: hosted-api
+        env:
+          KENKUI_TEST_DATABASE_URL: postgresql://postgres@127.0.0.1:55438/postgres
+      - name: Ensure independent PostgreSQL 17 fixture binaries
+        run: |
+          if [ ! -x /usr/lib/postgresql/17/bin/initdb ]; then
+            sudo apt-get update
+            sudo apt-get install -y curl ca-certificates gpg
+            sudo install -d /usr/share/postgresql-common/pgdg
+            sudo curl --fail --silent --show-error -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc
+            test "$(gpg --show-keys --with-colons /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc | awk -F: '$1=="fpr"{print $10;exit}')" = B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
+            . /etc/os-release
+            printf 'Types: deb\nURIs: https://apt.postgresql.org/pub/repos/apt\nSuites: %s-pgdg\nComponents: main\nSigned-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc\n' "$VERSION_CODENAME" | sudo tee /etc/apt/sources.list.d/pgdg.sources
+            sudo apt-get update
+            sudo apt-get install -y postgresql-17
+          fi
+      - name: Exact production artifacts with independently verified TLS
+        run: node test/production-artifact.mjs
+        working-directory: hosted-api
+        env:
+          KENKUI_PG_BIN: /usr/lib/postgresql/17/bin
+      - run: npm ci
+        working-directory: ingress
+      - run: npm run types && npm run typecheck && npm run dry-run && npm test
+        working-directory: ingress
+  release:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    needs: verify
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: kenkui-server
+      - name: Require immutable reviewed Studio revision
+        env:
+          STUDIO_REF: ${{ inputs.studio_ref }}
+        run: '[[ "$STUDIO_REF" =~ ^[0-9a-f]{40}$ ]]'
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.KENKUI_WEB_REPOSITORY }}
+          ref: ${{ inputs.studio_ref }}
+          path: kenkui-studio
+          token: ${{ secrets.KENKUI_REPO_READ_TOKEN || github.token }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm ci && npm run check:api
+        working-directory: kenkui-studio
+      - name: Validate selected public authority before any release artifact
+        env:
+          RELEASE_ENVIRONMENT: ${{ inputs.environment }}
+        run: node scripts/release-config.mjs "$RELEASE_ENVIRONMENT" --check
+        working-directory: kenkui-studio
+      - run: npm ci && npm run build
+        working-directory: kenkui-server/hosted-api
+      - name: Package only reviewed artifacts
+        env:
+          RELEASE_ENVIRONMENT: ${{ inputs.environment }}
+          STUDIO_REF: ${{ inputs.studio_ref }}
+        run: node scripts/neon/package.mjs "$RELEASE_ENVIRONMENT" ../kenkui-studio "$STUDIO_REF"
+        working-directory: kenkui-server
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kenkui-neon-${{ inputs.environment }}-${{ github.sha }}
+          path: |
+            kenkui-server/release/function.tar.gz
+            kenkui-server/release/standalone.tar.gz
+            kenkui-server/release/manifest.json
+          if-no-files-found: error
+          retention-days: 30

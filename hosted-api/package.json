@@ -9,11 +9,13 @@
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "smoke": "node smoke.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1161.0",
     "@aws-sdk/s3-request-presigner": "3.1161.0",
+    "@hono/node-server": "2.1.6",
     "@neon/auth": "0.8.2",
     "@neon/config": "1.10.0",
     "@neon/functions": "0.11.0",
