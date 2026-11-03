@@ -64,6 +64,23 @@ try:
                     "INSERT INTO provider_identities(issuer,subject,identity_id) VALUES (%s,%s,%s)",
                     (LEGACY_ISSUER, sub, owner),
                 )
+                account = UUID(int=7001)
+                lot_id = f"legacy:{account}"
+                conn.execute(
+                    "INSERT INTO credit_accounts(id,identity_id,available_credits) "
+                    "VALUES (%s,%s,4)",
+                    (account, owner),
+                )
+                conn.execute(
+                    """INSERT INTO credit_lots(id,account_id,kind,reference,credited)
+                                VALUES (%s,%s,'legacy',%s,4)""",
+                    (lot_id, account, lot_id),
+                )
+                conn.execute(
+                    """INSERT INTO credit_ledger_entries(id,account_id,kind,credits,reference)
+                        VALUES (gen_random_uuid(),%s,'reservation',-3,'fictional-reservation')""",
+                    (account,),
+                )
                 snapshot = restored_snapshot_digest(conn)
                 approval = {
                     "approvalArtifactDigest": "c" * 64,
@@ -75,13 +92,31 @@ try:
                             "ownerId": str(owner),
                             "legacySubject": sub,
                             "fixtureFingerprint": fixture_fingerprint(conn, "staging", owner),
+                            "financePolicy": "preserve-approved-unknown-legacy",
+                            "legacyOpeningBalances": [
+                                {
+                                    "accountId": str(account),
+                                    "availableCredits": "4",
+                                    "netLedgerCredits": "-3",
+                                    "openingResidualCredits": "7",
+                                    "legacyLots": [
+                                        {
+                                            "lotId": lot_id,
+                                            "reference": lot_id,
+                                            "credited": "4",
+                                            "reserved": "0",
+                                            "consumed": "0",
+                                        }
+                                    ],
+                                }
+                            ],
                         }
                     ],
                 }
                 q = json.dumps(
                     {
                         **approval,
-                        "version": 1,
+                        "version": 2,
                         "environment": "staging",
                         "sourceEnvironmentId": ENVIRONMENT_ID,
                         "sourceClientId": CLIENT_ID,

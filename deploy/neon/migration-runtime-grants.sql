@@ -1,5 +1,5 @@
 -- Run as the release owner with the target application schema on search_path.
--- psql -v api_role=... -v worker_role=... -f migration-runtime-grants.sql
+-- psql -v ON_ERROR_STOP=1 -1 -v api_role=... -v worker_role=... -f migration-runtime-grants.sql
 -- Clear direct grants inherited from table-creation defaults before adding read-only access.
 REVOKE ALL ON migration_directory_quarantines FROM PUBLIC, :"api_role", :"worker_role";
 REVOKE ALL ON migration_directory_active,migration_directory_runs,
@@ -18,3 +18,23 @@ GRANT UPDATE (claimed_at) ON migration_challenges TO :"worker_role";
 GRANT UPDATE (id) ON migration_rate_events TO :"worker_role";
 GRANT USAGE ON SCHEMA neon_auth TO :"api_role";
 GRANT SELECT (id,email,"emailVerified",banned) ON neon_auth."user" TO :"api_role";
+
+-- Abort the release if an inherited/default grant still allows private reads or
+-- directory writes. A zero denominator means the role grants must be reconciled.
+WITH runtime(role_name) AS (VALUES (:'api_role'::name), (:'worker_role'::name)),
+directory(relation) AS (VALUES
+    ('migration_directory_runs'::regclass), ('migration_directory_quarantines'::regclass),
+    ('migration_directory_rows'::regclass), ('migration_directory_aliases'::regclass),
+    ('migration_directory_active'::regclass))
+SELECT 1 / (:'api_role'::name <> :'worker_role'::name AND NOT EXISTS (
+    SELECT FROM runtime CROSS JOIN directory
+    WHERE has_table_privilege(role_name, relation, 'DELETE,TRUNCATE,TRIGGER')
+       OR has_any_column_privilege(role_name, relation, 'INSERT,UPDATE,REFERENCES')
+       OR (relation='migration_directory_quarantines'::regclass
+           AND has_any_column_privilege(role_name, relation, 'SELECT'))
+       OR (relation='migration_directory_runs'::regclass AND EXISTS (
+           SELECT FROM pg_attribute WHERE attrelid=relation AND attnum>0 AND NOT attisdropped
+             AND attname NOT IN ('id','issuer','mode','frozen','valid_until')
+             AND (role_name<>:'api_role'::name OR attname NOT IN ('environment','invited_emails'))
+             AND has_column_privilege(role_name, relation, attnum, 'SELECT')))
+))::int AS runtime_grants_verified;

@@ -179,9 +179,9 @@ def fixture_fingerprint(conn: Any, environment: str, owner: UUID) -> str:
         return _fingerprint(_projection(conn, environment, owner))
 
 
-def _validate_owner(conn: Any, environment: str, owner: UUID, fingerprint: str) -> None:
+def _validate_owner(conn: Any, environment: str, owner: UUID, record: dict[str, Any]) -> None:
     data = _projection(conn, environment, owner)
-    require(_fingerprint(data) == fingerprint)
+    require(_fingerprint(data) == record["fixtureFingerprint"])
     require(len(data["identity"]) == 1 and data["identity"][0]["email"] is None)
     require(len(data["bindings"]) == 1 and not data["payments"])
     require(all(j["status"] in ("succeeded", "failed", "cancelled") for j in data["jobs"]))
@@ -189,11 +189,20 @@ def _validate_owner(conn: Any, environment: str, owner: UUID, fingerprint: str) 
     available_from_lots = dict.fromkeys(balances, 0)
     ledger_balances = dict.fromkeys(balances, 0)
     grants = set()
+    legacy_lots: dict[str, list[dict[str, str]]] = {account: [] for account in balances}
     for lot in data["lots"]:
         require(lot["kind"] != "purchase" and not lot["reference"].startswith("stripe:"))
         credited = int(lot["credited"])
-        # The 0004 carryover aggregates pre-lot balances with unknown origin.
-        require(lot["kind"] != "legacy" or credited == 0)
+        if lot["kind"] == "legacy":
+            legacy_lots[lot["account_id"]].append(
+                {
+                    "lotId": lot["id"],
+                    "reference": lot["reference"],
+                    "credited": lot["credited"],
+                    "reserved": lot["reserved"],
+                    "consumed": lot["consumed"],
+                }
+            )
         available_from_lots[lot["account_id"]] += (
             credited - int(lot["reserved"]) - int(lot["consumed"])
         )
@@ -214,7 +223,31 @@ def _validate_owner(conn: Any, environment: str, owner: UUID, fingerprint: str) 
             origin = (account, entry["reference"], entry["credits"])
             require(entry["authorization_id"] is None and origin in grants)
             grants.remove(origin)
-    require(not grants and balances == available_from_lots == ledger_balances)
+    require(not grants and balances == available_from_lots)
+    # Derive the entire ordered wire value from locked inventory. Exact equality
+    # checks nested keys, canonical decimal strings, ordering and completeness.
+    exceptional = []
+    for account, available in sorted(balances.items()):
+        lots = legacy_lots[account]
+        net = ledger_balances[account]
+        residual = available - net
+        if residual == 0 and not any(int(lot["credited"]) > 0 for lot in lots):
+            continue
+        require(residual >= 0 and bool(lots))
+        # 0004 created each carryover with exactly this id and reference.
+        require(all(lot["lotId"] == lot["reference"] == f"legacy:{account}" for lot in lots))
+        exceptional.append(
+            {
+                "accountId": account,
+                "availableCredits": str(available),
+                "netLedgerCredits": str(net),
+                "openingResidualCredits": str(residual),
+                "legacyLots": lots,
+            }
+        )
+    require(record.get("legacyOpeningBalances", []) == exceptional)
+    expected_policy = "preserve-approved-unknown-legacy" if exceptional else "strict-v1"
+    require(record.get("financePolicy", "strict-v1") == expected_policy)
     blocked = conn.execute(
         """
         SELECT 1 FROM identity_link_proofs WHERE identity_id=%s AND consumed_at IS NULL
@@ -235,7 +268,8 @@ def prior_classifications(conn: Any, environment: str) -> list[dict[str, Any]]:
     # Inactive runs keep the classification even if a pointer is lost.
     rows: list[dict[str, Any]] = conn.execute(
         """
-        SELECT DISTINCT q.owner_id,q.subject,q.fixture_fingerprint,r.approval_ref,
+        SELECT DISTINCT q.owner_id,q.subject,q.fixture_fingerprint,q.finance_policy,
+               q.legacy_finance_evidence,r.approval_ref,r.approval_artifact_digest,
                a.run_id IS NOT NULL AS active
         FROM migration_directory_quarantines q JOIN migration_directory_runs r ON r.id=q.run_id
         LEFT JOIN migration_directory_active a ON a.run_id=q.run_id
@@ -261,7 +295,9 @@ def validate_quarantine(
     data = load_json(raw)
     require(isinstance(data, dict) and data.keys() == MANIFEST_KEYS)
     require(
-        type(data["version"]) is int and data["version"] == 1 and data["assertion"] == ASSERTION
+        type(data["version"]) is int
+        and data["version"] in (1, 2)
+        and data["assertion"] == ASSERTION
     )
     require(
         all(
@@ -295,11 +331,11 @@ def validate_quarantine(
     require(restored_snapshot_digest(conn) == data["restoredSnapshotDigest"])
     conn.execute("LOCK TABLE identity_link_proofs,migration_challenges IN SHARE MODE")
     remaining = dict(missing)
+    keys = {"ownerId", "legacySubject", "fixtureFingerprint"}
+    if data["version"] == 2:
+        keys.update(("financePolicy", "legacyOpeningBalances"))
     for entry in data["records"]:
-        require(
-            isinstance(entry, dict)
-            and entry.keys() == {"ownerId", "legacySubject", "fixtureFingerprint"}
-        )
+        require(isinstance(entry, dict) and entry.keys() == keys)
         sub = entry["legacySubject"]
         require(
             isinstance(sub, str)
@@ -310,14 +346,31 @@ def validate_quarantine(
             and str(remaining[sub]) == entry["ownerId"]
         )
         require(_digest(entry["fixtureFingerprint"]))
-        _validate_owner(conn, environment, remaining.pop(sub), entry["fixtureFingerprint"])
+        _validate_owner(conn, environment, remaining.pop(sub), entry)
     # An operator can rebind unchanged reviewed records to a new snapshot. A change
     # needs a fresh durable decision; replaying a formerly active approval is insufficient.
-    fingerprints = {r["legacySubject"]: r["fixtureFingerprint"] for r in data["records"]}
+    classifications = {
+        r["legacySubject"]: (
+            r["fixtureFingerprint"],
+            r.get("financePolicy", "strict-v1"),
+            r.get("legacyOpeningBalances") or None,
+        )
+        for r in data["records"]
+    }
+
+    def unchanged(row: dict[str, Any]) -> bool:
+        return classifications[row["subject"]] == (
+            row["fixture_fingerprint"],
+            row["finance_policy"],
+            row["legacy_finance_evidence"],
+        )
+
     active = [r for r in history if r["active"]]
-    if any(fingerprints[r["subject"]] != r["fixture_fingerprint"] for r in (active or history)):
+    if any(not unchanged(r) for r in (active or history)):
         require(all(r["approval_ref"] != data["approvalRef"] for r in history))
     for r in history:
         if r["approval_ref"] == data["approvalRef"]:
-            require(fingerprints[r["subject"]] == r["fixture_fingerprint"])
+            require(unchanged(r))
+            if data["version"] == 2:
+                require(r["approval_artifact_digest"] == data["approvalArtifactDigest"])
     return data, digest

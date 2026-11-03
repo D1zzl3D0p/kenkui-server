@@ -200,10 +200,19 @@ def import_directory(
                 )
                 cursor.executemany(
                     """INSERT INTO migration_directory_quarantines
-                       (run_id,owner_id,subject,fixture_fingerprint)
-                       VALUES (%s,%s,%s,%s)""",
+                       (run_id,owner_id,subject,fixture_fingerprint,finance_policy,legacy_finance_evidence)
+                       VALUES (%s,%s,%s,%s,%s,%s::jsonb)""",
                     [
-                        (run, r["ownerId"], r["legacySubject"], r["fixtureFingerprint"])
+                        (
+                            run,
+                            r["ownerId"],
+                            r["legacySubject"],
+                            r["fixtureFingerprint"],
+                            r.get("financePolicy", "strict-v1"),
+                            json.dumps(r["legacyOpeningBalances"])
+                            if r.get("legacyOpeningBalances")
+                            else None,
+                        )
                         for r in manifest.get("records", [])
                     ],
                 )

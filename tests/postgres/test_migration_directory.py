@@ -202,15 +202,35 @@ def test_runtime_grants_prevent_directory_activation(database):
             raw, ev = sample()
             import_directory(conn, "staging", raw, ev, activate=True)
             grants = Path("deploy/neon/migration-runtime-grants.sql").read_text()
-            for statement in "\n".join(
+            statements = "\n".join(
                 line for line in grants.splitlines() if not line.startswith("--")
-            ).split(";"):
-                if statement.strip() and "neon_auth" not in statement:
-                    conn.execute(
-                        statement.replace(':"api_role"', api.as_string(conn)).replace(
-                            ':"worker_role"', worker.as_string(conn)
-                        )
-                    )
+            ).split(";")
+
+            def apply_grants():
+                for statement in statements:
+                    if statement.strip() and "neon_auth" not in statement:
+                        for key, role in [("api_role", api), ("worker_role", worker)]:
+                            statement = statement.replace(
+                                f':"{key}"', role.as_string(conn)
+                            ).replace(
+                                f":'{key}'",
+                                sql.Literal(role.as_string(conn).strip('"')).as_string(conn),
+                            )
+                        conn.execute(statement)
+
+            inherited = sql.Identifier("migration_reader_" + uuid4().hex)
+            conn.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(inherited))
+            conn.execute(
+                sql.SQL(
+                    "GRANT SELECT (legacy_finance_evidence) ON "
+                    "migration_directory_quarantines TO {}"
+                ).format(inherited)
+            )
+            conn.execute(sql.SQL("GRANT {} TO {}").format(inherited, worker))
+            with pytest.raises(psycopg.errors.DivisionByZero), conn.transaction():
+                apply_grants()
+            conn.execute(sql.SQL("REVOKE {} FROM {}").format(inherited, worker))
+            apply_grants()
             insert_event = "INSERT INTO migration_rate_events(kind,rate_key) VALUES ('issue','key')"
             insert_challenge = (
                 "INSERT INTO migration_challenges SELECT * FROM migration_challenges WHERE false"
@@ -252,6 +272,8 @@ def test_runtime_grants_prevent_directory_activation(database):
                     conn.execute("DELETE FROM migration_directory_active")
                 for denied in (
                     "SELECT * FROM migration_directory_quarantines",
+                    "SELECT finance_policy FROM migration_directory_quarantines",
+                    "SELECT legacy_finance_evidence FROM migration_directory_quarantines",
                     "DELETE FROM migration_directory_quarantines",
                     "UPDATE migration_directory_runs SET quarantined_owners=0",
                 ):
@@ -497,7 +519,7 @@ def seed_owner(conn, n, subject):
     return owner
 
 
-def manifest(conn, evidence, records, *, approval_ref="fixture-review/1"):
+def manifest(conn, evidence, records, *, approval_ref="fixture-review/1", version=1):
     from kenkui_server.storage.migration_fixture_quarantine import restored_snapshot_digest
 
     snapshot = restored_snapshot_digest(conn)
@@ -506,7 +528,7 @@ def manifest(conn, evidence, records, *, approval_ref="fixture-review/1"):
         for k in ("environment", "sourceEnvironmentId", "sourceClientId", "sourceDigest")
     }
     payload.update(
-        version=1,
+        version=version,
         restoredSnapshotDigest=snapshot,
         approvalArtifactDigest="1" * 64,
         approvalRef=approval_ref,
@@ -586,6 +608,294 @@ def fixture_records(conn, env, count):
             }
         )
     return records
+
+
+def legacy_finance_records(conn):
+    from kenkui_server.storage.migration_fixture_quarantine import fixture_fingerprint
+
+    records = fixture_records(conn, "staging", 3)
+    for i, (balance, net, residual) in enumerate([(4, -3, 7), (0, -23, 23)]):
+        account = UUID(int=200 + i)
+        lot_id = f"legacy:{account}"
+        conn.execute("DELETE FROM credit_allocations WHERE account_id=%s", (account,))
+        conn.execute("DELETE FROM credit_lots WHERE account_id=%s", (account,))
+        conn.execute("DELETE FROM credit_ledger_entries WHERE account_id=%s", (account,))
+        conn.execute(
+            "UPDATE credit_accounts SET available_credits=%s WHERE id=%s", (balance, account)
+        )
+        conn.execute(
+            """INSERT INTO credit_lots(id,account_id,kind,reference,credited)
+                        VALUES(%s,%s,'legacy',%s,%s)""",
+            (lot_id, account, lot_id, balance),
+        )
+        # The reservations were finalized before 0004 captured current availability.
+        settled = UUID(int=500 + i)
+        conn.execute(
+            """INSERT INTO jobs(id,spec_json,status,version,progress_json,owner_id)
+                    SELECT %s,spec_json,'succeeded',1,progress_json,owner_id
+                    FROM jobs WHERE id=%s""",
+            (f"settled-{i}", f"job-{i}"),
+        )
+        conn.execute(
+            """INSERT INTO credit_authorizations(id,job_id,account_id,credits,status)
+                        VALUES(%s,%s,%s,%s,'settled')""",
+            (settled, f"settled-{i}", account, -net),
+        )
+        released = UUID(int=400 + i)
+        for auth, kind, credits in [
+            (settled, "reservation", net),
+            (settled, "settlement", 0),
+            (released, "reservation", -3),
+            (released, "release", 3),
+        ]:
+            conn.execute(
+                """INSERT INTO credit_ledger_entries
+                       (id,account_id,authorization_id,kind,credits,reference)
+                    VALUES(gen_random_uuid(),%s,%s,%s,%s,%s)""",
+                (account, auth, kind, credits, f"{kind}:{auth}"),
+            )
+        records[i].update(
+            fixtureFingerprint=fixture_fingerprint(conn, "staging", UUID(int=100 + i)),
+            financePolicy="preserve-approved-unknown-legacy",
+            legacyOpeningBalances=[
+                dict(
+                    accountId=str(account),
+                    availableCredits=str(balance),
+                    netLedgerCredits=str(net),
+                    openingResidualCredits=str(residual),
+                    legacyLots=[
+                        dict(
+                            lotId=lot_id,
+                            reference=lot_id,
+                            credited=str(balance),
+                            reserved="0",
+                            consumed="0",
+                        )
+                    ],
+                )
+            ],
+        )
+    records[2].update(financePolicy="strict-v1", legacyOpeningBalances=[])
+    return records
+
+
+def test_exact_v2_signed_legacy_finance_preserved_and_retained(database):
+    from kenkui_server.storage.migration_challenges import prune_migration_recovery
+
+    with database.connection() as conn:
+        records = legacy_finance_records(conn)
+        before = owned_inventory(conn)
+        raw, ev = sample()
+        strict = [
+            {k: v for k, v in r.items() if k not in ("financePolicy", "legacyOpeningBalances")}
+            for r in records
+        ]
+        v1 = manifest(conn, ev, strict)
+        with pytest.raises(ValueError):
+            import_directory(conn, "staging", raw, ev, activate=True, quarantine=v1)
+        for final in (False, True):
+            if final:
+                conn.execute("""INSERT INTO stored_objects(id,object_kind,opaque_object_key,
+                         resource_id,terminal_at) VALUES(gen_random_uuid(),'temporary',
+                         'unrelated-key','unrelated-resource',now())""")
+                raw, ev = sample(source_rows() + [source_rows()[0] | {"id": "user_fresh"}])
+                ev.update(
+                    mode="final",
+                    finalDigest=ev["sourceDigest"],
+                    finalWatermark=ev["watermark"],
+                    admissionsFrozen=True,
+                    writesFrozen=True,
+                )
+            q = manifest(conn, ev, records, version=2)
+            for activate in (False, True):
+                result = import_directory(conn, "staging", raw, ev, activate=activate, quarantine=q)
+                assert result.quarantined_owners == 3
+                assert result.source_only == ev["expectedSourceCount"]
+        conn.execute("""INSERT INTO migration_rate_events(kind,rate_key,created_at)
+                        VALUES ('issue','test',now()-interval '2 days')""")
+        assert prune_migration_recovery(conn) == 1
+        rows = conn.execute("""SELECT owner_id, finance_policy, legacy_finance_evidence,
+                                      quarantine_version
+                               FROM migration_directory_quarantines q
+                               JOIN migration_directory_runs r ON r.id=q.run_id
+                               ORDER BY owner_id""").fetchall()
+        digests = conn.execute("""SELECT DISTINCT restored_snapshot_digest
+                                 FROM migration_directory_runs""").fetchall()
+        assert len(digests) == 2
+        assert len(rows) == 6
+        for row, record in zip(rows, [r for r in records for _ in range(2)], strict=True):
+            assert row["quarantine_version"] == 2
+            assert str(row["owner_id"]) == record["ownerId"]
+            assert row["finance_policy"] == record["financePolicy"]
+            assert row["legacy_finance_evidence"] == (record["legacyOpeningBalances"] or None)
+        assert owned_inventory(conn) == before
+
+
+def test_v2_conserves_mixed_legacy_and_grant_availability(database):
+    from kenkui_server.storage.migration_fixture_quarantine import fixture_fingerprint
+
+    with database.connection() as conn:
+        records = legacy_finance_records(conn)
+        account = UUID(int=200)
+        # A later matched grant adds 3 credits after the existing reservation
+        # consumed 3 legacy credits. The combined lot availability remains 4.
+        conn.execute("UPDATE credit_lots SET consumed=3 WHERE account_id=%s", (account,))
+        conn.execute(
+            """INSERT INTO credit_lots(id,account_id,kind,reference,credited)
+                        VALUES('grant-later',%s,'grant','fictional-grant',3)""",
+            (account,),
+        )
+        conn.execute(
+            """INSERT INTO credit_ledger_entries(id,account_id,kind,credits,reference)
+                        VALUES(gen_random_uuid(),%s,'purchase',3,'fictional-grant')""",
+            (account,),
+        )
+        opening = records[0]["legacyOpeningBalances"][0]
+        opening.update(netLedgerCredits="0", openingResidualCredits="4")
+        opening["legacyLots"][0]["consumed"] = "3"
+        records[0]["fixtureFingerprint"] = fixture_fingerprint(conn, "staging", UUID(int=100))
+        raw, ev = sample()
+        q = manifest(conn, ev, records, version=2)
+        import_directory(conn, "staging", raw, ev, activate=True, quarantine=q)
+
+
+def test_v2_rejects_inexact_diagnostic_and_independent_approval(database):
+    from copy import deepcopy
+
+    with database.connection() as conn:
+        raw, ev = sample()
+        records = legacy_finance_records(conn)
+        for patch in [
+            {"accountId": records[1]["legacyOpeningBalances"][0]["accountId"]},
+            {"availableCredits": "04"},
+            {"availableCredits": 4},
+            {"availableCredits": True},
+            {"netLedgerCredits": "-0"},
+            {"netLedgerCredits": "-4"},
+            {"openingResidualCredits": "4"},
+            {"openingResidualCredits": "-1"},
+            {"legacyLots": []},
+            {"newField": None},
+        ]:
+            bad = deepcopy(records)
+            bad[0]["legacyOpeningBalances"][0].update(patch)
+            q = manifest(conn, ev, bad, version=2)
+            with pytest.raises(ValueError):
+                import_directory(conn, "staging", raw, ev, activate=True, quarantine=q)
+        for edit in (
+            lambda r: r.pop("financePolicy"),
+            lambda r: r.update(financePolicy="preserve"),
+            lambda r: r.update(financePolicy="strict-v1"),
+            lambda r: r.update(legacyOpeningBalances=[]),
+            lambda r: r["legacyOpeningBalances"].extend(r["legacyOpeningBalances"][:]),
+            lambda r: r["legacyOpeningBalances"][0]["legacyLots"].extend(
+                r["legacyOpeningBalances"][0]["legacyLots"][:]
+            ),
+            lambda r: r["legacyOpeningBalances"][0]["legacyLots"][0].update(reference="changed"),
+        ):
+            bad = deepcopy(records)
+            edit(bad[0])
+            q = manifest(conn, ev, bad, version=2)
+            with pytest.raises(ValueError):
+                import_directory(conn, "staging", raw, ev, activate=False, quarantine=q)
+        q = manifest(conn, ev, records, version=2)
+        ev["quarantineApproval"]["records"] = deepcopy(records)
+        ev["quarantineApproval"]["records"][0]["legacyOpeningBalances"][0][
+            "openingResidualCredits"
+        ] = "4"
+        with pytest.raises(ValueError):
+            import_directory(conn, "staging", raw, ev, activate=True, quarantine=q)
+        assert not conn.execute("SELECT * FROM migration_directory_runs").fetchall()
+
+
+def test_v2_exceptions_cannot_excuse_purchase_ownership_or_unrelated_corruption(database):
+    from copy import deepcopy
+
+    from kenkui_server.storage.migration_fixture_quarantine import fixture_fingerprint
+
+    with database.connection() as conn:
+        records = legacy_finance_records(conn)
+        raw, ev = sample()
+        for statement in [
+            "UPDATE credit_lots SET kind='purchase' WHERE credited=4",
+            "UPDATE credit_ledger_entries SET reference='stripe:fixture' WHERE credits=-23",
+            "INSERT INTO payment_events SELECT 'legacy', account_id::text, now() "
+            "FROM credit_lots WHERE credited=4",
+            "UPDATE credit_ledger_entries SET kind='purchase' WHERE credits=-23",
+            "UPDATE credit_lots SET reference='unmatched-grant' WHERE kind='grant'",
+            "UPDATE credit_authorizations SET account_id=("
+            "SELECT id FROM credit_accounts WHERE available_credits=0) WHERE job_id='job-0'",
+            "UPDATE credit_accounts SET available_credits=0 WHERE available_credits=4",
+            "UPDATE credit_ledger_entries SET credits=0 WHERE kind='purchase'",
+            "INSERT INTO provider_identities SELECT 'neon','claimant',id,now() "
+            "FROM identities WHERE workos_subject='user_fixture0'",
+            """INSERT INTO identity_link_proofs
+                      (id,identity_id,issuer,subject,verification_method,expires_at)
+               SELECT gen_random_uuid(),id,'neon','claimant','legacy_session',now()+interval '1 day'
+               FROM identities WHERE workos_subject='user_fixture0'""",
+            "UPDATE credit_lots SET id='renamed',reference='renamed' WHERE credited=4",
+        ]:
+            with conn.transaction(force_rollback=True):
+                conn.execute(statement)
+                changed = deepcopy(records)
+                for r in changed:
+                    r["fixtureFingerprint"] = fixture_fingerprint(
+                        conn, "staging", UUID(r["ownerId"])
+                    )
+                opening = changed[0]["legacyOpeningBalances"][0]
+                if statement.startswith("UPDATE credit_accounts"):
+                    opening.update(availableCredits="0", openingResidualCredits="3")
+                if "'renamed'" in statement:
+                    opening["legacyLots"][0].update(lotId="renamed", reference="renamed")
+                q = manifest(conn, ev, changed, version=2)
+                with pytest.raises(ValueError):
+                    import_directory(conn, "staging", raw, ev, activate=True, quarantine=q)
+        # Both sides of the composite allocation FKs must belong to the same account.
+        with pytest.raises(psycopg.errors.ForeignKeyViolation), conn.transaction():
+            conn.execute("""UPDATE credit_allocations SET lot_id=(
+                         SELECT id FROM credit_lots WHERE credited=4)""")
+        assert not conn.execute("SELECT * FROM migration_directory_active").fetchall()
+
+
+def test_v2_changed_finance_cannot_reuse_or_replay_approval(database):
+    from copy import deepcopy
+
+    from kenkui_server.storage.migration_fixture_quarantine import fixture_fingerprint
+
+    with database.connection() as conn:
+        raw, ev = sample()
+        original = legacy_finance_records(conn)
+        q = manifest(conn, ev, original, version=2)
+        import_directory(conn, "staging", raw, ev, activate=True, quarantine=q)
+        # A reused review reference identifies the same privately retained artifact bytes.
+        changed_approval = json.loads(q) | {"approvalArtifactDigest": "a" * 64}
+        changed_bytes = json.dumps(changed_approval).encode()
+        other = ev | {
+            "quarantineManifestDigest": hashlib.sha256(changed_bytes).hexdigest(),
+            "quarantineApproval": ev["quarantineApproval"] | {"approvalArtifactDigest": "a" * 64},
+        }
+        with pytest.raises(ValueError):
+            import_directory(conn, "staging", raw, other, activate=True, quarantine=changed_bytes)
+        # Neither stale evidence nor a recomputed inventory under the same old
+        # approval authorizes this changed account.
+        conn.execute("UPDATE credit_accounts SET available_credits=0 WHERE available_credits=4")
+        conn.execute("UPDATE credit_lots SET credited=0 WHERE credited=4")
+        changed = deepcopy(original)
+        changed[0]["fixtureFingerprint"] = fixture_fingerprint(conn, "staging", UUID(int=100))
+        opening = changed[0]["legacyOpeningBalances"][0]
+        opening.update(availableCredits="0", openingResidualCredits="3")
+        opening["legacyLots"][0]["credited"] = "0"
+        for records in (original, changed):
+            q = manifest(conn, ev, records, version=2)
+            with pytest.raises(ValueError):
+                import_directory(conn, "staging", raw, ev, activate=True, quarantine=q)
+        renewed = manifest(conn, ev, changed, version=2, approval_ref="fixture-review/2")
+        import_directory(conn, "staging", raw, ev, activate=True, quarantine=renewed)
+        conn.execute("UPDATE credit_accounts SET available_credits=4 WHERE id=%s", (UUID(int=200),))
+        conn.execute("UPDATE credit_lots SET credited=4 WHERE account_id=%s", (UUID(int=200),))
+        q = manifest(conn, ev, original, version=2)
+        with pytest.raises(ValueError):
+            import_directory(conn, "staging", raw, ev, activate=True, quarantine=q)
 
 
 @pytest.mark.parametrize(
@@ -816,8 +1126,8 @@ def test_fixture_locks_block_child_writes_and_failure_rolls_back_every_row(datab
     with database.connection() as conn:
         import_directory(conn, "staging", raw, ev, activate=True)
         prior = conn.execute("SELECT * FROM migration_directory_active").fetchall()
-        records = fixture_records(conn, "staging", 1)
-        q = manifest(conn, ev, records)
+        records = legacy_finance_records(conn)
+        q = manifest(conn, ev, records, version=2)
         conn.execute("""CREATE FUNCTION fail_fixture() RETURNS trigger LANGUAGE plpgsql AS $$
              BEGIN RAISE EXCEPTION 'injected'; END $$""")
         conn.execute("""CREATE TRIGGER fail_fixture AFTER INSERT ON migration_directory_quarantines
@@ -982,7 +1292,7 @@ def test_quarantine_expiring_behind_child_writer_preserves_pointer(database):
         assert not conn.execute("SELECT * FROM migration_directory_quarantines").fetchall()
 
 
-def test_0009_backfills_old_runs(tmp_path):
+def test_upgrades_backfill_old_runs_and_strict_v1_quarantine_rows(tmp_path):
     from psycopg.rows import dict_row
 
     schema = "quarantine_upgrade_" + uuid4().hex
@@ -998,9 +1308,51 @@ def test_0009_backfills_old_runs(tmp_path):
                 watermark,digest,mode,frozen,invited_emails,restored_owners,source_only)
                 VALUES(gen_random_uuid(),'staging','legacy',now(),'mark',repeat('0',64),
                        'final',true,'{}',3,2)""")
+            previous = Path("migrations/postgresql/0009_migration_fixture_quarantine.sql")
+            (tmp_path / previous.name).symlink_to(previous.resolve())
+            db.migrate(tmp_path)
+            fixture_run = uuid4()
+            with db.connection() as conn:
+                owner = seed_owner(conn, 101, "user_upgrade")
+                conn.execute(
+                    """INSERT INTO migration_directory_runs(
+                    id,environment,issuer,captured_at,watermark,digest,mode,frozen,invited_emails,
+                    restored_owners,source_only,matched_restored_owners,quarantined_owners,
+                    quarantine_version,quarantine_digest,approval_artifact_digest,approval_ref,
+                    attested_by,attested_at,restored_snapshot_digest)
+                    VALUES(%s,'staging','legacy',now(),'mark',repeat('0',64),'final',true,'{}',
+                        1,0,0,1,1,repeat('1',64),repeat('2',64),'review','operator',now(),
+                        repeat('3',64))""",
+                    (fixture_run,),
+                )
+                conn.execute(
+                    """INSERT INTO migration_directory_quarantines
+                    VALUES(%s,%s,'user_upgrade',repeat('4',64))""",
+                    (fixture_run, owner),
+                )
             db.migrate()
+            assert db.execute("""SELECT finance_policy,legacy_finance_evidence
+                               FROM migration_directory_quarantines""").fetchone() == {
+                "finance_policy": "strict-v1",
+                "legacy_finance_evidence": None,
+            }
+            with db.connection() as conn:
+                for policy, value in [
+                    ("unknown", None),
+                    ("strict-v1", "[]"),
+                    ("preserve-approved-unknown-legacy", None),
+                    ("preserve-approved-unknown-legacy", "[]"),
+                    ("preserve-approved-unknown-legacy", "{}"),
+                ]:
+                    with pytest.raises(psycopg.errors.CheckViolation), conn.transaction():
+                        conn.execute(
+                            """UPDATE migration_directory_quarantines
+                            SET finance_policy=%s,legacy_finance_evidence=%s::jsonb""",
+                            (policy, value),
+                        )
             assert db.execute("""SELECT restored_owners,matched_restored_owners,quarantined_owners,
-                    quarantine_digest FROM migration_directory_runs""").fetchone() == {
+                    quarantine_digest FROM migration_directory_runs
+                    WHERE quarantine_version IS NULL""").fetchone() == {
                 "restored_owners": 3,
                 "matched_restored_owners": 3,
                 "quarantined_owners": 0,
