@@ -1,4 +1,4 @@
-import { readFileSync,lstatSync } from 'node:fs';
+import { readFileSync,lstatSync,readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
@@ -31,6 +31,8 @@ export function reviewedRelease(environment:string|undefined,directory=process.c
   const manifest=readReceipt(resolve(directory,'dist/release-manifest.json'));
   const server=execFileSync('git',['rev-parse','HEAD'],{cwd:directory,encoding:'utf8'}).trim();
   if(manifest.environment!==environment||manifest.serverSha!==server)throw Error('Release receipt target mismatch');
+  const source=resolve(directory,'dist/function'),metadata=lstatSync(source),entries=readdirSync(source,{withFileTypes:true});
+  if(!metadata.isDirectory()||metadata.isSymbolicLink()||entries.length!==2||entries.some(entry=>!entry.isFile()||!['index.js','package.json'].includes(entry.name)))throw Error('Release runtime directory mismatch');
   verifyFiles(manifest,resolve(directory,'dist'));return manifest;
 }
 /** Same API-env renderer for the receipt-bound Function and retained Node/container. */

@@ -45,6 +45,13 @@ jobs:
         working-directory: hosted-api
       - run: npm run build
         working-directory: hosted-api
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Reviewed Docker context with the actual Moby matcher
+        run: go test -mod=readonly ./...
+        working-directory: scripts/neon/docker-context
       - name: Archive authorization, resource bounds and guarded fallback verification
         run: node --test --test-timeout=15000 scripts/neon/test/*.test.mjs
       - run: npm run smoke

@@ -1,4 +1,4 @@
-import { mkdtemp,mkdir,writeFile,rm } from 'node:fs/promises';
+import { mkdtemp,mkdir,writeFile,rm,symlink } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { execFileSync,spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
@@ -26,6 +26,13 @@ it('actual canonical deploy config derives all pins from verified receipt/runtim
 it('actual deploy path rejects a JWKS-only env substitution before configuration can apply',async()=>{
   const directory=await fixture();try{
     const result=config(directory,{KENKUI_RELEASE_AUTHORITY:JSON.stringify({...pin,jwksUrl:'https://substituted.invalid/jwks'})});expect(result.status).not.toBe(0);expect(result.stderr).toContain('Release authority override mismatch');
+  }finally{await rm(directory,{recursive:true,force:true});}
+});
+it.each(['extra.js','.snapshot','nested/diagnostic.json','symlink'])('actual deploy config rejects unreviewed Function directory entry %s',async(entry)=>{
+  const directory=await fixture();try{
+    const path=resolve(directory,'dist/function',entry);await mkdir(resolve(path,'..'),{recursive:true});
+    if(entry==='symlink')await symlink('index.js',path);else await writeFile(path,'unreviewed');
+    const result=config(directory);expect(result.status).not.toBe(0);expect(result.stderr).toContain('Release runtime directory mismatch');
   }finally{await rm(directory,{recursive:true,force:true});}
 });
 it('actual deploy path refuses runtime bytes altered after a verified restore',async()=>{

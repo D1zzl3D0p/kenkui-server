@@ -1,11 +1,14 @@
+# Individual files only: ancestor exceptions reinclude unreviewed descendants in Moby.
 **
-!hosted-api/
-!hosted-api/dist/
-!hosted-api/dist/standalone/
 !hosted-api/dist/standalone/standalone.js
 !hosted-api/dist/standalone/package.json
 !hosted-api/dist/release-manifest.json
-!deploy/
-!deploy/neon/
 !deploy/neon/Dockerfile
 !deploy/neon/verify-standalone.mjs
+# Defense in depth if future exceptions are added.
+**/.env
+**/.env.*
+**/private/**
+**/*.pem
+**/*.key
+**/.git/**
