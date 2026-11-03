@@ -16,6 +16,8 @@ import { BillingStore } from './db/billing.js';
 import { Checkout, StripePayments } from './billing/stripe.js';
 import { registerBillingRoutes } from './routes/billing.js';
 import { JobStore } from './db/jobs.js';
+import { EventStore } from './db/events.js';
+import { registerEventRoutes } from './routes/events.js';
 import { NotificationStore } from './db/notifications.js';
 import { registerJobRoutes } from './routes/jobs.js';
 import { registerNotificationRoutes } from './routes/notifications.js';
@@ -77,6 +79,7 @@ export default {
           get objects(){return assetServices.objects;},
           get signals(){return (assetServices.objects as R2ObjectStore).recoverySignals(config.environment);},
         }),Number(process.env.KENKUI_MAX_SPEECH_CHARACTERS??'10000000'));
+        registerEventRoutes(next,{jobs,events:new EventStore(getPool)});
         registerNotificationRoutes(next,new NotificationStore(getPool),process.env.KENKUI_UNSUBSCRIBE_SECRET??'');
         app=next;
       } catch {

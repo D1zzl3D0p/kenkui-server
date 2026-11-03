@@ -53,15 +53,17 @@ export function createApi(deps: ApiDeps): Hono<ApiEnv> {
     if (!origin || !deps.config.allowedOrigins.length) {await next(); return;}
     const allowed = deps.config.allowedOrigins.includes(origin);
     if (c.req.method === 'OPTIONS' && c.req.header('Access-Control-Request-Method')) {
+      const allowedMethods=c.req.path==='/v1/notifications'?[...methods,'PATCH']:methods;
+      const allowedHeaders=/^\/v1\/jobs\/[^/]+\/events$/.test(c.req.path)?[...corsHeaders,'Last-Event-ID']:corsHeaders;
       const failures:string[] = [];
       if (!allowed) failures.push('origin');
-      if (!methods.includes(c.req.header('Access-Control-Request-Method')!)) failures.push('method');
-      if ((c.req.header('Access-Control-Request-Headers') ?? '').split(',').filter(Boolean).some(h => !corsHeaders.some(a => a.toLowerCase() === h.trim().toLowerCase()))) failures.push('headers');
+      if (!allowedMethods.includes(c.req.header('Access-Control-Request-Method')!)) failures.push('method');
+      if ((c.req.header('Access-Control-Request-Headers') ?? '').split(',').filter(Boolean).some(h => !allowedHeaders.some(a => a.toLowerCase() === h.trim().toLowerCase()))) failures.push('headers');
       return c.text(failures.length ? `Disallowed CORS ${failures.join(', ')}` : 'OK',failures.length ? 400 : 200,{
         'Content-Type':'text/plain; charset=utf-8',
         'Access-Control-Allow-Credentials':'true',
-        'Access-Control-Allow-Methods':methods.join(', '),
-        'Access-Control-Allow-Headers':corsHeaders.join(', '),
+        'Access-Control-Allow-Methods':allowedMethods.join(', '),
+        'Access-Control-Allow-Headers':allowedHeaders.join(', '),
         'Access-Control-Max-Age':'600',
         'Vary':'Origin',
         ...(allowed ? {'Access-Control-Allow-Origin':origin} : {}),

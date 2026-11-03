@@ -5,6 +5,7 @@ import { decodeSpec, encodeSpec, scopedKey, type JobSpec } from '../billing/job-
 import { requireUuid } from '../compute/modal.js';
 import { ApiError } from '../types.js';
 import { transaction } from './transaction.js';
+import { streamQuery } from './stream-query.js';
 
 export interface AdmissionInput {
   jobId:string; dispatchId:string; ownerId:string; accountId:string; spec:JobSpec;
@@ -37,9 +38,10 @@ export class JobStore {
     const rows=await this.pool().query('SELECT id,spec_json,status,version,progress_json,owner_id FROM jobs WHERE owner_id=$1 ORDER BY id',[owner]);
     return rows.rows.map(snapshot);
   }
-  async getOwned(id:string,owner:string):Promise<JobSnapshot>{
+  async getOwned(id:string,owner:string,signal?:AbortSignal):Promise<JobSnapshot>{
     requireUuid(owner);
-    const row=(await this.pool().query('SELECT j.id,j.spec_json,j.status,j.version,j.progress_json,j.owner_id,f.code,f.message FROM jobs j LEFT JOIN job_failures f ON f.job_id=j.id WHERE j.id=$1',[id])).rows[0];
+    const sql='SELECT j.id,j.spec_json,j.status,j.version,j.progress_json,j.owner_id,f.code,f.message FROM jobs j LEFT JOIN job_failures f ON f.job_id=j.id WHERE j.id=$1';
+    const row=signal?(await streamQuery(this.pool,sql,[id],signal))[0]:(await this.pool().query(sql,[id])).rows[0];
     return ownedSnapshot(row,owner);
   }
   async artifactForJob(id:string):Promise<string>{
