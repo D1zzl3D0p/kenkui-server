@@ -32,6 +32,14 @@ def test_protected_ready_needs_no_database_and_invalid_requests_echo_nothing():
         for body in [
             {"environment": "staging", "email": "secret@private.test"},
             {"code": "secret-123"},
+            # A valid claim envelope cannot add a fixture subject, owner or recipient override.
+            {
+                "environment": "staging",
+                "challengeId": "00000000-0000-4000-8000-000000000001",
+                "code": "0123456789ABCDEF",
+                "legacySubject": "secret-fixture",
+                "recipient": "secret@example.test",
+            },
         ]:
             response = client.post("/migration-email", headers=auth, json=body)
             assert response.status_code == 422 and "secret" not in response.text

@@ -12,6 +12,7 @@ describe.skipIf(!testUrl)('authenticated migration against real PostgreSQL',()=>
    const f=await fixture();
    const {pool}=f;
    try {
+     await f.python('quarantine');
      const store=new IdentityStore(()=>pool,'staging');
      const before={identities:(await pool.query('SELECT * FROM identities')).rows,credits:(await pool.query('SELECT * FROM credit_accounts')).rows,jobs:(await pool.query('SELECT * FROM jobs')).rows};
      const neonKeys=await generateKeyPair('EdDSA'),legacyKeys=await generateKeyPair('RS256');
@@ -21,11 +22,13 @@ describe.skipIf(!testUrl)('authenticated migration against real PostgreSQL',()=>
      const verifier=createLegacyVerifier(legacyIssuer,createLocalJWKSet({keys:[{...await exportJWK(legacyKeys.publicKey),kid:'legacy'}]}));
      const recovery=new LegacyRecovery(auth,verifier,()=>pool,'staging',issuer);
      const legacy=await new SignJWT({iss:legacyIssuer,sub:'user_old',client_id:LEGACY_SOURCE.clientId,sid:'session_verified'}).setIssuedAt().setExpirationTime('5m').setProtectedHeader({alg:'RS256',kid:'legacy'}).sign(legacyKeys.privateKey);
+     const fixtureJwt=await new SignJWT({iss:legacyIssuer,sub:'user_fixture',client_id:LEGACY_SOURCE.clientId,sid:'session_verified'}).setIssuedAt().setExpirationTime('5m').setProtectedHeader({alg:'RS256',kid:'legacy'}).sign(legacyKeys.privateKey);
      for(const subject of [(await f.profile()).subject,(await f.profile('private@relay.test',false)).subject]) {
        const jwt=await new SignJWT({iss:origin,aud:origin,sub:subject,role:'authenticated'}).setIssuedAt().setExpirationTime('5m').setProtectedHeader({alg:'EdDSA',kid:'neon'}).sign(neonKeys.privateKey);
        const request=new Request('https://api.invalid',{headers:{Authorization:'Bearer '+jwt}});
        await expect(auth.verify(request)).rejects.toMatchObject({code:'recovery_required'});
        await expect(recovery.link(request,'unverified')).rejects.toMatchObject({code:'recovery_required'});
+       await expect(recovery.link(request,fixtureJwt)).rejects.toMatchObject({code:'recovery_required'});
        expect(await store.resolveIdentity(issuer,subject)).toBeNull();
        expect(await recovery.link(request,legacy)).toEqual({userId:'11111111-1111-4111-8111-111111111111'});
        expect((await auth.verify(request))?.userId).toBe('11111111-1111-4111-8111-111111111111');

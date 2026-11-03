@@ -16,7 +16,7 @@ name, action, *args = sys.argv[1:]
 assert re.fullmatch("migration_test_[a-f0-9]{32}", name)
 db = PostgresDatabase(url.removesuffix("postgres") + name)
 try:
-    if action == "activate":
+    if action in ("activate", "quarantine"):
         captured = datetime.now(UTC).isoformat()
         rows = [
             {"id": sub, "email": addr, "emailVerifiedAt": captured, "banned": False}
@@ -33,24 +33,71 @@ try:
             }
         ).encode()
         with db.connection() as conn:
-            import_directory(
-                conn,
-                "staging",
-                raw,
-                {
-                    "environment": "staging",
-                    "sourceEnvironmentId": ENVIRONMENT_ID,
-                    "sourceClientId": CLIENT_ID,
-                    "sourceDigest": hashlib.sha256(raw).hexdigest(),
-                    "complete": True,
-                    "mode": "provisional",
-                    "watermark": "fixture",
-                    "capturedAt": captured,
-                    "expectedSourceCount": 2,
-                    "invitedEmails": [],
-                },
-                activate=True,
-            )
+            evidence = {
+                "environment": "staging",
+                "sourceEnvironmentId": ENVIRONMENT_ID,
+                "sourceClientId": CLIENT_ID,
+                "sourceDigest": hashlib.sha256(raw).hexdigest(),
+                "complete": True,
+                "mode": "provisional",
+                "watermark": "fixture",
+                "capturedAt": captured,
+                "expectedSourceCount": 2,
+                "invitedEmails": [],
+            }
+            q = None
+            if action == "quarantine":
+                from uuid import UUID
+
+                from kenkui_server.storage.migration_directory import LEGACY_ISSUER
+                from kenkui_server.storage.migration_fixture_quarantine import (
+                    fixture_fingerprint,
+                    restored_snapshot_digest,
+                )
+
+                owner = UUID(int=7000)
+                sub = "user_fixture"
+                conn.execute(
+                    "INSERT INTO identities(id,workos_subject) VALUES (%s,%s)", (owner, sub)
+                )
+                conn.execute(
+                    "INSERT INTO provider_identities(issuer,subject,identity_id) VALUES (%s,%s,%s)",
+                    (LEGACY_ISSUER, sub, owner),
+                )
+                snapshot = restored_snapshot_digest(conn)
+                approval = {
+                    "approvalArtifactDigest": "c" * 64,
+                    "approvalRef": "synthetic/review",
+                    "attestedBy": "synthetic-release",
+                    "attestedAt": datetime.now(UTC).isoformat(),
+                    "records": [
+                        {
+                            "ownerId": str(owner),
+                            "legacySubject": sub,
+                            "fixtureFingerprint": fixture_fingerprint(conn, "staging", owner),
+                        }
+                    ],
+                }
+                q = json.dumps(
+                    {
+                        **approval,
+                        "version": 1,
+                        "environment": "staging",
+                        "sourceEnvironmentId": ENVIRONMENT_ID,
+                        "sourceClientId": CLIENT_ID,
+                        "sourceDigest": evidence["sourceDigest"],
+                        "restoredSnapshotDigest": snapshot,
+                        "assertion": (
+                            "owner-approved-synthetic-fixtures-preserve-all-exclude-recovery"
+                        ),
+                    }
+                ).encode()
+                evidence.update(
+                    restoredSnapshotDigest=snapshot,
+                    quarantineApproval=approval,
+                    quarantineManifestDigest=hashlib.sha256(q).hexdigest(),
+                )
+            import_directory(conn, "staging", raw, evidence, activate=True, quarantine=q)
     elif action in ("deliver", "fail_send", "slow_send"):
         from concurrent.futures import ThreadPoolExecutor
         from types import SimpleNamespace

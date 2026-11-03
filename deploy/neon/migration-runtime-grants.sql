@@ -1,6 +1,7 @@
 -- Run as the release owner with the target application schema on search_path.
 -- psql -v api_role=... -v worker_role=... -f migration-runtime-grants.sql
 -- Clear direct grants inherited from table-creation defaults before adding read-only access.
+REVOKE ALL ON migration_directory_quarantines FROM PUBLIC, :"api_role", :"worker_role";
 REVOKE ALL ON migration_directory_active,migration_directory_runs,
     migration_directory_rows,migration_directory_aliases FROM :"api_role", :"worker_role";
 GRANT SELECT ON migration_directory_active,migration_directory_runs,

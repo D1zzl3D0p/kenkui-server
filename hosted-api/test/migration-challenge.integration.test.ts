@@ -176,3 +176,33 @@ it.skipIf(!process.env.KENKUI_TEST_DATABASE_URL)('commits wrong guesses and corr
    expect(await service.verify(who,challengeId,code)).toEqual({userId:owner});
  } finally {await f.close();}
 });
+
+it.skipIf(!process.env.KENKUI_TEST_DATABASE_URL)('a quarantine provides no challenge, mail claim or proof',async()=>{
+ const f=await fixture();
+ const sent:string[]=[];
+ const service=new MigrationChallenges(()=>f.pool,'staging',issuer,
+   ()=>({ready:async()=>{},deliver:async(_id:string,code:string)=>{sent.push(code);}}),()=>0,async()=>{});
+ try {
+   const old=await f.profile();
+   const issued=await service.issue(old,'legacy@old.test');
+   await f.python('quarantine');
+   await expect(service.verify(old,issued.challengeId,sent[0]!)).rejects.toMatchObject({status:409});
+   const who=await f.profile('fixture@old.test');
+   const decoy=await service.issue(who,'fixture@old.test');
+   expect(sent).toHaveLength(1);
+   expect((await f.pool.query('SELECT id FROM migration_challenges WHERE id=$1',[decoy.challengeId])).rows).toEqual([]);
+   await expect(service.verify(who,decoy.challengeId,'0000000000000000')).rejects.toMatchObject({status:409});
+   expect(JSON.parse((await f.python('deliver',decoy.challengeId,'0000000000000000')).stdout))
+     .toEqual({messages:0,statuses:[409,409]});
+   const other=await f.profile();
+   // Even a preseeded challenge with a real code and mismatched quarantine owner fails the exact join.
+   await f.pool.query("UPDATE migration_rate_events SET created_at=created_at-interval '61 seconds'");
+   const valid=await service.issue(other,'legacy@old.test');
+   expect(sent).toHaveLength(2);
+   await f.pool.query('UPDATE migration_challenges SET owner_id=(SELECT owner_id FROM migration_directory_quarantines) WHERE id=$1',[valid.challengeId]);
+   await expect(service.verify(other,valid.challengeId,sent[1]!)).rejects.toMatchObject({status:409});
+   expect(JSON.parse((await f.python('deliver',valid.challengeId,sent[1]!)).stdout)).toEqual({messages:0,statuses:[409,409]});
+   expect((await f.pool.query('SELECT * FROM identity_link_proofs')).rows).toEqual([]);
+   expect((await f.pool.query('SELECT * FROM provider_identities WHERE issuer=$1',[issuer])).rows).toEqual([]);
+ } finally {await f.close();}
+});

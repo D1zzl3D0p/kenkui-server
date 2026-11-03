@@ -138,3 +138,16 @@ it.skipIf(!process.env.KENKUI_TEST_DATABASE_URL)('rejects a credential expiring 
    expect((await f.pool.query('SELECT count(*)::int n FROM identities')).rows[0].n).toBe(1);
  } finally {clock.mockRestore();await conn.query('ROLLBACK');conn.release();await f.close();}
 });
+
+it.skipIf(!process.env.KENKUI_TEST_DATABASE_URL)('admits a source-only address to a fresh UUID beside a quarantine',async()=>{
+ const f=await fixture();
+ try {
+   await f.python('quarantine');
+   const q=(await f.pool.query('SELECT owner_id FROM migration_directory_quarantines')).rows[0];
+   const service=new Admission(()=>f.pool,'staging',issuer);
+   const profile=await f.profile('source@new.test');
+   expect((await service.onboard(profile)).userId).not.toBe(q.owner_id);
+   expect((await f.pool.query('SELECT subject FROM provider_identities WHERE identity_id=$1',[q.owner_id])).rows)
+     .toEqual([{subject:'user_fixture'}]);
+ } finally {await f.close();}
+});

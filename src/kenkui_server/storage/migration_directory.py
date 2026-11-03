@@ -8,6 +8,11 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
+from kenkui_server.storage.migration_fixture_quarantine import (
+    prior_classifications,
+    validate_quarantine,
+)
+
 ENVIRONMENT_ID = "environment_01M0Y347Z9N6FYNTGVY3725X1Y"
 CLIENT_ID = "client_01M0Y37EQMGD270AW5W7NZC1E0"
 LEGACY_ISSUER = f"urn:kenkui:workos:{ENVIRONMENT_ID}:{CLIENT_ID}"
@@ -39,10 +44,19 @@ class ImportResult:
     restored_owners: int
     source_only: int
     digest: str
+    matched_restored_owners: int
+    quarantined_owners: int
+    quarantine_digest: str | None
 
 
 def import_directory(
-    connection: Any, environment: str, source: bytes, evidence: dict[str, Any], *, activate: bool
+    connection: Any,
+    environment: str,
+    source: bytes,
+    evidence: dict[str, Any],
+    *,
+    activate: bool,
+    quarantine: bytes | None = None,
 ) -> ImportResult:
     authority = AUTHORITIES.get(environment)
     if authority is None or evidence.get("environment") != environment:
@@ -97,7 +111,8 @@ def import_directory(
         subjects[subject] = address, key, verification is not None, row["banned"]
     with connection.transaction():
         owner = connection.execute(
-            "SELECT pg_get_userbyid(datdba) = current_user AS authorized "
+            "SELECT pg_get_userbyid(datdba) = current_user "
+            "AND current_setting('transaction_isolation')='read committed' AS authorized "
             "FROM pg_database WHERE datname=current_database()"
         ).fetchone()
         checked(bool(owner and owner["authorized"]))
@@ -112,7 +127,7 @@ def import_directory(
             (LEGACY_ISSUER,),
         ).fetchall()
         owners = {r["workos_subject"]: r["id"] for r in restored}
-        checked(len(owners) == len(restored) and owners.keys() <= subjects.keys())
+        checked(len(owners) == len(restored))
         checked(all(r["bound"] == r["id"] for r in restored))
         aliases = [(r["id"], mailbox(r["email"])[1]) for r in restored if r["email"] is not None]
         conflicts = connection.execute(
@@ -121,14 +136,32 @@ def import_directory(
             (LEGACY_ISSUER,),
         ).fetchone()
         checked(conflicts is None)
-        result = ImportResult(len(restored), len(subjects) - len(restored), digest)
+        missing = {sub: owner for sub, owner in owners.items() if sub not in subjects}
+        history = prior_classifications(connection, environment)
+        if history:
+            checked(quarantine is not None)
+            checked(set(missing.items()) == {(r["subject"], r["owner_id"]) for r in history})
+        manifest: dict[str, Any] = {}
+        quarantine_digest = None
+        if quarantine is None:
+            checked(not missing)
+        else:
+            manifest, quarantine_digest = validate_quarantine(
+                connection, environment, quarantine, evidence, missing, now, history
+            )
+        matched = len(restored) - len(missing)
+        result = ImportResult(
+            len(restored), len(subjects) - matched, digest, matched, len(missing), quarantine_digest
+        )
         if activate:
             run = uuid4()
             connection.execute(
                 """INSERT INTO migration_directory_runs
                    (id,environment,issuer,captured_at,watermark,digest,mode,valid_until,frozen,
-                    invited_emails,restored_owners,source_only)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    invited_emails,restored_owners,source_only,matched_restored_owners,quarantined_owners,
+                    quarantine_version,quarantine_digest,approval_artifact_digest,approval_ref,
+                    attested_by,attested_at,restored_snapshot_digest)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (
                     run,
                     environment,
@@ -142,6 +175,15 @@ def import_directory(
                     invited,
                     result.restored_owners,
                     result.source_only,
+                    matched,
+                    len(missing),
+                    manifest.get("version"),
+                    quarantine_digest,
+                    manifest.get("approvalArtifactDigest"),
+                    manifest.get("approvalRef"),
+                    manifest.get("attestedBy"),
+                    manifest.get("attestedAt"),
+                    manifest.get("restoredSnapshotDigest"),
                 ),
             )
             with connection.cursor() as cursor:
@@ -156,13 +198,30 @@ def import_directory(
                     "VALUES (%s,%s,%s)",
                     [(run, owner, key) for owner, key in aliases],
                 )
+                cursor.executemany(
+                    """INSERT INTO migration_directory_quarantines
+                       (run_id,owner_id,subject,fixture_fingerprint)
+                       VALUES (%s,%s,%s,%s)""",
+                    [
+                        (run, r["ownerId"], r["legacySubject"], r["fixtureFingerprint"])
+                        for r in manifest.get("records", [])
+                    ],
+                )
             published = connection.execute(
                 """INSERT INTO migration_directory_active(environment,run_id)
                    SELECT environment,id FROM migration_directory_runs
-                   WHERE id=%s AND (mode='final' OR valid_until>clock_timestamp())
+                   WHERE id=%s AND quarantined_owners=(SELECT count(*)
+                       FROM migration_directory_quarantines WHERE run_id=%s)
+                     AND (mode='final' OR valid_until>clock_timestamp())
                    ON CONFLICT (environment) DO UPDATE SET run_id=excluded.run_id
                    RETURNING (%s::timestamptz IS NULL OR clock_timestamp()<%s) AS fresh""",
-                (run, valid_until, valid_until),
+                (run, run, valid_until, valid_until),
             ).fetchone()
             checked(bool(published and published["fresh"]))
+        if valid_until is not None:
+            checked(
+                connection.execute(
+                    "SELECT clock_timestamp()<%s AS fresh", (valid_until,)
+                ).fetchone()["fresh"]
+            )
         return result

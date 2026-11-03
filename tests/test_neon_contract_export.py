@@ -18,6 +18,7 @@ def assert_supported_migrations(observed, frozen):
         "0006_provider_identities.sql",
         "0007_source_upload_intents.sql",
         "0008_migration_recovery.sql",
+        "0009_migration_fixture_quarantine.sql",
     ]
 
 
@@ -27,6 +28,7 @@ def test_contract_migration_allowlist_rejects_unknown_missing_or_reordered_migra
         "0006_provider_identities.sql",
         "0007_source_upload_intents.sql",
         "0008_migration_recovery.sql",
+        "0009_migration_fixture_quarantine.sql",
     ]
     assert_supported_migrations(approved, frozen)
     for observed in [approved + ["9999_unreviewed.sql"], approved[:-1], list(reversed(approved))]:

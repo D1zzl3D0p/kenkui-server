@@ -12,6 +12,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from kenkui_server.storage.migration_directory import import_directory
+from kenkui_server.storage.migration_fixture_quarantine import load_json
 
 
 class PrivateParser(argparse.ArgumentParser):
@@ -24,6 +25,7 @@ def main() -> int:
     parser.add_argument("--environment", choices=("staging", "production"), required=True)
     parser.add_argument("--source-file", type=Path, required=True)
     parser.add_argument("--attestation-file", type=Path, required=True)
+    parser.add_argument("--quarantine-file", type=Path)
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--dry-run", action="store_true")
     action.add_argument("--activate", action="store_true")
@@ -32,7 +34,7 @@ def main() -> int:
         if os.environ.get("KENKUI_ENV") != args.environment:
             raise ValueError
         url = os.environ[f"KENKUI_{args.environment.upper()}_RELEASE_DATABASE_URL"]
-        evidence = json.loads(args.attestation_file.read_bytes())
+        evidence = load_json(args.attestation_file.read_bytes())
         with psycopg.connect(url, row_factory=dict_row) as conn:
             result = import_directory(
                 conn,
@@ -40,6 +42,7 @@ def main() -> int:
                 args.source_file.read_bytes(),
                 evidence,
                 activate=args.activate,
+                quarantine=args.quarantine_file.read_bytes() if args.quarantine_file else None,
             )
         print(json.dumps(asdict(result)))
         return 0
