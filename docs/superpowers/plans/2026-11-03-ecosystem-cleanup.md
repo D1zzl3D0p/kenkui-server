@@ -46,11 +46,18 @@ As observed during this review: core main e45039e; server main 1d63ab9; Studio m
 
 ## Completion and delivery
 
-- [ ] Complete O1 and choose compatible source revisions before editing product code.
+- [x] Complete O1 and choose compatible source revisions before editing product code.
 - [ ] Complete each independently reviewable deliverable in its owning repository, record relevant checks and commit it separately.
-- [ ] Report deleted code/tests, preserved behavioral coverage, verification commands and remaining migration gates. Do not claim time/performance savings without measurements.
+- [x] Report deleted code/tests, preserved behavioral coverage, verification commands and remaining migration gates. Do not claim time/performance savings without measurements.
 - [ ] Complete O2/O4 only with live acceptance and required authorization; pending acceptance is a visible outstanding task, not a reason to delete fallback code.
-- [ ] Complete A2/A3 with a written adopt/defer decision. Adoption schedules a dedicated implementation plan based on prototype evidence; it is not bundled into housekeeping.
+- [x] Complete A2/A3 with a written adopt/defer decision. Adoption schedules a dedicated implementation plan based on prototype evidence; it is not bundled into housekeeping.
 - [ ] Update the master checklist and current architecture map after accepted changes.
 
 This document is a planning artifact. No implementation checks or live acceptance have been run as part of writing it.
+
+## Execution disposition
+
+See [implementation status](../../cleanup/implementation-status.md) for actual checks,
+commits, rulings and outstanding gates. Independent source cleanup is implemented;
+O2/O4 and deployed monitoring acceptance remain outstanding. A2 did not satisfy
+product adoption criteria, and A3 selects the documented contract-only fallback.
