@@ -1,7 +1,11 @@
 """Modal submission with database-owned admission and attempt identity."""
 
+import hashlib
+import json
 import logging
 import os
+import re
+import sys
 from typing import Any
 
 
@@ -21,7 +25,7 @@ class ModalProcessRunner:
         if token is None:
             return
         try:
-            modal.Function.from_name(
+            call = modal.Function.from_name(
                 self.app_name,
                 "render_job",
                 environment_name=os.environ.get("MODAL_ENVIRONMENT"),
@@ -32,3 +36,23 @@ class ModalProcessRunner:
             logging.getLogger(__name__).exception(
                 "hosted_dispatch_submission_failed", extra={"dispatch_id": dispatch_id}
             )
+            return
+
+        # Modal captures stdout even when the submitting process has no INFO handler.
+        try:
+            if not isinstance(call, modal.FunctionCall):
+                return
+            call_id = call.object_id
+            if not isinstance(call_id, str) or not re.fullmatch(r"fc-[A-Za-z0-9]+", call_id):
+                return
+            event = {
+                "event": "hosted_dispatch_spawned",
+                "dispatch_id": dispatch_id,
+                "function_call_id": call_id,
+                "lease_token_sha256": hashlib.sha256(token.encode("utf-8")).hexdigest(),
+            }
+            sys.stdout.write(json.dumps(event, separators=(",", ":")) + "\n")
+            sys.stdout.flush()
+        except Exception:
+            # The call was submitted. Observability must never trigger a second attempt.
+            return

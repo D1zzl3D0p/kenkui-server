@@ -1,6 +1,7 @@
 import { expect,it,vi } from 'vitest';
 import { releaseEnvironment } from '../release-environment.js';
 import { creditsForCharacters } from '../src/billing/job-spec.js';
+import { loadConfig } from '../src/config.js';
 const pin={apiOrigin:'https://api.staging.kenkui.fm',issuer:'https://auth.invalid/db/auth',jwksUrl:'https://auth.invalid/db/auth/jwks',clientId:'public',resource:'https://api.staging.kenkui.fm'};
 function selectedEnv() {
   const required=['KENKUI_ALLOWED_ORIGINS','KENKUI_ORIGIN_SECRET','R2_ENDPOINT','R2_BUCKET','R2_KEY_SALT','R2_ACCESS_KEY_ID','R2_SECRET_ACCESS_KEY','KENKUI_MODAL_BRIDGE_URL','KENKUI_MODAL_PROXY_KEY','KENKUI_MODAL_PROXY_SECRET','KENKUI_BRIDGE_SECRET','KENKUI_UNSUBSCRIBE_SECRET','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','KENKUI_WEB_ORIGIN','KENKUI_STRIPE_API_VERSION'];
@@ -29,4 +30,15 @@ it('rejects a JWKS-only supplied override despite matching issuer, recipient and
 it('derives auth fields from the reviewed manifest when no duplicate authority is supplied',()=>{
   const env:NodeJS.ProcessEnv=selectedEnv();delete env.KENKUI_RELEASE_AUTHORITY;
   expect(releaseEnvironment(env,pin)).toMatchObject({NEON_AUTH_BASE_URL:pin.issuer,NEON_AUTH_JWKS_URL:pin.jwksUrl,KENKUI_NATIVE_CLIENT_ID:pin.clientId});
+});
+it('keeps production public authority while reusing the internal staging worker label',()=>{
+  const production={...pin,apiOrigin:'https://api.kenkui.fm',resource:'https://api.kenkui.fm'};
+  const env={...selectedEnv(),KENKUI_ENV:'production',KENKUI_RELEASE_AUTHORITY:JSON.stringify(production),KENKUI_SERVICE_ENVIRONMENT:'staging',KENKUI_ACCOUNT_POLICY:'neon'};
+  const selected=releaseEnvironment(env,production);
+  expect(selected).toMatchObject({KENKUI_ENV:'production',KENKUI_SERVICE_ENVIRONMENT:'staging',KENKUI_ACCOUNT_POLICY:'neon',KENKUI_AUTH_RESOURCE:'https://api.kenkui.fm'});
+  expect(loadConfig({...selected,KENKUI_ALLOWED_ORIGINS:'https://app.kenkui.fm'}).environment).toBe('staging');
+  for(const bad of [{KENKUI_SERVICE_ENVIRONMENT:'other'},{KENKUI_ACCOUNT_POLICY:'unknown'}]) {
+    expect(()=>releaseEnvironment({...env,...bad},production)).toThrow();
+    expect(()=>loadConfig({...selected,...bad,KENKUI_ALLOWED_ORIGINS:'https://app.kenkui.fm'})).toThrow();
+  }
 });

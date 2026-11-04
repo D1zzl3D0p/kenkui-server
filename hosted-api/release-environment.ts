@@ -3,6 +3,8 @@ export function releaseEnvironment(env:NodeJS.ProcessEnv,reviewedAuthority:unkno
   const required=(name:string)=>{const value=env[name];if(!value?.trim())throw Error('Missing release configuration: '+name);return value;};
   const environment=required('KENKUI_ENV');
   if(environment!=='staging'&&environment!=='production')throw Error('Invalid release environment');
+  if(env.KENKUI_SERVICE_ENVIRONMENT!==undefined&&!['staging','production'].includes(env.KENKUI_SERVICE_ENVIRONMENT))throw Error('Invalid service environment');
+  if(env.KENKUI_ACCOUNT_POLICY!==undefined&&!['migration','neon'].includes(env.KENKUI_ACCOUNT_POLICY))throw Error('Invalid account policy');
   const database=required('KENKUI_API_DATABASE_URL');
   const pin=reviewedAuthority as Record<string,unknown>;
   const origin=environment==='staging'?'https://api.staging.kenkui.fm':'https://api.kenkui.fm';
@@ -19,6 +21,6 @@ export function releaseEnvironment(env:NodeJS.ProcessEnv,reviewedAuthority:unkno
   for(const name of ['KENKUI_ALLOWED_ORIGINS','KENKUI_ORIGIN_SECRET','R2_ENDPOINT','R2_BUCKET','R2_ACCESS_KEY_ID','R2_SECRET_ACCESS_KEY','KENKUI_MODAL_BRIDGE_URL','KENKUI_MODAL_PROXY_KEY','KENKUI_MODAL_PROXY_SECRET','KENKUI_BRIDGE_SECRET','KENKUI_UNSUBSCRIBE_SECRET','STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET','KENKUI_WEB_ORIGIN','KENKUI_STRIPE_API_VERSION'])selected[name]=required(name);
   if(env.R2_KEY_SALT===undefined)throw Error('Missing release configuration: R2_KEY_SALT');
   selected.R2_KEY_SALT=env.R2_KEY_SALT; // Existing empty-salt keys must remain addressable.
-  for(const name of ['KENKUI_BETA_CREDITS','KENKUI_ESTIMATED_COST_CENTS_PER_MILLION','KENKUI_EMAIL_NOTIFICATIONS','KENKUI_MAX_SPEECH_CHARACTERS','KENKUI_VOICE_SET','KENKUI_MODEL_ALLOWLIST','KENKUI_LEGACY_TOKEN_ISSUER','KENKUI_STRIPE_TAX_CODE'])if(env[name])selected[name]=env[name]!;
+  for(const name of ['KENKUI_SERVICE_ENVIRONMENT','KENKUI_ACCOUNT_POLICY','KENKUI_BETA_CREDITS','KENKUI_ESTIMATED_COST_CENTS_PER_MILLION','KENKUI_EMAIL_NOTIFICATIONS','KENKUI_MAX_SPEECH_CHARACTERS','KENKUI_VOICE_SET','KENKUI_MODEL_ALLOWLIST','KENKUI_LEGACY_TOKEN_ISSUER','KENKUI_STRIPE_TAX_CODE'])if(env[name])selected[name]=env[name]!;
   return selected;
 }

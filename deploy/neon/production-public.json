@@ -1,0 +1,34 @@
+{
+  "projectId": "divine-boat-06396016",
+  "branchId": "br-gentle-thunder-bbo796nz",
+  "endpointId": "ep-quiet-lab-bb7fuxf2",
+  "database": "kenkui",
+  "authority": {
+    "apiOrigin": "https://api.kenkui.fm",
+    "issuer": "https://ep-quiet-lab-bb7fuxf2.neonauth.c-15.us-east-1.aws.neon.tech/kenkui/auth",
+    "jwksUrl": "https://ep-quiet-lab-bb7fuxf2.neonauth.c-15.us-east-1.aws.neon.tech/kenkui/auth/.well-known/jwks.json",
+    "clientId": "UwdWqqDMzWqQGrtIUHDmRBIENDDogySX",
+    "resource": "https://api.kenkui.fm"
+  },
+  "publicEnvironment": {
+    "KENKUI_ENV": "production",
+    "KENKUI_SERVICE_ENVIRONMENT": "staging",
+    "KENKUI_ACCOUNT_POLICY": "neon",
+    "KENKUI_ALLOWED_ORIGINS": "https://app.kenkui.fm,https://api.kenkui.fm",
+    "KENKUI_WEB_ORIGIN": "https://app.kenkui.fm"
+  },
+  "authUpdatesPendingRoot": {
+    "server": {
+      "login_page": "https://api.kenkui.fm/v1/auth/login",
+      "consent_page": "https://api.kenkui.fm/v1/auth/consent",
+      "resources": [
+        {"identifier": "https://api.staging.kenkui.fm"},
+        {"identifier": "https://api.kenkui.fm"}
+      ]
+    },
+    "client": {
+      "resources": ["https://api.staging.kenkui.fm", "https://api.kenkui.fm"]
+    },
+    "addTrustedDomains": ["https://app.kenkui.fm", "https://api.kenkui.fm"]
+  }
+}

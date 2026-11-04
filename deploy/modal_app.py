@@ -12,6 +12,18 @@ if deployment not in {"staging", "production"}:
     raise ValueError("KENKUI_DEPLOYMENT must be staging or production")
 app_name = f"kenkui-{deployment}"
 idle_mode = os.environ.get("KENKUI_DATABASE_IDLE") == "1"
+# Prelaunch runs on demand; periodic recovery/retention is an explicit operating choice.
+background_schedules = os.environ.get("KENKUI_BACKGROUND_SCHEDULES", "0")
+if background_schedules not in {"0", "1"}:
+    raise ValueError("KENKUI_BACKGROUND_SCHEDULES must be 0 or 1")
+background_schedules_enabled = background_schedules == "1"
+public_web_origin = os.environ.get("KENKUI_PUBLIC_WEB_ORIGIN", "")
+public_api_origin = os.environ.get("KENKUI_PUBLIC_API_ORIGIN", "")
+if (public_web_origin or public_api_origin) and (public_web_origin, public_api_origin) not in {
+    ("https://app.kenkui.fm", "https://api.kenkui.fm"),
+    ("https://app.staging.kenkui.fm", "https://api.staging.kenkui.fm"),
+}:
+    raise ValueError("public origins must be a matching canonical Kenkui HTTPS pair")
 app = modal.App(app_name)
 proxy_name = os.environ.get("KENKUI_MODAL_PROXY")
 proxy = modal.Proxy.from_name(proxy_name, environment_name=deployment) if proxy_name else None
@@ -115,6 +127,16 @@ secrets = [
 if idle_mode:
     # Later secrets override duplicate keys without rewriting worker credentials.
     secrets.append(modal.Secret.from_name(f"{app_name}-database-idle", environment_name=deployment))
+if public_web_origin:
+    # Public links may be promoted independently of the internal Modal environment.
+    secrets.append(
+        modal.Secret.from_dict(
+            {
+                "KENKUI_WEB_ORIGIN": public_web_origin,
+                "KENKUI_API_ORIGIN": public_api_origin,
+            }
+        )
+    )
 
 # Full-database read authority and public encryption recipient exist only on daily maintenance.
 maintenance_secrets = secrets + (
@@ -191,7 +213,8 @@ def provision() -> None:
 @app.function(
     image=image,
     secrets=secrets,
-    schedule=modal.Period(minutes=1),
+    schedule=modal.Period(minutes=1) if background_schedules_enabled else None,
+    scaledown_window=2,
     timeout=240,
     max_containers=1,
     proxy=proxy,
@@ -205,7 +228,7 @@ def recover_jobs() -> None:
 @app.function(
     image=maintenance_image,
     secrets=maintenance_secrets,
-    schedule=modal.Period(hours=24 if idle_mode else 1),
+    schedule=modal.Period(hours=24 if idle_mode else 1) if background_schedules_enabled else None,
     timeout=1800 if idle_mode else 300,
     max_containers=1,
     proxy=proxy,
