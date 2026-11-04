@@ -6,7 +6,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import anyio
@@ -23,13 +22,6 @@ from kenkui_server.api import assets, billing, jobs, notifications
 from kenkui_server.api import voices as voices_api
 from kenkui_server.api.schemas import EventResponse
 from kenkui_server.auth.base import AuthBackend, Identity
-from kenkui_server.auth.browser import (
-    SESSION_COOKIE,
-    BrowserAuthBackend,
-    browser_auth_router,
-    set_session,
-)
-from kenkui_server.auth.native import native_auth_router
 from kenkui_server.billing.service import BillingService
 from kenkui_server.billing.stripe import StripeWebhookHandler
 from kenkui_server.compute.base import ProcessRunner
@@ -272,10 +264,7 @@ def create_app(
     # a local server still describes them rather than hiding them from clients.
     app.include_router(notifications.router)
     configured_auth = app.state.hosted_auth
-    if configured_auth is not None and isinstance(configured_auth.backend, BrowserAuthBackend):
-        app.include_router(browser_auth_router(configured_auth.backend))
-        app.include_router(native_auth_router(configured_auth.backend))
-    elif configured_auth is not None:
+    if configured_auth is not None:
 
         @app.get("/v1/auth/session")
         def current_bearer_identity(request: Request) -> dict[str, str]:
@@ -311,10 +300,7 @@ def create_app(
             status_code=422,
             code="validation_error",
             message="Request validation failed",
-            # Native auth bodies contain refresh credentials and PKCE material.
-            details=None
-            if request.url.path.startswith("/v1/auth/native/")
-            else {"errors": jsonable_encoder(exc.errors())},
+            details={"errors": jsonable_encoder(exc.errors())},
         )
 
     @app.exception_handler(Exception)
@@ -344,9 +330,6 @@ def create_app(
         request_id = request.headers.get(REQUEST_ID_HEADER)
         request.state.request_id = request_id if request_id else str(uuid4())
         response = await call_next(request)
-        if request.url.path.startswith("/v1/auth/native/"):
-            response.headers["Cache-Control"] = "no-store"
-            response.headers["Pragma"] = "no-cache"
         log_event(
             LOGGER,
             "request.completed",
@@ -370,40 +353,19 @@ def create_app(
             or path.startswith("/v1/assets")
             or (path.startswith("/v1/billing") and path != "/v1/billing/webhooks/stripe")
             # Unsubscribe links are opened by mail clients that carry no session.
-            or (
-                path.startswith("/v1/notifications")
-                and path != "/v1/notifications/unsubscribe"
-            )
-            or path in {"/v1/auth/session", "/v1/auth/logout"}
+            or (path.startswith("/v1/notifications") and path != "/v1/notifications/unsubscribe")
+            or path == "/v1/auth/session"
         )
         if hosted_auth is None or not protected:
             return await call_next(request)
         scheme, _, bearer = request.headers.get("Authorization", "").partition(" ")
-        cookie = request.cookies.get(SESSION_COOKIE)
-        token = bearer if scheme.lower() == "bearer" else cookie
+        token = bearer if scheme.lower() == "bearer" else ""
         if not token:
             return _error_response(
                 request, status_code=401, code="unauthenticated", message="Sign in to continue."
             )
-        refreshed = None
         try:
-            backend = hosted_auth.backend
-            if cookie and scheme.lower() != "bearer" and isinstance(backend, BrowserAuthBackend):
-                if request.method not in {"GET", "HEAD", "OPTIONS"}:
-                    redirect = urlsplit(backend.config.redirect_uri)
-                    trusted = {backend.config.web_origin, f"{redirect.scheme}://{redirect.netloc}"}
-                    if request.headers.get("Origin") not in trusted:
-                        return _error_response(
-                            request,
-                            status_code=403,
-                            code="invalid_origin",
-                            message="Request origin is not allowed.",
-                        )
-                identity, refreshed = await anyio.to_thread.run_sync(
-                    backend.authenticate_browser, token
-                )
-            else:
-                identity = await anyio.to_thread.run_sync(backend.authenticate, token)
+            identity = await anyio.to_thread.run_sync(hosted_auth.backend.authenticate, token)
             request.state.hosted_identity = identity
         except PermissionError:
             return _error_response(
@@ -412,10 +374,7 @@ def create_app(
                 code="unauthenticated",
                 message="Sign in with an invited account to continue.",
             )
-        response = await call_next(request)
-        if refreshed is not None:
-            set_session(response, refreshed)
-        return response
+        return await call_next(request)
 
     @app.get("/v1/health", responses=ERROR_RESPONSES)
     async def health() -> dict[str, str]:
@@ -431,9 +390,7 @@ def create_app(
         result.max_upload_bytes = max_upload_bytes
         auth = app.state.hosted_auth
         if auth is not None:
-            result.auth = AuthCapabilities(
-                mode="session" if isinstance(auth.backend, BrowserAuthBackend) else "bearer"
-            )
+            result.auth = AuthCapabilities(mode="bearer")
         if hosted_services is not None:
             result.billing = BillingCapabilities(mode="credits")
         if hosted_config is not None and hosted_config.email_notifications:

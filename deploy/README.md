@@ -17,10 +17,12 @@ environment settings. Worker images use this same extra for rendering, bridge,
 recovery, provisioning and maintenance. It includes S3, Modal and PostgreSQL
 dependencies without the WorkOS SDK.
 
-The `hosted` extra adds legacy WorkOS authentication to `worker`. Keep using it
-for the Python hosted composition and the complete compatibility test suite.
-Neon Auth remains in the TypeScript API; workers do not need WorkOS credentials.
-Changing dependencies does not change deployment secret maps or rotate credentials.
+The old `hosted` extra and WorkOS Python login API are retired. Use `worker` for
+the full verification suite as well. `python -m kenkui_server.hosted` retains only
+explicit `migrate` and `recover` operations; it no longer serves an API.
+Neon Auth and optional legacy-owner recovery remain in the TypeScript API.
+Workers need no WorkOS credentials. Notification links require an explicit
+`KENKUI_API_ORIGIN`; they no longer derive an origin from a WorkOS callback.
 
 The Render Blueprint generator and Python image release workflow are retired.
 Historical instructions remain under [the archive](../docs/archive/render/README.md).

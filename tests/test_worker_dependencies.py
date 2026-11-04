@@ -40,10 +40,3 @@ def test_worker_images_export_cloud_dependencies_without_workos(monkeypatch, tmp
         dependencies = export_requirements(command, tmp_path)
         assert {"boto3", "modal", "psycopg", "psycopg-binary", "psycopg-pool"} <= dependencies
         assert "workos" not in dependencies
-
-
-def test_legacy_hosted_extra_retains_worker_dependencies_and_workos(tmp_path):
-    dependencies = export_requirements(
-        "uv export --frozen --extra hosted --no-dev --no-hashes --output-file ignored", tmp_path
-    )
-    assert {"boto3", "modal", "psycopg", "workos"} <= dependencies

@@ -111,3 +111,15 @@ def test_bearer_identity_scopes_studio_drafts_without_exposing_tokens(tmp_path: 
         response = client.get("/v1/auth/session", headers={"Authorization": "Bearer secret"})
     assert response.status_code == 200
     assert response.json() == {"userId": str(owner)}
+
+
+def test_legacy_session_cookie_is_not_a_bearer_credential(tmp_path: Path) -> None:
+    owner = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    backend = RecordingAuthBackend(Identity(owner, "user-1"))
+    app = create_app(
+        data_dir=tmp_path / "state", auth_backend=backend, job_owner_resolver=lambda _: owner
+    )
+    with TestClient(app, base_url="https://api.example") as client:
+        client.cookies.set("__Host-kenkui-session", "retired-sealed-session")
+        assert client.get("/v1/auth/session").status_code == 401
+    assert backend.tokens == []

@@ -5,6 +5,12 @@ Public v1 resource types originate in the selected reviewed OpenAPI artifact. St
 client types only for reviewed schema changes. `neon/baseline.json` and route-matrix.md
 are frozen migration evidence, not fixtures to regenerate until a port passes.
 
+The retired Python WorkOS HTTP-baseline exporter and its exclusive authentication
+tests are preserved on `cleanup/worker-dependencies-20261104`. Current TypeScript
+tests continue consuming the checked baseline; PostgreSQL/validation comparison
+tests remain active. Do not change frozen evidence to match a retired route's
+removal from the Python local API.
+
 Python Kenkui owns document parsing, normalized speech counts, planning and audio
 semantics. Public API validation is characterized against Python Pydantic during
 the migration. TypeScript pricing/canonical serialization and credit transitions

@@ -24,7 +24,7 @@ def checks(tier: str, component: str) -> list[Check]:
     server = "kenkui-server"
     hosted = server + "/hosted-api"
     studio = "kenkui-studio"
-    pytest = ("uv", "run", "--frozen", "--extra", "hosted", "pytest")
+    pytest = ("uv", "run", "--frozen", "--extra", "worker", "pytest")
     python_tests = pytest if tier != "fast" else (*pytest, "--ignore=tests/postgres")
     result = [
         Check(server, python_tests),

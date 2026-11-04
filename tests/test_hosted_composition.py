@@ -126,7 +126,6 @@ def _config() -> HostedConfig:
         r2_endpoint="https://r2.example",
         r2_access_key_id="key",
         r2_secret_access_key="r2-secret",
-        workos_api_key="workos-secret",
         stripe_webhook_secret="stripe-secret",
     )
 

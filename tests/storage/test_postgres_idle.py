@@ -178,13 +178,11 @@ def test_schema_validation_precedes_pool_creation(wire_connections, idle):
 
 
 @pytest.mark.parametrize("setting", [None, "0", "true", "1"])
-@pytest.mark.parametrize("entrypoint", ["api", "worker", "migrate", "recover"])
+@pytest.mark.parametrize("entrypoint", ["worker", "migrate", "recover"])
 def test_hosted_idle_requires_explicit_environment_setting(
     monkeypatch, tmp_path, wire_connections, setting, entrypoint
 ):
     import sys
-
-    import workos
 
     from kenkui_server import hosted
     from kenkui_server.compute.hosted import HostedJobRunner
@@ -202,29 +200,16 @@ def test_hosted_idle_requires_explicit_environment_setting(
         databases.append(database)
         return database
 
-    monkeypatch.setattr(
-        hosted,
-        "required",
-        lambda name: {
-            "WORKOS_REDIRECT_URI": "https://api.example/callback",
-            "KENKUI_WEB_ORIGIN": "https://web.example",
-            "KENKUI_SESSION_SECRET": "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg=",
-        }.get(name, "test-value"),
-    )
+    monkeypatch.setattr(hosted, "required", lambda name: "test-value")
     monkeypatch.setattr(hosted, "PostgresDatabase", database_factory)
     monkeypatch.setattr(hosted, "object_store", object)
     monkeypatch.setattr(
         hosted, "recovery_signals", lambda: SimpleNamespace(list_job_ids=lambda: ())
     )
-    monkeypatch.setattr(hosted.kk, "list_voices", lambda: ())
-    monkeypatch.setattr(hosted, "select_hosted_voices", lambda *args: ())
-    monkeypatch.setattr(workos, "WorkOSClient", lambda **kwargs: object())
     monkeypatch.setattr(PostgresDatabase, "migrate", lambda self: None)
     monkeypatch.setattr(HostedDispatcher, "recover", lambda self: None)
     try:
-        if entrypoint == "api":
-            hosted.create_hosted_app()
-        elif entrypoint == "worker":
+        if entrypoint == "worker":
             databases.append(HostedJobRunner("", object(), tmp_path, lease=("d", "t"))._database())
         else:
             monkeypatch.setattr(sys, "argv", ["kenkui-hosted", entrypoint])

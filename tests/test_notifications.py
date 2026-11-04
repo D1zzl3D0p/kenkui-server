@@ -192,12 +192,11 @@ def test_partial_smtp_configuration_stays_unconfigured(environment: dict[str, st
     assert smtp_config_from_environment(environment) is None
 
 
-def test_api_origin_falls_back_to_the_auth_callback_host() -> None:
+def test_notification_api_origin_is_explicit_and_ignores_retired_auth_configuration() -> None:
+    assert api_origin_from({"WORKOS_REDIRECT_URI": "https://old.example/v1/auth/callback"}) == ""
     assert (
-        api_origin_from({"WORKOS_REDIRECT_URI": "https://api.kenkui.fm/v1/auth/callback"})
-        == "https://api.kenkui.fm"
+        api_origin_from({"KENKUI_API_ORIGIN": "https://api.kenkui.fm/"}) == "https://api.kenkui.fm"
     )
-    assert api_origin_from({"KENKUI_API_ORIGIN": "https://other.example/"}) == "https://other.example"
     assert api_origin_from({}) == ""
 
 
@@ -212,6 +211,9 @@ def test_notification_settings_require_mail_links_and_a_signing_key() -> None:
     settings = notification_settings_from_environment(complete)
     assert settings is not None and settings.web_origin == "https://app.kenkui.fm"
     for missing in ("KENKUI_SMTP_PASSWORD", "KENKUI_WEB_ORIGIN", "KENKUI_UNSUBSCRIBE_SECRET"):
-        assert notification_settings_from_environment(
-            {key: value for key, value in complete.items() if key != missing}
-        ) is None
+        assert (
+            notification_settings_from_environment(
+                {key: value for key, value in complete.items() if key != missing}
+            )
+            is None
+        )

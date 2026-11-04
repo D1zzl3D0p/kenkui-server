@@ -72,7 +72,7 @@ jobs:
           echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
           age --version
           pg_dump --version
-      - run: uv sync --frozen --all-groups --extra hosted
+      - run: uv sync --frozen --all-groups --extra worker
         working-directory: kenkui-server
       - run: npm ci
         working-directory: kenkui-server/hosted-api

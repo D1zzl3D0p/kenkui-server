@@ -1,5 +1,8 @@
 # Worker dependencies and WorkOS
 
+This records the initial dependency split. The [WorkOS retirement follow-up](workos-retirement.md)
+subsequently removes the legacy Python API, SDK and `hosted` extra entirely.
+
 November 4, 2026 continuation of the ecosystem cleanup. Render resources are
 retained at the owner's request. No provider deployments or credential changes
 are part of this change. Read-only GitHub inventory found the backup workflow

@@ -1,25 +1,16 @@
-"""Environment-driven hosted composition. Migrations are an explicit release step."""
+"""Cloud worker services and explicit migration/recovery commands."""
 
 from __future__ import annotations
 
 import os
 from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID, uuid4
 
-import kenkui as kk
-from fastapi import FastAPI
-
-from kenkui_server.app import HostedServices, create_app
-from kenkui_server.auth.browser import BrowserAuthBackend, BrowserSessionConfig
 from kenkui_server.compute.modal import ModalProcessRunner
-from kenkui_server.config import DEFAULT_CHARACTER_MODEL, HostedConfig
-from kenkui_server.notifications.composition import notification_settings_from_environment
 from kenkui_server.storage.assets import R2AssetStore
-from kenkui_server.storage.postgres import PostgresHostedRepository, PostgresIdentityRepository
+from kenkui_server.storage.postgres import PostgresHostedRepository
 from kenkui_server.storage.postgres_database import PostgresDatabase
 from kenkui_server.storage.recovery_signals import R2RecoverySignals
-from kenkui_server.voice_catalog import VCTK_VOICE_SET, select_hosted_voices
 
 
 def required(name: str) -> str:
@@ -143,110 +134,11 @@ def retain_objects() -> None:
         database.close()
 
 
-def create_hosted_app() -> FastAPI:
-    from workos import WorkOSClient
-
-    session_config = BrowserSessionConfig(
-        redirect_uri=required("WORKOS_REDIRECT_URI"),
-        web_origin=required("KENKUI_WEB_ORIGIN").rstrip("/"),
-        cookie_password=required("KENKUI_SESSION_SECRET"),
-        invited_emails=frozenset(
-            email
-            for email in (
-                raw.strip() for raw in os.environ.get("KENKUI_INVITED_EMAILS", "").split(",")
-            )
-            if email
-        ),
-        native_redirect_uri=os.environ.get("KENKUI_NATIVE_REDIRECT_URI") or None,
-    )
-    voices = select_hosted_voices(
-        os.environ.get("KENKUI_VOICE_SET", VCTK_VOICE_SET), kk.list_voices()
-    )
-    database = PostgresDatabase(
-        required("DATABASE_URL"), idle=os.environ.get("KENKUI_DATABASE_IDLE") == "1"
-    )
-    repositories = PostgresHostedRepository(database)
-    identities = PostgresIdentityRepository(database)
-    auth = BrowserAuthBackend(
-        WorkOSClient(api_key=required("WORKOS_API_KEY"), client_id=required("WORKOS_CLIENT_ID")),
-        identities,
-        session_config,
-    )
-    allowance = int(os.environ.get("KENKUI_BETA_CREDITS", "1000"))
-    if allowance < 1:
-        raise ValueError("beta allowance must be positive")
-
-    def account_for_identity(identity_id: UUID) -> str:
-        with database.transaction():
-            row = database.execute(
-                (
-                    "INSERT INTO credit_accounts (id, identity_id) VALUES (%s,%s) ON "
-                    "CONFLICT(identity_id) DO UPDATE SET identity_id=EXCLUDED.identity_id "
-                    "RETURNING id"
-                ),
-                (str(uuid4()), str(identity_id)),
-            ).fetchone()
-            if row is None:
-                raise RuntimeError("account creation failed")
-            account_id = str(row["id"])
-            repositories.billing.grant(
-                account_id, allowance, reference=f"beta-allowance:{identity_id}"
-            )
-            return account_id
-
-    services = HostedServices(
-        repositories,
-        object_store(),
-        voices,
-        ModalProcessRunner(
-            repositories,
-            app_name=os.environ.get("KENKUI_MODAL_APP", "kenkui-beta"),
-            max_jobs=int(os.environ.get("KENKUI_MAX_JOBS", "2")),
-        ),
-        auth,
-        account_for_identity,
-        identities,
-        recovery_signals=recovery_signals()
-        if os.environ.get("KENKUI_DATABASE_IDLE") == "1"
-        else None,
-    )
-    config = HostedConfig(
-        database_url=required("DATABASE_URL"),
-        r2_bucket=required("R2_BUCKET"),
-        r2_endpoint=required("R2_ENDPOINT"),
-        r2_access_key_id=required("R2_ACCESS_KEY_ID"),
-        r2_secret_access_key=required("R2_SECRET_ACCESS_KEY"),
-        workos_api_key=required("WORKOS_API_KEY"),
-        stripe_webhook_secret=os.environ.get("STRIPE_WEBHOOK_SECRET", ""),
-        stripe_secret_key=os.environ.get("STRIPE_SECRET_KEY", ""),
-        web_origin=session_config.web_origin,
-        # The worker sends the mail; the API only advertises and unsubscribes.
-        email_notifications=notification_settings_from_environment(os.environ) is not None,
-        unsubscribe_secret=os.environ.get("KENKUI_UNSUBSCRIBE_SECRET", ""),
-    )
-    app = create_app(
-        hosted_config=config,
-        hosted_services=services,
-        allowed_origins=[session_config.web_origin],
-        max_speech_characters=int(os.environ.get("KENKUI_MAX_SPEECH_CHARACTERS", "10000000")),
-        model_allowlist=tuple(
-            filter(
-                None,
-                (
-                    os.environ.get("KENKUI_MODEL_ALLOWLIST", "").strip() or DEFAULT_CHARACTER_MODEL
-                ).split(","),
-            )
-        ),
-    )
-    app.state.hosted_database = database
-    return app
-
-
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["migrate", "serve", "recover"])
+    parser = argparse.ArgumentParser(description="Worker recovery and explicit database migrations")
+    parser.add_argument("command", choices=["migrate", "recover"])
     command = parser.parse_args().command
     if command == "migrate":
         database = PostgresDatabase(
@@ -256,12 +148,8 @@ def main() -> None:
             database.migrate()
         finally:
             database.close()
-    elif command == "recover":
-        recover_jobs()
     else:
-        import uvicorn
-
-        uvicorn.run(create_hosted_app(), host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
+        recover_jobs()
 
 
 if __name__ == "__main__":

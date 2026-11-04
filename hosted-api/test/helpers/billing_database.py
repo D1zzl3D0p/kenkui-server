@@ -1,6 +1,5 @@
 """Python oracle and actual fixture worker for disposable PG17 billing integration tests."""
 
-import base64
 import hashlib
 import json
 import os
@@ -9,8 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from kenkui_server.compute.hosted import HostedJobRunner, HostedWorkerStore
 from kenkui_server.jobs.models import (
@@ -132,30 +130,18 @@ try:
     elif operation == "snapshot":
         print(json.dumps(snapshot(), sort_keys=True))
     elif operation == "allowance":
-        from kenkui_server.hosted import create_hosted_app
-
-        fake_env = {
-            "WORKOS_REDIRECT_URI": "https://web.invalid/callback",
-            "KENKUI_WEB_ORIGIN": "https://web.invalid",
-            "KENKUI_SESSION_SECRET": base64.urlsafe_b64encode(bytes(32)).decode(),
-            "WORKOS_API_KEY": "test",
-            "WORKOS_CLIENT_ID": "test",
-            "DATABASE_URL": url,
-            "R2_BUCKET": "fixture",
-            "R2_ENDPOINT": "https://r2.invalid",
-            "R2_ACCESS_KEY_ID": "fixture",
-            "R2_SECRET_ACCESS_KEY": "fixture",
-        }
-        with (
-            patch.dict(os.environ, fake_env, clear=True),
-            patch("kenkui_server.hosted.PostgresDatabase", return_value=db),
-            patch("kenkui_server.hosted.object_store"),
-            patch("workos.WorkOSClient"),
-            patch("kenkui_server.hosted.select_hosted_voices", return_value=()),
-            patch("kenkui_server.hosted.kk.list_voices"),
-        ):
-            services = create_hosted_app().state.hosted_services
-            assert services.account_id_for_identity(UUID(args[0])) == args[1]
+        # Preserve the retired Python allowance transition as a test-only oracle.
+        identity_id = UUID(args[0])
+        with db.transaction():
+            row = db.execute(
+                "INSERT INTO credit_accounts (id, identity_id) VALUES (%s,%s) ON "
+                "CONFLICT(identity_id) DO UPDATE SET identity_id=EXCLUDED.identity_id RETURNING id",
+                (str(uuid4()), str(identity_id)),
+            ).fetchone()
+            assert row is not None
+            account_id = str(row["id"])
+            assert account_id == args[1]
+            repo.billing.grant(account_id, 1000, reference=f"beta-allowance:{identity_id}")
     elif operation == "admit":
         spec = JobSpec(
             source,

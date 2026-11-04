@@ -37,7 +37,6 @@ class HostedConfig(BaseModel):
     r2_endpoint: str
     r2_access_key_id: SecretStr
     r2_secret_access_key: SecretStr
-    workos_api_key: SecretStr
     stripe_webhook_secret: SecretStr
     stripe_secret_key: SecretStr = SecretStr("")
     web_origin: str = ""

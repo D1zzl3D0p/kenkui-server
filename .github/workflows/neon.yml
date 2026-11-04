@@ -48,7 +48,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: '3.12'
-      - run: uv sync --frozen --all-groups --extra hosted
+      - run: uv sync --frozen --all-groups --extra worker
       - name: Ensure independent PostgreSQL 17 fixture binaries
         run: |
           if [ ! -x /usr/lib/postgresql/17/bin/initdb ]; then

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from urllib.parse import urlsplit
 
 from kenkui_server.notifications.mailer import (
     Mailer,
@@ -19,12 +18,8 @@ from kenkui_server.notifications.service import CompletionNotifier, Notification
 
 
 def api_origin_from(environment: Mapping[str, str]) -> str:
-    """Where unsubscribe links point. The auth callback already names this host."""
-    explicit = environment.get("KENKUI_API_ORIGIN", "").strip()
-    if explicit:
-        return explicit.rstrip("/")
-    parts = urlsplit(environment.get("WORKOS_REDIRECT_URI", "").strip())
-    return f"{parts.scheme}://{parts.netloc}" if parts.scheme and parts.netloc else ""
+    """Use the explicit public API origin for signed unsubscribe links."""
+    return environment.get("KENKUI_API_ORIGIN", "").strip().rstrip("/")
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +53,4 @@ def notification_settings_from_environment(
     api_origin = api_origin_from(environment)
     if config is None or not web_origin or not unsubscribe_secret or not api_origin:
         return None
-    return NotificationSettings(
-        SmtpMailer(config), web_origin, api_origin, unsubscribe_secret
-    )
+    return NotificationSettings(SmtpMailer(config), web_origin, api_origin, unsubscribe_secret)

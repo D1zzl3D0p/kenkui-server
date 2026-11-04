@@ -3,8 +3,9 @@
 Local-first FastAPI server for Kenkui.
 
 The server owns durable Jobs, source assets, execution, and output artifacts.
-Local mode is unmetered and binds to loopback. The optional hosted composition
-adds PostgreSQL, R2, AuthKit browser sessions, beta allowances and Modal workers.
+Local mode is unmetered and binds to loopback. The `worker` extra adds PostgreSQL,
+R2 and Modal processing. The hosted HTTP API is TypeScript in `hosted-api/` and
+uses Neon Auth; the old Python WorkOS API is retired.
 See [deployment and local development](deploy/README.md) for configuration and
 acceptance requirements.
 
@@ -29,7 +30,7 @@ acceptance requirements.
 ## Development
 
 ```sh
-uv sync --all-groups
+uv sync --frozen --all-groups --extra worker
 uv run pytest
 uv run mypy
 uv run ruff check src

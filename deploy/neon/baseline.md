@@ -1,5 +1,12 @@
 # Frozen migration baseline
 
+The Python WorkOS API and its HTTP regeneration harness are now retired. Commands
+below describe the historical source; use the prior backed-up
+`cleanup/worker-dependencies-20261104` branch to reproduce that old composition.
+Current setup uses `uv sync --frozen --all-groups --extra worker`; see
+[WorkOS retirement](../../docs/cleanup/workos-retirement.md). Frozen artifacts
+remain unchanged and continue to drive TypeScript compatibility checks.
+
 The machine-readable source of truth is [`contracts/neon/baseline.json`](../../contracts/neon/baseline.json). It freezes 34 observed HTTP method/route pairs, 48 synthetic HTTP cases, the actual browser/native and hosted OpenAPI schemas, and SQL invariant results from a migrated disposable PostgreSQL 17 database. [`route-matrix.md`](../../contracts/neon/route-matrix.md) maps every observed route to its cases. This is a local compatibility baseline, not a statement that the migration is deployed or accepted.
 
 ## Source and deployment reconciliation
