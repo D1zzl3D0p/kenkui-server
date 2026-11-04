@@ -102,7 +102,7 @@ normal production reliability or disaster recovery acceptance is complete.
 
 | Priority | Opportunity | Concrete boundary / reason to defer implementation |
 |---|---|---|
-| Next | Separate worker install dependencies from legacy Python hosted auth | `deploy/modal_app.py` still exports the `hosted` extra containing WorkOS. A dedicated worker extra can avoid installing that SDK without deleting legacy account recovery. Validate a rebuilt worker image before switching it. |
+| Implemented in follow-up | Separate worker dependencies from legacy Python hosted auth | The [worker-extra follow-up](worker-dependencies.md) removes the SDK from image requirements while preserving legacy account recovery. A live image rebuild remains an operator step. |
 | Next | Close the supported legacy recovery policy, then retire WorkOS-only composition | Normal hosted enrollment now supports `KENKUI_ACCOUNT_POLICY=neon`. `auth/recovery.ts`, Python hosted auth and frozen migration fixtures serve distinct compatibility/evidence purposes; do not delete them together without deciding which remains supported. |
 | Next feature release | Reconcile newer core features with the hosted pin | Explicit EPUB/PDF/TOC capabilities and worker revisions are simpler than accidentally installing current core under older contract fixtures. Preserve the old pin until that release is tested. |
 | Later | Break repository implementations into focused modules if changes require it | `storage/postgres.py` groups job, identity, asset, event, dispatch and billing repositories. Move whole repository classes behind existing exports; avoid a new generic storage abstraction or transaction-boundary changes. |

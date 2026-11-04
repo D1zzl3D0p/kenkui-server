@@ -1,4 +1,4 @@
-"""Deploy from the server checkout: uv run --extra hosted modal deploy deploy/modal_app.py."""
+"""Deploy from the server checkout: uv run --extra worker modal deploy deploy/modal_app.py."""
 
 import os
 from pathlib import Path
@@ -97,7 +97,7 @@ def code_image(base: modal.Image) -> modal.Image:
         )
         .workdir("/app/kenkui-server")
         .run_commands(
-            "uv export --frozen --extra hosted --no-dev --no-hashes "
+            "uv export --frozen --extra worker --no-dev --no-hashes "
             "--output-file /tmp/requirements.txt",
             "uv pip install --system -r /tmp/requirements.txt",
         )

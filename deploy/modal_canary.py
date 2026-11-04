@@ -1,7 +1,7 @@
 """Run real synthesis and private R2 round trips without creating user jobs.
 
 From the server checkout, with KENKUI_DEPLOYMENT matching the selected environment:
-uv run --extra hosted modal run --env staging -m deploy.modal_canary
+uv run --extra worker modal run --env staging -m deploy.modal_canary
 """
 
 from pathlib import Path
@@ -56,9 +56,14 @@ def verify(source_bytes: bytes) -> dict:
                 chapters=chapter_ids,
                 casting=SingleVoiceCasting(voice_id),
                 tts=TtsSettings(
-                    prepare_numbers=True, pronunciation_corrections=True, stutter_handling=True,
-                    chapter_pause_ms=1500, heading_before_pause_ms=100,
-                    heading_after_pause_ms=500, paragraph_pause_ms=250, line_pause_ms=100,
+                    prepare_numbers=True,
+                    pronunciation_corrections=True,
+                    stutter_handling=True,
+                    chapter_pause_ms=1500,
+                    heading_before_pause_ms=100,
+                    heading_after_pause_ms=500,
+                    paragraph_pause_ms=250,
+                    line_pause_ms=100,
                 ),
                 output=OutputSpec(str(output), "Kenkui deployment canary", "Kenkui", False),
             )
@@ -79,9 +84,8 @@ def verify(source_bytes: bytes) -> dict:
                 text=True,
             )
             metadata = json.loads(probe.stdout)
-            if (
-                float(metadata["format"]["duration"]) <= 0
-                or len(metadata["chapters"]) != len(chapter_ids)
+            if float(metadata["format"]["duration"]) <= 0 or len(metadata["chapters"]) != len(
+                chapter_ids
             ):
                 raise RuntimeError("Canary audio or chapter validation failed")
             subprocess.run(
@@ -125,16 +129,20 @@ def main() -> None:
         for name in original.namelist():
             data = original.read(name)
             if name.endswith(".opf"):
-                text = data.decode().replace(
-                    "</manifest>",
-                    '<item id="chapter-2" href="chapter-2.xhtml" '
-                    'media-type="application/xhtml+xml"/></manifest>',
-                ).replace("</spine>", '<itemref idref="chapter-2"/></spine>')
+                text = (
+                    data.decode()
+                    .replace(
+                        "</manifest>",
+                        '<item id="chapter-2" href="chapter-2.xhtml" '
+                        'media-type="application/xhtml+xml"/></manifest>',
+                    )
+                    .replace("</spine>", '<itemref idref="chapter-2"/></spine>')
+                )
                 data = text.encode()
             output.writestr(name, data)
         output.writestr(
             "OPS/chapter-2.xhtml",
             '<html xmlns="http://www.w3.org/1999/xhtml"><body><h1>Second chapter</h1>'
-            '<p>S-s-sorry, that costs $25.</p><p>The end.</p></body></html>',
+            "<p>S-s-sorry, that costs $25.</p><p>The end.</p></body></html>",
         )
     print(json.dumps(verify.remote(buffer.getvalue()), indent=2))

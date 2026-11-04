@@ -11,6 +11,17 @@ the former staging Neon branch and internal worker/storage names.
 - [Encrypted backup custody and maintenance](neon/maintenance.md)
 - [Payments](payments.md)
 
+Install Modal deployment tools with `uv sync --frozen --extra worker` and use
+`uv run --frozen --extra worker modal deploy deploy/modal_app.py` with the reviewed
+environment settings. Worker images use this same extra for rendering, bridge,
+recovery, provisioning and maintenance. It includes S3, Modal and PostgreSQL
+dependencies without the WorkOS SDK.
+
+The `hosted` extra adds legacy WorkOS authentication to `worker`. Keep using it
+for the Python hosted composition and the complete compatibility test suite.
+Neon Auth remains in the TypeScript API; workers do not need WorkOS credentials.
+Changing dependencies does not change deployment secret maps or rotate credentials.
+
 The Render Blueprint generator and Python image release workflow are retired.
 Historical instructions remain under [the archive](../docs/archive/render/README.md).
 

@@ -32,10 +32,13 @@ kenkui = { path = "../kenkui", editable = true }
 kenkui-server = "kenkui_server.main:main"
 
 [project.optional-dependencies]
-hosted = [
+worker = [
     "boto3>=1.35,<2",
     "modal>=1,<2",
     "psycopg[binary,pool]>=3.2,<4",
+]
+hosted = [
+    "kenkui-server[worker]",
     "workos>=5,<6",
 ]
 

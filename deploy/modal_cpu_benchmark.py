@@ -6,7 +6,7 @@ this benchmark still requests 8 GiB rather than the deployed 12 GiB.
 
 Run from the server checkout:
 
-    KENKUI_DEPLOYMENT=staging uv run --extra hosted modal run \
+    KENKUI_DEPLOYMENT=staging uv run --extra worker modal run \
         -m deploy.modal_cpu_benchmark --repeats 1
 
 Use configurations such as ``24x16,24`` to compare 16 and 24 Kenkui workers
@@ -164,9 +164,7 @@ def _fixture(chapters: int, characters_per_chapter: int) -> bytes:
     chapter_documents: list[tuple[str, bytes]] = []
     for number in range(1, chapters + 1):
         heading = f"Benchmark chapter {number}"
-        body = (sentence * ((characters_per_chapter // len(sentence)) + 1))[
-            :characters_per_chapter
-        ]
+        body = (sentence * ((characters_per_chapter // len(sentence)) + 1))[:characters_per_chapter]
         document = (
             '<?xml version="1.0" encoding="UTF-8"?>'
             '<html xmlns="http://www.w3.org/1999/xhtml"><head>'
@@ -180,15 +178,13 @@ def _fixture(chapters: int, characters_per_chapter: int) -> bytes:
         'media-type="application/xhtml+xml"/>'
         for number in range(1, chapters + 1)
     )
-    spine = "".join(
-        f'<itemref idref="chapter-{number}"/>' for number in range(1, chapters + 1)
-    )
+    spine = "".join(f'<itemref idref="chapter-{number}"/>' for number in range(1, chapters + 1))
     package = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<package xmlns="http://www.idpf.org/2007/opf" version="3.0" '
         'unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
         '<dc:identifier id="book-id">kenkui-cpu-benchmark</dc:identifier>'
-        '<dc:title>Kenkui CPU benchmark</dc:title><dc:language>en</dc:language>'
+        "<dc:title>Kenkui CPU benchmark</dc:title><dc:language>en</dc:language>"
         f"</metadata><manifest>{manifest}</manifest><spine>{spine}</spine></package>"
     ).encode()
     container = (

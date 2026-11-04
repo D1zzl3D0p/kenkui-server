@@ -13,6 +13,7 @@ class Image:
         self.base = base
         self.packages = []
         self.environment = {}
+        self.commands = []
 
     def env(self, values):
         self.environment.update(values)
@@ -29,6 +30,10 @@ class Image:
 
     def apt_install(self, *packages):
         self.packages.extend(packages)
+        return self
+
+    def run_commands(self, *commands):
+        self.commands.extend(commands)
         return self
 
     def __getattr__(self, name):
