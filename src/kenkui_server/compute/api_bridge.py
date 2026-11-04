@@ -451,7 +451,7 @@ def bridge_from_environment() -> FastAPI:
     """Compose one isolated environment lazily; never migrate on a request."""
     import os
 
-    from kenkui_server.compute.modal import ModalProcessRunner
+    from kenkui_server.compute.modal import ModalProcessRunner, deployment_app_name
     from kenkui_server.hosted import object_store, required
     from kenkui_server.storage.postgres import PostgresHostedRepository
     from kenkui_server.storage.postgres_database import PostgresDatabase
@@ -460,6 +460,7 @@ def bridge_from_environment() -> FastAPI:
     environment = required("KENKUI_DEPLOYMENT")
     if environment not in {"staging", "production"}:
         raise ValueError("invalid bridge environment")
+    app_name = deployment_app_name(environment, os.environ.get("KENKUI_MODAL_APP"))
 
     def services() -> BridgeServices:
         database = PostgresDatabase(
@@ -477,7 +478,7 @@ def bridge_from_environment() -> FastAPI:
                 ),
                 ModalProcessRunner(
                     repositories,
-                    app_name=f"kenkui-{environment}",
+                    app_name=app_name,
                     max_jobs=int(os.environ.get("KENKUI_MAX_JOBS", "2")),
                 ),
                 database.close,

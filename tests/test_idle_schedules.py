@@ -12,6 +12,11 @@ class Image:
     def __init__(self, base):
         self.base = base
         self.packages = []
+        self.environment = {}
+
+    def env(self, values):
+        self.environment.update(values)
+        return self
 
     @classmethod
     def debian_slim(cls, **kwargs):
@@ -31,11 +36,14 @@ class Image:
 
 
 def register_deployment(monkeypatch, idle, deployment="staging", schedules=None):
-    registered = {}
+    class Registration(dict):
+        app_name: str
+
+    registered = Registration()
 
     class App:
         def __init__(self, name):
-            pass
+            registered.app_name = name
 
         def function(self, **kwargs):
             def register(function):
@@ -52,7 +60,7 @@ def register_deployment(monkeypatch, idle, deployment="staging", schedules=None)
             asgi_app=lambda **options: lambda function: function,
             Image=Image,
             Period=lambda **kwargs: kwargs,
-            Volume=SimpleNamespace(from_name=lambda *args, **kwargs: object()),
+            Volume=SimpleNamespace(from_name=lambda name, **kwargs: (name, kwargs)),
             Secret=SimpleNamespace(
                 from_name=lambda name, *, environment_name: (name, environment_name),
                 from_dict=lambda values: dict(values),
