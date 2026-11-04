@@ -1,6 +1,8 @@
 # Kenkui: Neon database and API migration
 
 Date: November 2, 2026
+
+Owner amendment, November 4, 2026: backup recovery must be hardware-independent. An owner-selected password manager or secure cloud vault is the intended custody location for the private age recovery identity; a USB drive/offline disk is not required. This supersedes offline-hardware language below. Keep only the public encryption recipient on the backup worker and prove retrieval/decryption from the retained vault copy. Ordinary deployments need no decryption key. Email-code/password sign-in is also acceptable when seamless; Google/GitHub-only is no longer a blocking requirement.
 Status: user decisions settled: Neon database/API and Managed Better Auth with Google/GitHub; one-time sign-in accepted; $5/month Neon spending-alert threshold; Apple sign-in deferred. The earlier independent builder review covered the database/API design only. Implementation plan is in ../plans/2026-11-02-neon-migration.md. No production changes made by this chat.
 
 ## Auth scope amendment — Google and GitHub selected
