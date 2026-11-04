@@ -6,8 +6,10 @@ const DEFAULT_MODEL = 'openrouter/deepseek/deepseek-v4-flash';
 
 /** Parse only explicitly passed environment state; never run at module import. */
 export function loadConfig(env: NodeJS.ProcessEnv): ApiConfig {
-  const environment = env.KENKUI_ENV;
-  if (environment !== 'staging' && environment !== 'production') throw new Error('KENKUI_ENV must be staging or production');
+  if (env.KENKUI_ENV !== 'staging' && env.KENKUI_ENV !== 'production') throw new Error('KENKUI_ENV must be staging or production');
+  const environment = env.KENKUI_SERVICE_ENVIRONMENT ?? env.KENKUI_ENV;
+  if (environment !== 'staging' && environment !== 'production') throw new Error('Invalid service environment');
+  if (env.KENKUI_ACCOUNT_POLICY !== undefined && !['migration','neon'].includes(env.KENKUI_ACCOUNT_POLICY)) throw new Error('Invalid account policy');
   const allowedOrigins = (env.KENKUI_ALLOWED_ORIGINS ?? '').split(',').map(x => x.trim()).filter(Boolean);
   for (const origin of allowedOrigins) {
     let parsed:URL;

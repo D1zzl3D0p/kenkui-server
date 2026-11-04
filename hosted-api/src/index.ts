@@ -3,7 +3,7 @@ import { createApi } from './app.js';
 import { loadConfig } from './config.js';
 import { getPool } from './db/pool.js';
 import { IdentityStore } from './db/identities.js';
-import { Admission } from './auth/admission.js';
+import { Admission,NeonAdmission } from './auth/admission.js';
 import { MigrationChallenges } from './auth/migration-challenge.js';
 import { createNeonAuth,loadNeonAuthConfig } from './auth/neon.js';
 import { createLegacyVerifier,LegacyRecovery } from './auth/recovery.js';
@@ -62,7 +62,8 @@ export default {
           const {environment}=config;
           const {issuer}=authConfig;
           const migration={
-            auth,admission:new Admission(getPool,environment,issuer),
+            auth,admission:process.env.KENKUI_ACCOUNT_POLICY==='neon'
+              ?new NeonAdmission(getPool,issuer):new Admission(getPool,environment,issuer),
             challenges:new MigrationChallenges(getPool,environment,issuer,()=>assetServices.bridge as ModalBridge),
           };
           const legacyIssuer=process.env.KENKUI_LEGACY_TOKEN_ISSUER;

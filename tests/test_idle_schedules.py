@@ -30,7 +30,7 @@ class Image:
         return lambda *args, **kwargs: self
 
 
-def register_deployment(monkeypatch, idle, deployment="staging"):
+def register_deployment(monkeypatch, idle, deployment="staging", schedules=None):
     registered = {}
 
     class App:
@@ -60,6 +60,10 @@ def register_deployment(monkeypatch, idle, deployment="staging"):
     )
     monkeypatch.setenv("KENKUI_DEPLOYMENT", deployment)
     monkeypatch.setenv("KENKUI_DATABASE_IDLE", "1" if idle else "0")
+    if schedules is None:
+        monkeypatch.delenv("KENKUI_BACKGROUND_SCHEDULES", raising=False)
+    else:
+        monkeypatch.setenv("KENKUI_BACKGROUND_SCHEDULES", schedules)
     monkeypatch.delenv("KENKUI_MODAL_PROXY", raising=False)
     runpy.run_path(str(Path(__file__).parents[1] / "deploy/modal_app.py"))
     return registered
@@ -67,7 +71,7 @@ def register_deployment(monkeypatch, idle, deployment="staging"):
 
 @pytest.mark.parametrize("idle", [False, True])
 def test_deployment_keeps_two_schedules_and_uses_backup_image_only_for_daily(monkeypatch, idle):
-    registered = register_deployment(monkeypatch, idle)
+    registered = register_deployment(monkeypatch, idle, schedules="1")
     schedules = {
         name: options for name, (_, options) in registered.items() if "schedule" in options
     }
@@ -91,6 +95,33 @@ def test_deployment_keeps_two_schedules_and_uses_backup_image_only_for_daily(mon
     registered["recover_jobs"][0]()
     registered["retain_objects"][0]()
     assert called == ["recover", "maintenance"]
+
+
+@pytest.mark.parametrize("deployment", ["staging", "production"])
+@pytest.mark.parametrize("idle", [False, True])
+@pytest.mark.parametrize("schedules", [None, "0"])
+def test_prelaunch_default_has_no_background_schedule_and_keeps_manual_calls(
+    monkeypatch, deployment, idle, schedules
+):
+    registered = register_deployment(monkeypatch, idle, deployment, schedules)
+    assert all(options.get("schedule") is None for _, options in registered.values())
+    from kenkui_server import hosted
+
+    called = []
+    monkeypatch.setattr(hosted, "recover_jobs", lambda: called.append("recover"))
+    monkeypatch.setattr(hosted, "retain_objects", lambda: called.append("maintenance"))
+    registered["recover_jobs"][0]()
+    registered["retain_objects"][0]()
+    assert called == ["recover", "maintenance"]
+    assert registered["render_job"][1]["cpu"] == 8
+    assert registered["render_job"][1]["retries"] == 0
+    assert registered["api_bridge"][1]["max_containers"] == 2
+
+
+@pytest.mark.parametrize("value", ["true", "false", "", "2"])
+def test_background_schedule_choice_rejects_invalid_values(monkeypatch, value):
+    with pytest.raises(ValueError, match="KENKUI_BACKGROUND_SCHEDULES"):
+        register_deployment(monkeypatch, True, schedules=value)
 
 
 @pytest.mark.parametrize(

@@ -24,11 +24,11 @@ export class BillingStore {
   constructor(private readonly pool:()=>Pool){}
   async accountForOwner(owner:string):Promise<{id:string;availableCredits:string}>{
     const configured=integerText(process.env.KENKUI_BETA_CREDITS??'1000');
-    if(configured===null||configured<1n||configured>2147483647n)throw Error('invalid_beta_allowance');
+    if(configured===null||configured<0n||configured>2147483647n)throw Error('invalid_beta_allowance');
     return transaction(this.pool(),async client=>{
       const row=(await client.query(`INSERT INTO credit_accounts(id,identity_id) VALUES($1,$2)
         ON CONFLICT(identity_id) DO UPDATE SET identity_id=EXCLUDED.identity_id RETURNING id`,[randomUUID(),owner])).rows[0];
-      await grant(client,row.id,Number(configured),'beta-allowance:'+owner,'grant');
+      if(configured>0n)await grant(client,row.id,Number(configured),'beta-allowance:'+owner,'grant');
       const result=await client.query('SELECT available_credits FROM credit_accounts WHERE id=$1',[row.id]);
       return {id:row.id,availableCredits:result.rows[0].available_credits};
     });
