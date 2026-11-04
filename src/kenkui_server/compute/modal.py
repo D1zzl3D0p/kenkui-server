@@ -9,6 +9,20 @@ import sys
 from typing import Any
 
 
+def deployment_app_name(environment: str, configured: str | None = None) -> str:
+    """Keep live app defaults; only staging may select the isolated test app."""
+    if environment not in {"staging", "production"}:
+        raise ValueError("invalid Modal environment")
+    default = f"kenkui-{environment}"
+    allowed = {default}
+    if environment == "staging":
+        allowed.add("kenkui-staging-test")
+    selected = default if configured is None else configured
+    if selected not in allowed:
+        raise ValueError("KENKUI_MODAL_APP does not match the deployment")
+    return selected
+
+
 class ModalProcessRunner:
     def __init__(
         self, repositories: Any, *, app_name: str = "kenkui-beta", max_jobs: int = 2

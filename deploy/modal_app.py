@@ -5,18 +5,26 @@ from pathlib import Path
 
 import modal
 
+from kenkui_server.compute.modal import deployment_app_name
+
 ROOT = Path(__file__).resolve().parents[1]
 CORE = ROOT.parent / "kenkui"
 deployment = os.environ.get("KENKUI_DEPLOYMENT", "staging")
 if deployment not in {"staging", "production"}:
     raise ValueError("KENKUI_DEPLOYMENT must be staging or production")
-app_name = f"kenkui-{deployment}"
+app_name = deployment_app_name(deployment, os.environ.get("KENKUI_MODAL_APP"))
+test_app = app_name == "kenkui-staging-test"
+test_mail = os.environ.get("KENKUI_TEST_EMAIL_NOTIFICATIONS", "0")
+if test_app and test_mail not in {"0", "1"}:
+    raise ValueError("KENKUI_TEST_EMAIL_NOTIFICATIONS must be 0 or 1")
 idle_mode = os.environ.get("KENKUI_DATABASE_IDLE") == "1"
 # Prelaunch runs on demand; periodic recovery/retention is an explicit operating choice.
 background_schedules = os.environ.get("KENKUI_BACKGROUND_SCHEDULES", "0")
 if background_schedules not in {"0", "1"}:
     raise ValueError("KENKUI_BACKGROUND_SCHEDULES must be 0 or 1")
 background_schedules_enabled = background_schedules == "1"
+if test_app and background_schedules_enabled:
+    raise ValueError("test app cannot enable background schedules")
 public_web_origin = os.environ.get("KENKUI_PUBLIC_WEB_ORIGIN", "")
 public_api_origin = os.environ.get("KENKUI_PUBLIC_API_ORIGIN", "")
 if (public_web_origin or public_api_origin) and (public_web_origin, public_api_origin) not in {
@@ -112,7 +120,7 @@ maintenance_image = (
     code_image(
         modal.Image.from_registry("postgres:17-bookworm", add_python="3.12").apt_install("age")
     )
-    if idle_mode
+    if idle_mode and not test_app
     else image
 )
 models = modal.Volume.from_name(
@@ -122,11 +130,15 @@ secrets = [
     modal.Secret.from_name(f"{app_name}-worker", environment_name=deployment),
     # Completion mail is a separate secret so worker credentials are never
     # rewritten to add it. An empty SMTP password leaves the deployment silent.
-    modal.Secret.from_name(f"{app_name}-mail", environment_name=deployment),
 ]
+if not test_app or test_mail == "1":
+    secrets.append(modal.Secret.from_name(f"{app_name}-mail", environment_name=deployment))
 if idle_mode:
     # Later secrets override duplicate keys without rewriting worker credentials.
     secrets.append(modal.Secret.from_name(f"{app_name}-database-idle", environment_name=deployment))
+if test_app and test_mail != "1":
+    # No inherited worker-map SMTP setting can send test mail by accident.
+    secrets.append(modal.Secret.from_dict({"KENKUI_SMTP_PASSWORD": ""}))
 if public_web_origin:
     # Public links may be promoted independently of the internal Modal environment.
     secrets.append(
@@ -141,7 +153,7 @@ if public_web_origin:
 # Full-database read authority and public encryption recipient exist only on daily maintenance.
 maintenance_secrets = secrets + (
     [modal.Secret.from_name(f"{app_name}-database-backup", environment_name=deployment)]
-    if idle_mode
+    if idle_mode and not test_app
     else []
 )
 
@@ -225,15 +237,19 @@ def recover_jobs() -> None:
     recover()
 
 
-@app.function(
-    image=maintenance_image,
-    secrets=maintenance_secrets,
-    schedule=modal.Period(hours=24 if idle_mode else 1) if background_schedules_enabled else None,
-    timeout=1800 if idle_mode else 300,
-    max_containers=1,
-    proxy=proxy,
-)
-def retain_objects() -> None:
-    from kenkui_server.hosted import retain_objects as maintain
+if not test_app:
 
-    maintain()
+    @app.function(
+        image=maintenance_image,
+        secrets=maintenance_secrets,
+        schedule=modal.Period(hours=24 if idle_mode else 1)
+        if background_schedules_enabled
+        else None,
+        timeout=1800 if idle_mode else 300,
+        max_containers=1,
+        proxy=proxy,
+    )
+    def retain_objects() -> None:
+        from kenkui_server.hosted import retain_objects as maintain
+
+        maintain()
