@@ -1,5 +1,8 @@
 # Ecosystem cleanup implementation status
 
+This records the first cleanup pass. For reconciliation with the settled prelaunch
+promotion and Render retirement, see [the continuation](render-retirement.md).
+
 Implemented on isolated `cleanup/ecosystem-20261103` branches. Active migration checkouts were left unchanged. No branches were merged, no provider resources were written or deleted, and the live monitoring gate remains unchanged.
 
 ## Task disposition

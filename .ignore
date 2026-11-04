@@ -1,0 +1,2 @@
+# Historical deployment evidence remains tracked; use rg --no-ignore docs/archive explicitly.
+docs/archive/

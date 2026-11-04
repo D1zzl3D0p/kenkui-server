@@ -5,7 +5,7 @@ Local-first FastAPI server for Kenkui.
 The server owns durable Jobs, source assets, execution, and output artifacts.
 Local mode is unmetered and binds to loopback. The optional hosted composition
 adds PostgreSQL, R2, AuthKit browser sessions, beta allowances and Modal workers.
-See [the private beta release runbook](deploy/README.md) for configuration and
+See [deployment and local development](deploy/README.md) for configuration and
 acceptance requirements.
 
 ## Local API behavior

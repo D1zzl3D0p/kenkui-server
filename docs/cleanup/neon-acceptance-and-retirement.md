@@ -1,5 +1,10 @@
 # Live acceptance and retirement prerequisites
 
+Historical first-pass observations follow. The later prelaunch promotion reuses
+the tested branch as public production and explicitly excludes further data-copy
+and DR rehearsals. See [the current retirement record](render-retirement.md).
+Those scope decisions do not mark these earlier acceptance checks passed.
+
 Read-only control-plane observation on November 3, 2026 (cleanup execution):
 
 | Environment | Project / branch | Auth | Functions |
