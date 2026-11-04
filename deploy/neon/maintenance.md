@@ -9,6 +9,8 @@ Task 11 implements and locally verifies this contract. **Task 13 owns live deplo
 3. Freeze staging admission/writes, drain active jobs and pause old writers/schedules. Transfer the existing staging API and **all** Modal consumers together to the same verified Neon authority. Never attach the Neon worker overlay while the old staging API still writes Render. In idle mode set `KENKUI_DEPLOYMENT` and `KENKUI_DATABASE_IDLE=1` in the matching Modal deployment. Do not connect production to staging.
 4. Reopen staging only after consumer/role/auth readiness. Run an interrupted multi-chapter canary: reuse checkpoints, renew live leases, settle once, keep active data, and clear terminal recovery markers. Check real Neon suspend/reconnect and overnight idle using control-plane observation without keepalive SQL. Task 13 records exact revisions, metadata and costs, plus encrypted independent restore and owner acceptance. Local tests are not live evidence.
 
+A successful render submission emits a best-effort `hosted_dispatch_spawned` JSON line on the submitting worker's private Modal stdout. It contains `dispatch_id`, the returned `function_call_id`, and `lease_token_sha256` (lowercase hex SHA-256 of the exact submitted lease token's UTF-8 bytes). Before interrupting a canary, match the dispatch and its current lease digest to one call. If that match is missing or ambiguous, leave the call running.
+
 ## Configuration and privilege boundary
 
 | Overlay | Mount | Exact new fields |
