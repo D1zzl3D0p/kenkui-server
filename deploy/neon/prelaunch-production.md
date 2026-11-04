@@ -11,6 +11,10 @@ no secrets. `KENKUI_ENV=production` binds the public API authority/receipt to
 retains the existing internal Modal app, bridge checks and R2 recovery-marker
 namespace. This label does not select the public Auth audience. Keep the existing
 restricted API database credential and existing matching Modal/R2 secrets.
+Deploy the existing staging Modal app with `KENKUI_BACKGROUND_SCHEDULES=0`,
+`KENKUI_PUBLIC_WEB_ORIGIN=https://app.kenkui.fm`, and
+`KENKUI_PUBLIC_API_ORIGIN=https://api.kenkui.fm`. These public-only overrides keep
+completion/unsubscribe links on production while reusing existing secret maps.
 
 Set `KENKUI_ACCOUNT_POLICY=neon` for normal verified Neon enrollment. It keeps
 existing issuer/subject bindings, creates new accounts without WorkOS directory

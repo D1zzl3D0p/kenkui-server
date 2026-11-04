@@ -54,7 +54,8 @@ def register_deployment(monkeypatch, idle, deployment="staging", schedules=None)
             Period=lambda **kwargs: kwargs,
             Volume=SimpleNamespace(from_name=lambda *args, **kwargs: object()),
             Secret=SimpleNamespace(
-                from_name=lambda name, *, environment_name: (name, environment_name)
+                from_name=lambda name, *, environment_name: (name, environment_name),
+                from_dict=lambda values: dict(values),
             ),
         ),
     )
@@ -122,6 +123,42 @@ def test_prelaunch_default_has_no_background_schedule_and_keeps_manual_calls(
 def test_background_schedule_choice_rejects_invalid_values(monkeypatch, value):
     with pytest.raises(ValueError, match="KENKUI_BACKGROUND_SCHEDULES"):
         register_deployment(monkeypatch, True, schedules=value)
+
+
+@pytest.mark.parametrize("suffix", ["", ".staging"])
+def test_public_links_override_existing_maps_without_changing_internal_environment(
+    monkeypatch, suffix
+):
+    web = f"https://app{suffix}.kenkui.fm"
+    api = f"https://api{suffix}.kenkui.fm"
+    monkeypatch.setenv("KENKUI_PUBLIC_WEB_ORIGIN", web)
+    monkeypatch.setenv("KENKUI_PUBLIC_API_ORIGIN", api)
+    registered = register_deployment(monkeypatch, True)
+    for _, options in registered.values():
+        overlays = [entry for entry in options["secrets"] if isinstance(entry, dict)]
+        assert overlays == [{"KENKUI_WEB_ORIGIN": web, "KENKUI_API_ORIGIN": api}]
+        worker_index = options["secrets"].index(("kenkui-staging-worker", "staging"))
+        mail_index = options["secrets"].index(("kenkui-staging-mail", "staging"))
+        overlay_index = options["secrets"].index(overlays[0])
+        assert worker_index < mail_index < overlay_index
+
+
+@pytest.mark.parametrize(
+    "web,api",
+    [
+        ("https://app.kenkui.fm", ""),
+        ("", "https://api.kenkui.fm"),
+        ("https://app.kenkui.fm", "https://api.staging.kenkui.fm"),
+        ("http://app.kenkui.fm", "https://api.kenkui.fm"),
+        ("https://app.kenkui.fm/", "https://api.kenkui.fm"),
+        ("https://evil.test", "https://api.kenkui.fm"),
+    ],
+)
+def test_public_links_reject_partial_mixed_or_noncanonical_origins(monkeypatch, web, api):
+    monkeypatch.setenv("KENKUI_PUBLIC_WEB_ORIGIN", web)
+    monkeypatch.setenv("KENKUI_PUBLIC_API_ORIGIN", api)
+    with pytest.raises(ValueError, match="public origins"):
+        register_deployment(monkeypatch, True)
 
 
 @pytest.mark.parametrize(
