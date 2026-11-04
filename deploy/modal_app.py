@@ -108,6 +108,13 @@ def code_image(base: modal.Image) -> modal.Image:
                 "KENKUI_MODAL_APP": app_name,
                 "MODAL_ENVIRONMENT": deployment,
                 "KENKUI_DATABASE_IDLE": "1" if idle_mode else "0",
+                # Container reimports must reconstruct the same conditional dependencies.
+                "KENKUI_PUBLIC_WEB_ORIGIN": public_web_origin,
+                "KENKUI_PUBLIC_API_ORIGIN": public_api_origin,
+                "KENKUI_TEST_EMAIL_NOTIFICATIONS": os.environ.get(
+                    "KENKUI_TEST_EMAIL_NOTIFICATIONS", "0"
+                ),
+                "KENKUI_BACKGROUND_SCHEDULES": background_schedules,
             }
         )
     )
